@@ -12,7 +12,15 @@ function parseArguments(argv) {
     const value = rest[index];
     if (value === "--thread-id") options.threadId = rest[++index];
     else if (value === "--sessions-dir") options.sessionsDirectory = rest[++index];
-    else if (value === "--cdp-port") options.cdpPort = Number(rest[++index]);
+    else if (value === "--desktop-session-id") {
+      options.desktopSessionId = rest[++index];
+    } else if (value === "--claude-sessions-dir") {
+      options.claudeSessionsDirectory = rest[++index];
+    } else if (value === "--claude-projects-dir") {
+      options.claudeProjectsDirectory = rest[++index];
+    } else if (value === "--cdp-port") {
+      options.cdpPort = Number(rest[++index]);
+    }
     else throw new Error(`Unknown argument: ${value}`);
   }
   return options;
@@ -31,6 +39,51 @@ if (options.command === "snapshot") {
     threadId: options.threadId ?? null,
   });
   process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
+} else if (options.command === "claude-snapshot") {
+  if (!options.desktopSessionId) {
+    throw new Error("--desktop-session-id is required for claude-snapshot");
+  }
+  const [{ ClaudeDesktopSessionStore }, { ClaudeTranscriptStore }] =
+    await Promise.all([
+      import("./claude/desktop-session-store.mjs"),
+      import("./claude/transcript-store.mjs"),
+    ]);
+  const claudeSessionsDirectory =
+    options.claudeSessionsDirectory ??
+    path.join(
+      os.homedir(),
+      "Library",
+      "Application Support",
+      "Claude",
+      "claude-code-sessions",
+    );
+  const claudeProjectsDirectory =
+    options.claudeProjectsDirectory ??
+    path.join(os.homedir(), ".claude", "projects");
+  const sessionStore = new ClaudeDesktopSessionStore({
+    sessionsDirectory: claudeSessionsDirectory,
+  });
+  const session = await sessionStore.resolve(options.desktopSessionId);
+  if (session.status !== "resolved") {
+    process.stdout.write(`${JSON.stringify(session, null, 2)}\n`);
+  } else {
+    const transcriptStore = new ClaudeTranscriptStore({
+      projectsDirectory: claudeProjectsDirectory,
+    });
+    const files = await transcriptStore.refresh({ session });
+    const snapshot = new MetricsEngine().snapshot(files, {
+      threadId: session.desktopSessionId,
+      hostName: "Claude Desktop",
+    });
+    snapshot.binding = {
+      source: "claude-desktop-session-metadata",
+      exact: snapshot.status === "bound",
+      desktopSessionId: session.desktopSessionId,
+      cliSessionId: session.cliSessionId,
+    };
+    snapshot.usageMethod = "claude-transcript-raw";
+    process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
+  }
 } else if (options.command === "inject") {
   const modulePath = new URL("./codex/injector.mjs", import.meta.url);
   const { runCodexInjector } = await import(modulePath);
@@ -50,6 +103,6 @@ if (options.command === "snapshot") {
 } else {
   const script = fileURLToPath(import.meta.url);
   throw new Error(
-    `Unknown command \"${options.command}\". Run ${script} snapshot, inject, or remove.`,
+    `Unknown command \"${options.command}\". Run ${script} snapshot, claude-snapshot, inject, or remove.`,
   );
 }

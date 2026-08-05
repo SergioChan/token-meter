@@ -133,15 +133,18 @@ export class MetricsEngine {
     this.hourWindowMs = hourWindowMs;
   }
 
-  snapshot(files, { threadId = null, nowMs = Date.now() } = {}) {
+  snapshot(
+    files,
+    { threadId = null, nowMs = Date.now(), hostName = "Codex" } = {},
+  ) {
     const root = pickRoot(files, threadId);
     if (root == null) {
       return {
         status: "unbound",
         requestedThreadId: threadId,
         reason: threadId
-          ? "The selected Codex thread is not present in the loaded rollout index."
-          : "No Codex user session is available.",
+          ? `The selected ${hostName} session is not present in the loaded telemetry index.`
+          : `No ${hostName} user session is available.`,
       };
     }
 

@@ -32,6 +32,7 @@
     "ci": "npm run check && npm test",
     "screenshots": "node scripts/capture-readme-screenshots.mjs",
     "snapshot": "node src/cli.mjs snapshot",
+    "claude:snapshot": "node src/cli.mjs claude-snapshot",
     "codex:inject": "node src/cli.mjs inject",
     "codex:remove": "node src/cli.mjs remove",
     "test": "node --test"
