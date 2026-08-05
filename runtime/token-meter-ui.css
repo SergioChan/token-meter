@@ -12,6 +12,7 @@
 .meter-card {
   --accent: #5f9d7c;
   --accent-strong: #2d7754;
+  --rate-color: #5f9d7c;
   width: 286px;
   box-sizing: border-box;
   overflow: hidden;
@@ -90,24 +91,26 @@
 }
 
 .gauge-progress {
-  stroke: var(--accent);
+  stroke: url(#token-meter-rate-gradient);
   stroke-dasharray: 157;
   stroke-dashoffset: 157;
   transition: stroke-dashoffset 520ms cubic-bezier(.2, .9, .25, 1), stroke 180ms ease;
 }
 
 .needle {
-  stroke: #242622;
+  stroke: var(--rate-color);
   stroke-width: 2;
   stroke-linecap: round;
   transform: rotate(-100deg);
   transform-origin: 62px 54px;
+  transition: stroke 180ms ease;
 }
 
 .needle-pin {
-  fill: #242622;
+  fill: var(--rate-color);
   stroke: rgb(247 247 244);
   stroke-width: 2;
+  transition: fill 180ms ease;
 }
 
 .rate {
@@ -234,6 +237,18 @@
   box-shadow: 0 14px 38px rgb(111 35 12 / 0.22), inset 0 1px 0 rgb(255 255 255 / 0.8);
 }
 
+.meter-card[data-rate-band="yellow"] {
+  --rate-color: #d3a62b;
+}
+
+.meter-card[data-rate-band="orange"] {
+  --rate-color: #dd702c;
+}
+
+.meter-card[data-rate-band="red"] {
+  --rate-color: #d64235;
+}
+
 .meter-card[data-level="critical"] {
   --accent: #d64235;
   --accent-strong: #9d211b;
@@ -288,12 +303,7 @@
     stroke: rgb(255 255 255 / 0.12);
   }
 
-  .needle {
-    stroke: #f1f2ef;
-  }
-
   .needle-pin {
-    fill: #f1f2ef;
     stroke: #1c1d1b;
   }
 

@@ -5,6 +5,7 @@ import {
   percentile,
 } from "./statistics.mjs";
 import { isRootUserRollout } from "./rollout-store.mjs";
+import { buildRateScale } from "./rate-scale.mjs";
 
 function latestTotal(file) {
   return file.usage.at(-1)?.total.totalTokens ?? 0;
@@ -182,6 +183,11 @@ export class MetricsEngine {
       currentTurnDurationMs: Math.max(0, nowMs - turnStartedAtMs),
       historicalRates,
     });
+    const rateScale = buildRateScale({
+      tokensPerMinute,
+      medianTokensPerMinute: anomaly.baseline.medianTokensPerMinute,
+      p95TokensPerMinute: anomaly.baseline.p95TokensPerMinute,
+    });
 
     return {
       status: "bound",
@@ -207,6 +213,7 @@ export class MetricsEngine {
       rate: {
         tokensPerMinute,
         windowMs: this.rateWindowMs,
+        ...rateScale,
       },
       anomaly,
     };

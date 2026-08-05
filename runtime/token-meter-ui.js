@@ -1,5 +1,5 @@
 ((cssText) => {
-  const VERSION = 1;
+  const VERSION = 2;
   const existing = window.__tokenMeter;
   if (existing?.version === VERSION) {
     existing.ensureMounted();
@@ -28,6 +28,18 @@
     <div class="meter-body">
       <div class="gauge" aria-hidden="true">
         <svg viewBox="0 0 124 66">
+          <defs>
+            <linearGradient id="token-meter-rate-gradient" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#5f9d7c" />
+              <stop offset="46%" stop-color="#5f9d7c" />
+              <stop offset="54%" stop-color="#d3a62b" />
+              <stop offset="68%" stop-color="#d3a62b" />
+              <stop offset="76%" stop-color="#dd702c" />
+              <stop offset="84%" stop-color="#dd702c" />
+              <stop offset="92%" stop-color="#d64235" />
+              <stop offset="100%" stop-color="#d64235" />
+            </linearGradient>
+          </defs>
           <path class="gauge-track" d="M12 54 A50 50 0 0 1 112 54" />
           <path class="gauge-progress" d="M12 54 A50 50 0 0 1 112 54" />
           <line class="needle" x1="62" y1="54" x2="62" y2="15" />
@@ -157,6 +169,7 @@
       displayed.clear();
       animateNeedle(0);
       card.dataset.level = "learning";
+      card.dataset.rateBand = "green";
       return;
     }
 
@@ -186,9 +199,7 @@
 
     const rate = snapshot.rate.tokensPerMinute;
     const median = snapshot.anomaly.baseline.medianTokensPerMinute || 0;
-    const p95 = snapshot.anomaly.baseline.p95TokensPerMinute || 0;
-    const scale = Math.max(10_000, p95, median * 3, rate);
-    const intensity = Math.min(1, rate / scale);
+    const intensity = Math.min(1, Math.max(0, snapshot.rate.intensity ?? 0));
     elements.rate.textContent = `${format(rate)}/min`;
     elements.baseline.textContent = median ? `${format(median)}/min` : "Learning";
     elements.agentCount.textContent = snapshot.childAgentCount
@@ -199,6 +210,7 @@
       lastRate = rate;
     }
 
+    card.dataset.rateBand = snapshot.rate.band ?? "green";
     card.dataset.level = snapshot.anomaly.level;
     elements.warning.hidden = !["warning", "critical"].includes(snapshot.anomaly.level);
   };
