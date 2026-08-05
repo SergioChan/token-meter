@@ -26,7 +26,10 @@ Changes must preserve these properties:
 
 - An unknown selected task fails closed and never falls back to the newest Session.
 - Token numbers advance only from confirmed host telemetry.
+- Active Context follows the selected root thread and is never summed across independent child-Agent context windows.
+- Compaction may reduce Active Context but must never reduce cumulative Session usage.
 - Cached input is never added on top of total input.
+- Raw rollout totals must never be labeled as Codex `/usage`, backend billing, credits, or exact per-Session account consumption.
 - Child-Agent usage remains visible and explicitly labeled.
 - Renderer scripts are registered only after the target passes semantic verification.
 - CDP remains loopback-only and is accepted only from the verified official Codex process tree.
@@ -48,7 +51,9 @@ For Codex compatibility changes, also verify:
 2. Switching tasks switches the complete Meter.
 3. Avatar, blank, and auxiliary renderers remain untouched.
 4. A confirmed token event moves the number or delta pulse and the needle.
-5. Control-C removes the overlay.
+5. A compaction fixture reduces Active Context without reducing cumulative Session usage.
+6. The LaunchAgent loads at login and makes no more than one normal recovery attempt per Codex process.
+7. Control-C removes a one-shot overlay, and uninstall removes the persistent service.
 
 ## Pull requests
 

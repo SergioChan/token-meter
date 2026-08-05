@@ -1,7 +1,7 @@
 # Token Meter
 
 <p align="center">
-  <img src="docs/assets/token-meter-live.png" width="628" alt="Token Meter showing live Codex session tokens, rolling-hour usage, current-turn usage, rate, and child agents">
+  <img src="docs/assets/token-meter-live.png" width="628" alt="Token Meter showing live Codex session tokens, active context, rolling-hour usage, current-turn usage, rate, and child agents">
 </p>
 
 <p align="center">
@@ -24,13 +24,37 @@ It is designed for the failure mode that percentages hide: a polluted context, r
 
 | Metric | Meaning |
 | --- | --- |
-| **Session** | Confirmed cumulative tokens for the selected root Session and every known child Agent sharing its `session_id`. |
-| **1H Session** | Confirmed token deltas for that Session tree during the trailing hour. |
-| **Current Turn** | Confirmed cumulative deltas since the latest root user message. |
+| **Session** | Locally reported raw cumulative tokens for the selected root Session and every known child Agent sharing its `session_id`. |
+| **1H Session** | Locally reported raw token deltas for that Session tree during the trailing hour. |
+| **Current Turn** | Locally reported raw cumulative deltas since the latest root user message. |
+| **Active Context** | Codex-reported tokens currently occupying the selected root thread's context, shown against the active model context window. This value falls after compaction. |
 | **Rate** | Confirmed deltas in a trailing 60-second window, normalized to tokens per minute. |
 | **Baseline** | The median rate of completed historical turns, with p95 and median absolute deviation retained for anomaly detection. |
 
-The counter never invents streamed usage. Codex records token usage after an upstream completion, so the Meter moves in truthful steps. Every positive confirmation also produces a visible `+delta` pulse, even when a compact `M` or `B` total would otherwise round to the same text.
+The counter never invents per-token streaming between host updates. It moves when Codex writes a new cumulative `TokenCount` snapshot and shows a visible `+delta` pulse, even when a compact `M` or `B` total would otherwise round to the same text. `TokenCount` is useful local telemetry, but it is not a billing-grade event and can include restored or estimated state.
+
+### Raw workload versus active context
+
+Token Meter keeps two independent readings:
+
+- `SESSION`, `1H SESSION`, `CURRENT TURN`, and the rate gauge use positive deltas from Codex's cumulative `total_token_usage`. This is a raw workload counter: cached input remains part of total input and is counted once each time Codex reports it.
+- `ACTIVE CONTEXT` uses the selected root thread's latest `last_token_usage.total_tokens` and `model_context_window`. When Codex emits `context_compacted`, this reading resets to the smaller compacted context and then grows again.
+
+This distinction follows Codex's own usage and compaction surfaces: the official App Server exposes active-thread usage updates and a `contextCompaction` lifecycle, while Codex configuration defines both the automatic compaction threshold and model context window. See the [Codex App Server reference](https://developers.openai.com/codex/app-server/) and [configuration reference](https://developers.openai.com/codex/config-reference/).
+
+### Why this does not match Codex `/usage`
+
+Codex `/usage` is a separate backend account statistic. Its App Server method, `account/usage/read`, accepts no Session or thread parameter and returns only an account summary plus optional daily buckets. The public protocol exposes no per-Session backend attribution and OpenAI does not publish a formula that maps rollout `total_token_usage` to the account activity number.
+
+The [official Codex rate card](https://help.openai.com/en/articles/20001106-codex-rate-card) confirms that uncached input, cached input, and output have different credit rates. That does not establish that the `/usage` chart applies the same weighting, and Token Meter will not present a reverse-engineered estimate as an exact backend Session total.
+
+The practical boundary is:
+
+- Token Meter can measure exact, Session-bound raw workload and rate from local confirmed events.
+- Codex can return exact backend account-level daily activity through `/usage`.
+- No currently exposed API can return exact backend-accounted usage for one Session.
+
+See [the account-usage reconciliation note](docs/research/codex-account-usage-reconciliation.md) for the protocol evidence and known limitations.
 
 ## Live intensity and alerts
 
@@ -74,13 +98,30 @@ npm test
 npm run check
 ```
 
-Start Token Meter:
+Install the persistent per-user service:
+
+```bash
+./scripts/install-token-meter-macos.sh
+```
+
+Installation copies the runtime to `~/Library/Application Support/Token Meter/` and loads `~/Library/LaunchAgents/com.sergiochan.token-meter.plist`. After that, open Codex normally from the Dock or Applications folder—no special command is required on each launch, and the service returns automatically after login or reboot.
+
+If a new Codex process starts without the required loopback debugging endpoint, the service performs one normal quit and relaunch with the endpoint enabled. It never force-quits, and it will not retry the same process after a failed recovery attempt. Logs contain lifecycle messages only and live in `~/Library/Logs/Token Meter/`.
+
+To update an existing installation after pulling a new version, run the installer again:
+
+```bash
+git pull --ff-only
+./scripts/install-token-meter-macos.sh
+```
+
+For one-shot development without installing the LaunchAgent, use:
 
 ```bash
 ./scripts/start-codex-meter-macos.sh --restart
 ```
 
-The first start may request a normal Codex restart because Chromium DevTools Protocol must be enabled at launch. The script never force-quits Codex.
+Keep that terminal open. The one-shot launcher remains intentionally separate from the normal persistent installation.
 
 ## Security boundary
 
@@ -94,6 +135,7 @@ Before injection, the launcher and injector:
 4. Verify the listening socket belongs to the expected Codex process tree.
 5. Probe renderer semantics before registering any persistent script.
 6. Reject Avatar, blank, and auxiliary renderer surfaces.
+7. Limit automatic launch recovery to one normal quit/relaunch per Codex process.
 
 CDP is a privileged local debugging interface. Do not run untrusted local software while it is enabled. See [SECURITY.md](SECURITY.md) for the threat model and vulnerability reporting process.
 
@@ -103,13 +145,15 @@ Token Meter reads the exact UUID from Codex's active semantic sidebar row. When 
 
 If the selected UUID cannot be validated or matched to local telemetry, the Meter displays `SESSION UNKNOWN`. It never guesses from the newest rollout file and never carries numbers over from a previous Session.
 
-## Stop and restore Codex
+## Uninstall and restore Codex
 
-Press Control-C in the launcher terminal to remove the overlay. To remove the Meter and restart Codex without the debugging port:
+Remove the LaunchAgent, installed runtime, overlay, and local lifecycle logs, then normally restart Codex without the debugging port:
 
 ```bash
-./scripts/stop-codex-meter-macos.sh --restart
+./scripts/uninstall-token-meter-macos.sh --restart
 ```
+
+Without `--restart`, the service and overlay are removed immediately; the current Codex process keeps its loopback debugging port until you quit it normally. For a one-shot development run, press Control-C or use `./scripts/stop-codex-meter-macos.sh --restart`.
 
 ## Read-only snapshots
 
@@ -128,10 +172,11 @@ The parser retains numerical usage events and timing metadata only. It does not 
 flowchart LR
   A["Codex rollout JSONL"] --> B["Bounded read-only collector"]
   B --> C["Session-tree metrics engine"]
-  C --> D["Rate and anomaly model"]
-  D --> E["Verified CDP adapter"]
-  E --> F["Shadow DOM Token Meter"]
-  G["Active Codex task UUID"] --> C
+  C --> D["Cumulative usage + active context"]
+  D --> E["Rate and anomaly model"]
+  E --> F["Verified CDP adapter"]
+  F --> G["Shadow DOM Token Meter"]
+  H["Active Codex task UUID"] --> C
 ```
 
 The measurement core is host-independent. Codex-specific rollout and UI code lives behind adapters so a future Claude Desktop adapter can reuse the same Session, window, turn, rate, and alert semantics.

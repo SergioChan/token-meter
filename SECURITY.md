@@ -31,5 +31,7 @@ Token Meter is designed to defend against accidental target confusion and untrus
 - Probes semantic main-renderer markers before registering the payload.
 - Rejects Avatar, blank, and auxiliary surfaces.
 - Reads rollout files without retaining content-bearing events.
+- Installs only a per-user LaunchAgent and a copied runtime under the current user's Application Support directory.
+- Makes at most one normal quit/relaunch attempt for a Codex process that lacks the required endpoint; it never force-quits or enters a relaunch loop.
 
-Token Meter cannot protect the CDP endpoint from a malicious process already running as the same macOS user. Do not run untrusted local software while CDP is enabled. Restart Codex normally after stopping Token Meter to close the endpoint.
+Token Meter cannot protect the CDP endpoint or its user-writable installed copy from a malicious process already running as the same macOS user. Do not run untrusted local software while CDP is enabled. Uninstall with `./scripts/uninstall-token-meter-macos.sh --restart`, or restart Codex normally after stopping a one-shot run, to close the endpoint.

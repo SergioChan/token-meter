@@ -10,6 +10,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 - Public project documentation, reproducible screenshots, CI, contribution guidance, and security policy.
 - Explicit Codex and Claude Code support matrix.
+- A visible active-Context reading that follows Codex compaction independently from cumulative Session usage.
+- A per-user macOS LaunchAgent installer and uninstaller for normal Dock launches and login persistence.
 
 ### Changed
 
@@ -18,6 +20,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Codex listener verification now checks the exact bundle path, signature, and signing Team ID.
 - Session-tree discovery includes child-Agent rollouts created on later dates.
 - Confirmed token increments display a visible delta pulse at high cumulative totals.
+- Codex shutdown waits for the complete application process tree before a relaunch.
+- Documentation now distinguishes raw Session workload from backend account-level `/usage` activity.
 
 ## [0.1.0] - 2026-08-05
 
