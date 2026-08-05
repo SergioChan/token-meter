@@ -33,6 +33,24 @@ It is designed for the failure mode that percentages hide: a polluted context, r
 
 The counter never invents per-token streaming between host updates. It moves when Codex writes a new cumulative `TokenCount` snapshot and shows a visible `+delta` pulse, even when a compact `M` or `B` total would otherwise round to the same text. `TokenCount` is useful local telemetry, but it is not a billing-grade event and can include restored or estimated state.
 
+### How Token Meter calculates usage
+
+Token Meter derives its readings from Codex's local rollout telemetry:
+
+1. It incrementally reads `~/.codex/sessions/**/rollout-*.jsonl` using bounded chunks. The parser retains numerical usage events, timestamps, Session identity, and turn boundaries only; it does not retain prompt, reasoning, tool, or assistant content.
+2. It reads the exact task UUID selected in the Codex sidebar, resolves that task's root rollout, and groups every root and child-Agent rollout with the same `session_id`. Switching tasks switches the entire group atomically.
+3. `SESSION` is the sum of the latest cumulative `total_token_usage.total_tokens` value reported by every rollout in that Session tree. It does not sum every historical snapshot.
+4. `1H SESSION`, `CURRENT TURN`, and the rate gauge use positive changes between consecutive cumulative snapshots inside their respective time windows. A normal increment is `current - previous`; if a counter resets, the new value becomes the increment:
+
+```text
+delta = current >= previous ? current - previous : current
+```
+
+5. Cached input is already a subset of input and is not added a second time. It remains included at its full raw token count whenever Codex reports it. A turn can contain many upstream model requests around tool calls, and each reported request contributes to the raw workload.
+6. The alert model compares the trailing 60-second raw-token rate with the median, p95, and median absolute deviation of completed historical turns.
+
+This method is deliberately optimized for observability rather than billing reconciliation. Repeated large cached prompts, tool loops, retries, and child-Agent activity all increase the Meter, because they are meaningful signals of how hard the Agent is working and whether a Session may be unhealthy.
+
 ### Raw workload versus active context
 
 Token Meter keeps two independent readings:
@@ -44,15 +62,17 @@ This distinction follows Codex's own usage and compaction surfaces: the official
 
 ### Why this does not match Codex `/usage`
 
-Codex `/usage` is a separate backend account statistic. Its App Server method, `account/usage/read`, accepts no Session or thread parameter and returns only an account summary plus optional daily buckets. The public protocol exposes no per-Session backend attribution and OpenAI does not publish a formula that maps rollout `total_token_usage` to the account activity number.
+Codex `/usage` is a separate backend account statistic. Its App Server method, `account/usage/read`, accepts no Session or thread parameter and returns only an account summary plus optional daily buckets. The public protocol exposes no per-Session backend attribution, and OpenAI does not publish the backend aggregation, normalization, or compression formula that maps rollout `total_token_usage` to the account activity number.
 
 The [official Codex rate card](https://help.openai.com/en/articles/20001106-codex-rate-card) confirms that uncached input, cached input, and output have different credit rates. That does not establish that the `/usage` chart applies the same weighting, and Token Meter will not present a reverse-engineered estimate as an exact backend Session total.
 
-The practical boundary is:
+The two values therefore are not expected to match exactly. The practical boundary is:
 
-- Token Meter can measure exact, Session-bound raw workload and rate from local confirmed events.
+- Token Meter can measure Session-bound local raw workload and rate under one consistent collector method.
 - Codex can return exact backend account-level daily activity through `/usage`.
 - No currently exposed API can return exact backend-accounted usage for one Session.
+
+Despite that difference, the local reading remains useful as a consistent relative instrument: its absolute value is not a `/usage` bill, but its movement, rate, historical deviation, and Session-to-Session comparison reveal Agent intensity and potential Session pollution.
 
 See [the account-usage reconciliation note](docs/research/codex-account-usage-reconciliation.md) for the protocol evidence and known limitations.
 
