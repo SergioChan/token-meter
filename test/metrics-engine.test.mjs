@@ -117,3 +117,25 @@ test("anomaly warning compares current rate against completed historical turns",
   assert.equal(snapshot.anomaly.baseline.sampleCount, 6);
   assert.ok(snapshot.anomaly.ratio > 50);
 });
+
+test("completed turns in the active session contribute to its baseline", () => {
+  const active = rollout({
+    id: "long-running-session",
+    modifiedMs: 100,
+    userMessages: [0, 2, 4, 6, 8, 10, 12].map((value) => value * minute),
+    turnCompletions: [1, 3, 5, 7, 9, 11].map((value) => value * minute),
+    usageEvents: [
+      ...[1, 3, 5, 7, 9, 11].map((value, index) =>
+        usage(value * minute, (index + 1) * 1_000),
+      ),
+      usage(12.5 * minute, 66_000),
+    ],
+  });
+
+  const snapshot = new MetricsEngine().snapshot([active], {
+    threadId: active.meta.id,
+    nowMs: 12.5 * minute,
+  });
+  assert.equal(snapshot.anomaly.baseline.sampleCount, 6);
+  assert.equal(snapshot.anomaly.level, "critical");
+});

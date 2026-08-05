@@ -61,11 +61,10 @@ function pickRoot(files, requestedThreadId) {
   return roots.sort((left, right) => right.modifiedMs - left.modifiedMs)[0] ?? null;
 }
 
-function completedTurnRates(files, activeSessionId) {
+function completedTurnRates(files) {
   const sessions = groupBySession(files);
   const rates = [];
   for (const root of files.filter(isRootUserRollout)) {
-    if (root.meta?.sessionId === activeSessionId) continue;
     const group = sessions.get(root.meta?.sessionId) ?? [root];
     const boundaries = root.userMessages;
     for (let index = 0; index < boundaries.length; index += 1) {
@@ -176,7 +175,7 @@ export class MetricsEngine {
     );
     const tokensPerMinute =
       recentTokens * (60_000 / Math.max(this.rateWindowMs, 1));
-    const historicalRates = completedTurnRates(files, sessionId);
+    const historicalRates = completedTurnRates(files);
     const anomaly = classifyAnomaly({
       currentRate: tokensPerMinute,
       currentTurnTokens,
@@ -213,10 +212,3 @@ export class MetricsEngine {
     };
   }
 }
-
-export const metricsInternals = {
-  deltaBetween,
-  latestTotal,
-  totalBefore,
-};
-

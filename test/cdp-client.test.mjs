@@ -8,4 +8,3 @@ test("CDP client accepts loopback targets only", () => {
   assert.equal(isLoopbackWebSocketUrl("ws://192.168.1.4:9334/devtools/page/1"), false);
   assert.equal(isLoopbackWebSocketUrl("wss://example.com/devtools/page/1"), false);
 });
-

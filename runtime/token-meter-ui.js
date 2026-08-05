@@ -84,7 +84,9 @@
     const number = Math.max(0, Number(value) || 0);
     if (number >= 1_000_000_000) return `${(number / 1_000_000_000).toFixed(2)}B`;
     if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(2)}M`;
-    if (number >= 10_000) return `${Math.round(number / 1_000)}K`;
+    if (number >= 100_000) return `${(number / 1_000).toFixed(1)}K`;
+    if (number >= 10_000) return `${(number / 1_000).toFixed(1)}K`;
+    if (number >= 1_000) return `${(number / 1_000).toFixed(2)}K`;
     return Math.round(number).toLocaleString();
   };
 
@@ -142,6 +144,18 @@
     if (!bound) {
       elements.warning.hidden = true;
       elements.sessionId.textContent = "UNBOUND";
+      elements.sessionTotal.textContent = "—";
+      elements.hourTotal.textContent = "—";
+      elements.turnTotal.textContent = "—";
+      elements.accountHour.textContent = "—";
+      elements.rate.textContent = "Awaiting session";
+      elements.baseline.textContent = "—";
+      elements.agentCount.textContent = "";
+      currentSessionId = null;
+      lastSessionTotal = 0;
+      lastRate = null;
+      displayed.clear();
+      animateNeedle(0);
       card.dataset.level = "learning";
       return;
     }

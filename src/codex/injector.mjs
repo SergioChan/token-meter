@@ -120,19 +120,35 @@ function updateExpression(snapshot) {
   return `window.__tokenMeter?.update(${JSON.stringify(snapshot)})`;
 }
 
+function waitForNextPoll(timeoutMs, signal) {
+  if (signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    signal?.addEventListener("abort", finish, { once: true });
+  });
+}
+
 export async function runCodexInjector({
   sessionsDirectory,
   cdpPort = 9334,
   pollIntervalMs = 1_000,
   targetDiscoveryIntervalMs = 5_000,
+  historyFileLimit = 100,
+  historyFilesPerPoll = 2,
   signal,
 } = {}) {
   if (!sessionsDirectory) throw new TypeError("sessionsDirectory is required");
   const payload = await loadPayload();
-  const store = new RolloutStore({ sessionsDirectory });
+  const store = new RolloutStore({ sessionsDirectory, historyFileLimit: 0 });
   const engine = new MetricsEngine();
   const attached = new Map();
   let lastDiscoveryMs = 0;
+  let warmedHistoryFileLimit = 0;
   let stopping = false;
   let stopPromise = null;
 
@@ -182,6 +198,7 @@ export async function runCodexInjector({
       }
 
       const activeThreadIds = probes.map((probe) => probe.threadId).filter(Boolean);
+      store.historyFileLimit = warmedHistoryFileLimit;
       const files = await store.refresh({ activeThreadIds });
       for (const connection of attached.values()) {
         const snapshot = engine.snapshot(files, {
@@ -196,18 +213,12 @@ export async function runCodexInjector({
           connection.failed = true;
         });
       }
+      warmedHistoryFileLimit = Math.min(
+        historyFileLimit,
+        warmedHistoryFileLimit + historyFilesPerPoll,
+      );
 
-      await new Promise((resolve) => {
-        const timer = setTimeout(resolve, pollIntervalMs);
-        signal?.addEventListener(
-          "abort",
-          () => {
-            clearTimeout(timer);
-            resolve();
-          },
-          { once: true },
-        );
-      });
+      await waitForNextPoll(pollIntervalMs, signal);
     }
   } finally {
     await stop();

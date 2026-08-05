@@ -1,8 +1,10 @@
-function timeoutPromise(timeoutMs, message) {
-  return new Promise((_, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+function withTimeout(promise, timeoutMs, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
     timer.unref?.();
   });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 export function isLoopbackWebSocketUrl(value) {
@@ -44,10 +46,11 @@ export class CdpClient {
         { once: true },
       );
     });
-    await Promise.race([
+    await withTimeout(
       opened,
-      timeoutPromise(timeoutMs, "Timed out connecting to the Codex CDP target"),
-    ]);
+      timeoutMs,
+      "Timed out connecting to the Codex CDP target",
+    );
     return new CdpClient(socket);
   }
 
@@ -56,11 +59,17 @@ export class CdpClient {
     const response = new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
     });
-    this.socket.send(JSON.stringify({ id, method, params }));
-    return Promise.race([
+    try {
+      this.socket.send(JSON.stringify({ id, method, params }));
+    } catch (error) {
+      this.pending.delete(id);
+      throw error;
+    }
+    return withTimeout(
       response,
-      timeoutPromise(timeoutMs, `CDP method timed out: ${method}`),
-    ]).finally(() => this.pending.delete(id));
+      timeoutMs,
+      `CDP method timed out: ${method}`,
+    ).finally(() => this.pending.delete(id));
   }
 
   async evaluate(expression) {
@@ -105,4 +114,3 @@ export class CdpClient {
     this.pending.clear();
   }
 }
-

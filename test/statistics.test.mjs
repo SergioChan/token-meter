@@ -13,4 +13,3 @@ test("statistics produce stable historical baselines", () => {
   assert.equal(medianAbsoluteDeviation([1, 2, 3, 100]), 1);
   assert.equal(percentile([0, 10, 20], 0.95), 19);
 });
-

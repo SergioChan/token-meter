@@ -117,3 +117,35 @@ test("rollout files are read through bounded chunks", async (context) => {
   assert.ok(readLengths.length > 1);
   assert.equal(files[0].usage[0].total.totalTokens, 42);
 });
+
+test("an exact active thread bypasses throttled file discovery", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "token-meter-discovery-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const id = "00000000-0000-0000-0000-000000000002";
+  const store = new RolloutStore({
+    sessionsDirectory: directory,
+    discoveryIntervalMs: 60_000,
+  });
+  assert.deepEqual(await store.refresh(), []);
+
+  const filePath = path.join(
+    directory,
+    `rollout-2026-08-05T00-00-00-${id}.jsonl`,
+  );
+  await writeFile(
+    filePath,
+    `${JSON.stringify({
+      timestamp: "2026-08-05T00:00:00.000Z",
+      type: "session_meta",
+      payload: {
+        id,
+        session_id: id,
+        source: "vscode",
+        thread_source: "user",
+      },
+    })}\n`,
+  );
+
+  const files = await store.refresh({ activeThreadIds: [id] });
+  assert.equal(files[0].meta.id, id);
+});

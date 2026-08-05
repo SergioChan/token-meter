@@ -6,8 +6,9 @@ export function isThreadId(value) {
 }
 
 export function buildSessionProbeExpression() {
+  const threadIdSource = THREAD_ID_PATTERN.source;
   return `(() => {
-    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const uuid = new RegExp(${JSON.stringify(threadIdSource)}, 'i');
     const href = String(location.href);
     const lowerHref = href.toLowerCase();
     const avatarMarker = document.querySelector(
@@ -59,4 +60,3 @@ export function buildSessionProbeExpression() {
     };
   })()`;
 }
-

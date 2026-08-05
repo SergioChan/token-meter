@@ -83,7 +83,7 @@ Press Control-C to stop the foreground injector and remove its UI. Restart Codex
 ## Current limitations
 
 - The Codex DOM and rollout format are version-sensitive compatibility surfaces.
-- Initial historical indexing can take several seconds for very large local histories; subsequent reads are incremental.
+- The active Session loads first. Historical baselines warm incrementally and may show `Learning` for the first few samples.
 - The MVP is macOS-first.
 - Claude Code support is designed but not implemented. The intended official path is OpenTelemetry aggregation plus Claude Code's native status line.
 - The injector is not currently distributed as a signed native macOS controller.

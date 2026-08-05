@@ -110,4 +110,3 @@ Restart Codex normally afterward to close the debugging port.
 EOF
 
 exec "$NODE" "$ROOT/src/cli.mjs" inject --cdp-port "$PORT"
-

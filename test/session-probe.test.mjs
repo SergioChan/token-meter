@@ -51,4 +51,3 @@ test("session probe falls back to the exact route and rejects ambiguous labels",
   assert.equal(result.bindingSource, "thread-route");
   assert.equal(isThreadId("My project name"), false);
 });
-

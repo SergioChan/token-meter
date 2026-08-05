@@ -34,9 +34,13 @@ if (options.command === "snapshot") {
 } else if (options.command === "inject") {
   const modulePath = new URL("./codex/injector.mjs", import.meta.url);
   const { runCodexInjector } = await import(modulePath);
+  const controller = new AbortController();
+  process.once("SIGINT", () => controller.abort());
+  process.once("SIGTERM", () => controller.abort());
   await runCodexInjector({
     sessionsDirectory,
     cdpPort: options.cdpPort || 9334,
+    signal: controller.signal,
   });
 } else if (options.command === "remove") {
   const modulePath = new URL("./codex/injector.mjs", import.meta.url);

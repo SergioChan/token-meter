@@ -27,6 +27,13 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+case "$PORT" in
+  ''|*[!0-9]*)
+    printf 'Port must be numeric.\n' >&2
+    exit 2
+    ;;
+esac
+
 NODE="$APP_PATH/Contents/Resources/cua_node/bin/node"
 if [ ! -x "$NODE" ]; then
   printf 'The bundled Codex Node runtime is missing: %s\n' "$NODE" >&2

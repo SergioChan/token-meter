@@ -132,14 +132,29 @@ async function walk(directory, result) {
   );
 }
 
+async function runWithConcurrency(items, concurrency, operation) {
+  let index = 0;
+  const workers = Array.from(
+    { length: Math.min(Math.max(1, concurrency), items.length) },
+    async () => {
+      while (index < items.length) {
+        const item = items[index++];
+        await operation(item);
+      }
+    },
+  );
+  await Promise.all(workers);
+}
+
 export class RolloutStore {
   constructor({
     sessionsDirectory,
-    historyFileLimit = 200,
+    historyFileLimit = 100,
     discoveryIntervalMs = 10_000,
     readChunkBytes = 1024 * 1024,
     maxLineBytes = 4 * 1024 * 1024,
     readRange = defaultReadRange,
+    readConcurrency = 16,
   }) {
     if (!sessionsDirectory) throw new TypeError("sessionsDirectory is required");
     this.sessionsDirectory = sessionsDirectory;
@@ -148,6 +163,7 @@ export class RolloutStore {
     this.readChunkBytes = readChunkBytes;
     this.maxLineBytes = maxLineBytes;
     this.readRange = readRange;
+    this.readConcurrency = readConcurrency;
     this.files = new Map();
     this.lastDiscoveryMs = 0;
   }
@@ -174,39 +190,68 @@ export class RolloutStore {
   async refresh({ activeThreadIds = [] } = {}) {
     await this.discover();
     const activeIds = new Set(activeThreadIds.filter(Boolean));
+    const discoveredIds = new Set(
+      [...this.files.values()].map((file) => file.discoveredId),
+    );
+    if ([...activeIds].some((id) => !discoveredIds.has(id))) {
+      await this.discover({ force: true });
+    }
     const files = [...this.files.values()].sort(
       (left, right) => right.modifiedMs - left.modifiedMs,
     );
     const selected = new Set(files.slice(0, this.historyFileLimit));
-
+    const exactActiveFiles = files.filter((file) => activeIds.has(file.discoveredId));
+    const activeDirectories = new Set(
+      exactActiveFiles.map((file) => path.dirname(file.path)),
+    );
+    const activeCandidates = files.filter((file) =>
+      activeDirectories.has(path.dirname(file.path)),
+    );
+    await runWithConcurrency(
+      activeCandidates,
+      this.readConcurrency,
+      (file) => this.#readMetadata(file),
+    );
+    const activeSessionIds = new Set(
+      exactActiveFiles.map((file) => file.meta?.sessionId).filter(Boolean),
+    );
     for (const file of files) {
-      if (activeIds.has(file.discoveredId)) {
+      if (
+        activeIds.has(file.discoveredId) ||
+        activeSessionIds.has(file.meta?.sessionId)
+      ) {
         selected.add(file);
-        const directory = path.dirname(file.path);
-        for (const sibling of files) {
-          if (path.dirname(sibling.path) === directory) selected.add(sibling);
-        }
       }
     }
 
-    await Promise.all([...selected].map((file) => this.#readAppended(file)));
-
-    const activeSessionIds = new Set();
-    for (const file of selected) {
-      if (activeIds.has(file.meta?.id) || activeIds.has(file.discoveredId)) {
-        if (file.meta?.sessionId) activeSessionIds.add(file.meta.sessionId);
-      }
-    }
-    if (activeSessionIds.size > 0) {
-      for (const file of files) {
-        if (activeSessionIds.has(file.meta?.sessionId)) {
-          selected.add(file);
-          await this.#readAppended(file);
-        }
-      }
-    }
+    await runWithConcurrency(
+      [...selected],
+      this.readConcurrency,
+      (file) => this.#readAppended(file),
+    );
 
     return [...selected].filter((file) => file.meta != null);
+  }
+
+  async #readMetadata(file) {
+    if (file.meta != null) return;
+    const fileStat = await stat(file.path);
+    const decoder = new StringDecoder("utf8");
+    let position = 0;
+    let source = "";
+    while (position < fileStat.size && Buffer.byteLength(source, "utf8") <= this.maxLineBytes) {
+      const length = Math.min(this.readChunkBytes, fileStat.size - position);
+      const buffer = await this.readRange(file.path, { length, position });
+      if (buffer.length === 0) break;
+      position += buffer.length;
+      source += decoder.write(buffer);
+      const newline = source.indexOf("\n");
+      if (newline !== -1) {
+        const event = parseRolloutLine(source.slice(0, newline));
+        if (event?.kind === "meta") file.meta = event;
+        return;
+      }
+    }
   }
 
   async #readAppended(file) {

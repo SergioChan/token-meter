@@ -31,4 +31,3 @@ export function percentile(values, quantile) {
   const weight = position - lower;
   return sorted[lower] * (1 - weight) + sorted[upper] * weight;
 }
-
