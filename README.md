@@ -18,7 +18,7 @@ Token Meter is an open-source, local-first telemetry overlay for Codex Desktop. 
 It is designed for the failure mode that percentages hide: a polluted context, retry loop, or background-agent spiral that makes one interaction cost several times more than normal.
 
 > [!IMPORTANT]
-> Token Meter currently supports **Codex Desktop on macOS**. The planned Claude target is the **Code tab inside Claude Desktop**, with the same injected lower-right overlay—not the Claude Code CLI status line. Claude Desktop support is not implemented yet. See [Claude Desktop status](#claude-desktop-status).
+> Token Meter currently supports **Codex Desktop on macOS**. The planned Claude target is the **Code tab inside Claude Desktop**, not the CLI status line. Claude's production app currently blocks public CDP injection behind an Anthropic-signed authorization token, so only the read-only Session and usage adapter is usable today. See [Claude Desktop status](#claude-desktop-status).
 
 ## What it measures
 
@@ -98,7 +98,7 @@ _Screenshots are captured from the real injected Shadow DOM runtime with control
 | Host | Status | UI | Usage source |
 | --- | --- | --- | --- |
 | Codex Desktop, macOS | Supported | Injected lower-right overlay | Local rollout token events |
-| Claude Code in Claude Desktop, macOS | Not implemented end to end | Offline injector adapter implemented; live validation pending | Offline Desktop Session resolver and transcript collector implemented |
+| Claude Code in Claude Desktop, macOS | Host-blocked for UI injection | Production CDP requires Anthropic-signed authorization | Read-only Desktop Session resolver and transcript collector implemented |
 | Codex Desktop, Windows/Linux | Not implemented | — | — |
 
 Validated locally against Codex Desktop `26.730.61639 (6234)`. Codex DOM and rollout formats are compatibility surfaces, so newer builds must pass the release checks in [the architecture document](docs/architecture.md).
@@ -218,7 +218,11 @@ npm run screenshots
 
 ## Claude Desktop status
 
-**No: this repository does not yet support the complete Token Meter experience inside Claude Desktop.** The renderer probe and injector adapter are implemented from static application evidence and tested with fixtures, but they have not been connected to a live Claude renderer. The restart-safe lifecycle controller, installer, and restart-approved UI validation are still missing.
+**No: this repository does not support the injected Token Meter inside production Claude Desktop today.** The read-only usage adapter works, and a fail-closed renderer/injector adapter exists for compatibility work, but the host application prevents a normal third-party launcher from enabling CDP.
+
+Read-only inspection of Claude Desktop `1.24012.9` found an explicit startup gate: the production main process exits when it sees `--remote-debugging-port` or `--remote-debugging-pipe`, unless both `CLAUDE_USER_DATA_DIR` and a valid `CLAUDE_CDP_AUTH` value are present. That authorization is short-lived, bound to the exact user-data path, and verified with an embedded Anthropic public key. The installed application contains verification code but no public local signer, and Anthropic does not document a third-party issuance flow.
+
+Token Meter will not bypass this control by patching, copying, re-signing, or dynamically modifying Claude.app. A public injected adapter therefore requires either an Anthropic-supported extension surface for persistent host UI or an officially issued CDP authorization flow.
 
 The offline adapter foundation is now implemented and tested:
 
@@ -227,7 +231,7 @@ The offline adapter foundation is now implemented and tested:
 - The bounded incremental collector reads the exact root transcript plus its child-Agent transcripts, discards message content, de-duplicates repeated response rows by `message.id`, and replaces partial usage snapshots with the latest confirmed snapshot.
 - The shared metrics engine produces Session, trailing-hour, current-turn, rate, baseline, alert, compaction, and child-Agent readings from those events.
 - Fixtures cover duplicate, partial, appended, truncated, oversized, switched, unknown, and ambiguous Session cases.
-- The fail-closed injector verifies the Claude application and CDP listener owner, rejects untrusted targets, requires an exact `/code/<local_uuid>` binding with semantic Code-page markers, and registers the persistent UI script only after that probe passes.
+- The dormant fail-closed injector verifies the Claude application and CDP listener owner, rejects untrusted targets, requires an exact `/code/<local_uuid>` binding with semantic Code-page markers, and registers the UI script only after that probe passes. It is not exposed as a public launcher while the host authorization prerequisite is unavailable.
 
 A development-only read-only snapshot can be generated without opening a debugging port or restarting Claude:
 
@@ -255,7 +259,7 @@ The target is the graphical Code tab documented by Anthropic, not a terminal sta
 4. Use the implemented content-discarding collector to aggregate confirmed usage events into Session, trailing-hour, current-turn, rate, and baseline snapshots.
 5. Switch the complete meter atomically whenever the selected Desktop Session changes.
 
-The local files and renderer structure are undocumented, version-sensitive compatibility surfaces. The selected-Session probe and injector still require an explicit restart-approved live CDP validation. Until the restart-safe lifecycle, real Session-switch tests, and live accuracy checks pass, the support status remains **Not implemented end to end**.
+The local files and renderer structure are undocumented, version-sensitive compatibility surfaces. Even with user approval to restart or launch a second instance, the production CDP authorization gate remains. Until Anthropic exposes a supported authorization or extension route, support remains **host-blocked for UI injection**; no Claude restart is useful for Token Meter validation.
 
 See [the Claude Desktop adapter status](docs/claude-code.md). Anthropic's public product documentation confirms that [the Code tab is Claude Code's graphical Desktop interface](https://code.claude.com/docs/en/desktop).
 

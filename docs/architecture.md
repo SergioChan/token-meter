@@ -12,7 +12,7 @@ The first implementation uses Codex rollout JSONL as a read-only compatibility a
 Current host support:
 
 - Codex Desktop on macOS: implemented.
-- Claude Code in Claude Desktop on macOS: offline Session resolver, transcript collector, metrics adapter, application verifier, renderer probe, and injector adapter implemented; live renderer validation and lifecycle integration absent.
+- Claude Code in Claude Desktop on macOS: read-only Session resolver, transcript collector, metrics adapter, application verifier, renderer probe, and dormant injector adapter implemented; production UI injection is blocked by host CDP authorization.
 - Codex Desktop on Windows and Linux: implementation absent.
 
 ## Modules
@@ -37,7 +37,7 @@ CodexInjector
   shadow-DOM UI updates
 ```
 
-The seam between the core and a host adapter is the snapshot shape returned by `MetricsEngine`. The Claude Desktop collector now satisfies that shape from confirmed transcript usage events; the live Claude renderer and lifecycle adapters remain pending.
+The seam between the core and a host adapter is the snapshot shape returned by `MetricsEngine`. The Claude Desktop collector now satisfies that shape from confirmed transcript usage events. The renderer adapter remains dormant because production Claude requires an Anthropic-signed CDP authorization token that has no documented third-party issuance path.
 
 ```text
 ClaudeDesktopSessionStore
@@ -128,9 +128,13 @@ The latest live validation recorded in this repository used Codex Desktop `26.73
 
 The Claude target is the Code tab inside Claude Desktop, not the Claude Code CLI status line. It can reuse the measurement and Shadow DOM presentation layers, but not the Codex Session probe, rollout reader, application verifier, or renderer allowlist.
 
+Claude Desktop `1.24012.9` performs a startup check before normal initialization. `--remote-debugging-port` and `--remote-debugging-pipe` cause the production process to exit unless `CLAUDE_CDP_AUTH` validates against the embedded Anthropic public key and is bound to the exact `CLAUDE_USER_DATA_DIR`. The accepted token is time-limited to five minutes. The application contains the verifier but no public local signer.
+
+This is a host security boundary, not an unresolved command-line detail. Token Meter does not patch or re-sign the official bundle and does not attempt to forge or bypass signed authorization. The dormant CDP adapter can only become a supported path if Anthropic provides an official authorization flow; otherwise Claude support requires a different supported UI surface or a separately approved companion-overlay architecture.
+
 The macOS adapter has three host-specific responsibilities:
 
-1. Verify the official Claude application, loopback debugging listener, process ownership, and semantic main renderer before injection. The fail-closed verification code is implemented; live process and renderer validation remain pending.
+1. Verify the official Claude application, loopback debugging listener, process ownership, and semantic main renderer before injection. The fail-closed verification code is implemented but cannot reach a production renderer without host-issued CDP authorization.
 2. Read the exact Session selected in the Desktop UI and map its Desktop identity to the underlying Claude Code transcript identity. The route/current-link conflict detector and fail-closed identity mapper are implemented; live Session-switch validation remains pending.
 3. Convert confirmed, de-duplicated transcript usage events into the shared snapshot model without retaining message content. The bounded incremental collector and shared metrics path are implemented.
 

@@ -13,7 +13,7 @@ The project follows [Semantic Versioning](https://semver.org/).
 - A visible active-Context reading that follows Codex compaction independently from cumulative Session usage.
 - A per-user macOS LaunchAgent installer and uninstaller for normal Dock launches and login persistence.
 - An offline Claude Desktop Session resolver, de-duplicating transcript collector, read-only snapshot command, and application identity verifier.
-- A fail-closed Claude Desktop Code renderer probe and injector adapter, pending restart-approved live validation.
+- A dormant fail-closed Claude Desktop Code renderer probe and injector adapter for a future supported authorization path.
 
 ### Changed
 
@@ -24,6 +24,7 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Confirmed token increments display a visible delta pulse at high cumulative totals.
 - Codex shutdown waits for the complete application process tree before a relaunch.
 - Documentation now distinguishes raw Session workload from backend account-level `/usage` activity.
+- Documented Claude Desktop's Anthropic-signed CDP authorization gate and marked production UI injection as host-blocked instead of presenting restart as sufficient.
 
 ## [0.1.0] - 2026-08-05
 

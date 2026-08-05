@@ -8,7 +8,7 @@ The Claude Code CLI `statusLine` is explicitly out of scope for this adapter. It
 
 ## Current status
 
-Claude Code Desktop is **not supported end to end by the current release**. The offline measurement path and injector adapter are implemented, but the renderer adapter has not been attached to a live Claude process. The repository does not yet contain a restart-safe Claude lifecycle controller, installer, or restart-approved UI tests.
+Claude Code Desktop UI injection is **blocked by a production host authorization boundary**. The read-only measurement path is implemented. A fail-closed injector adapter is retained for a future supported authorization path, but it cannot enable CDP in the current public production application.
 
 Implemented offline components:
 
@@ -20,7 +20,7 @@ Implemented offline components:
 - Shared Session, trailing-hour, current-turn, rate, historical baseline, alert, and child-Agent metrics.
 - A development-only `claude-snapshot` command and Claude-specific unit fixtures.
 - A fail-closed Code renderer probe derived from the installed application's `/code/<local_uuid>` route, active-link `aria-current`, and semantic Session-header marker.
-- A Claude injector adapter that verifies the signed application and listener process tree, rejects untrusted CDP targets, and registers the persistent script only after the semantic probe succeeds.
+- A dormant Claude injector adapter that verifies the signed application and listener process tree, rejects untrusted CDP targets, and registers the persistent script only after the semantic probe succeeds.
 
 Anthropic documents the Code tab as Claude Code's graphical Desktop interface, with multiple parallel sessions managed in a sidebar. Desktop uses the same underlying engine as the CLI but maintains separate Session history.
 
@@ -38,6 +38,20 @@ A read-only inspection of Claude Desktop for macOS on 2026-08-05 established the
 - Multiple Claude Code Session processes can run concurrently, so process recency cannot identify the Session currently selected in the UI.
 
 These observations demonstrate a plausible read-only identity and usage path. They are not public Anthropic APIs and must not be treated as stable contracts. Field names, paths, event semantics, and renderer structure may change between Desktop releases.
+
+## Production injection blocker
+
+Read-only inspection and isolated launch tests against Claude Desktop `1.24012.9` confirmed the following startup behavior:
+
+1. The packaged main process scans its arguments before normal application initialization.
+2. `--remote-debugging-port` and `--remote-debugging-pipe` cause the production process to exit.
+3. The only observed exception requires both `CLAUDE_USER_DATA_DIR` and `CLAUDE_CDP_AUTH`.
+4. `CLAUDE_CDP_AUTH` is bound to the exact user-data path, expires after five minutes, and must validate against an embedded Anthropic public key.
+5. The application bundle contains the verifier but no public local signing path. Anthropic's public Desktop documentation does not describe a third-party CDP authorization flow.
+
+Starting a second instance with an isolated profile does not remove this gate: the profile can be isolated, but the remote-debugging argument is rejected before that instance becomes usable. Restarting the user's main Claude process would hit the same check and would only interrupt active tasks.
+
+Token Meter will not patch, copy, re-sign, or dynamically modify Claude.app, and it will not attempt to forge signed authorization. The injected UI target therefore remains blocked until Anthropic provides either a supported persistent host-UI extension surface or an official third-party CDP authorization flow.
 
 ## Adapter architecture
 
@@ -120,9 +134,11 @@ The Claude adapter follows the Codex adapter's fail-closed principles while usin
 7. Never modify, unpack, replace, or re-sign the official Claude application bundle.
 8. Remove injected DOM on shutdown and provide a normal restart path that closes the debugging port.
 
-## Remaining unknowns
+These are necessary adapter invariants, not a claim that a public launcher can currently satisfy the host's signed CDP prerequisite.
 
-The following items require a restart-approved live probe against Claude Desktop before implementation can be considered safe:
+## Remaining live-validation work
+
+The following items remain after—and only after—a supported host authorization path exists:
 
 - The stable semantic marker for the currently selected Code Session.
 - The correct main-renderer target and the rejection rules for every auxiliary window.
@@ -131,21 +147,21 @@ The following items require a restart-approved live probe against Claude Desktop
 - Resumed-Session behavior across Desktop upgrades and transcript relocation.
 - Whether remote and SSH Sessions expose sufficient local confirmed usage for the same accounting guarantees.
 
-No public Claude Desktop extension API currently documented by Anthropic provides a persistent arbitrary host-UI overlay. Desktop Extensions and Claude Code plugins expose MCP, skills, agents, hooks, and related capabilities; they are not a documented API for injecting a permanent widget into the Desktop shell. The planned overlay is therefore an unofficial, version-sensitive local compatibility adapter.
+No public Claude Desktop extension API currently documented by Anthropic provides a persistent arbitrary host-UI overlay. Desktop Extensions and Claude Code plugins expose MCP, skills, agents, hooks, and related capabilities; they are not a documented API for injecting a permanent widget into the Desktop shell. The planned overlay is therefore an unofficial, version-sensitive local compatibility adapter with an unmet host authorization prerequisite.
 
 ## Acceptance criteria
 
 Claude Code Desktop support must not be marked complete until the repository provides:
 
 1. A Claude-specific application verifier and safe macOS start/stop flow. The verifier is implemented; lifecycle flow is pending.
-2. A semantic main-renderer and exact selected-Session probe. Implemented from static bundle evidence; live validation is pending.
+2. A semantic main-renderer and exact selected-Session probe. Implemented from static bundle evidence; live validation is blocked by host authorization.
 3. A versioned Desktop `sessionId` to transcript identity resolver. Implemented for the inspected local metadata format.
 4. A bounded, content-discarding, de-duplicating usage collector. Implemented for local root and child-Agent transcripts.
 5. Session, trailing-hour, current-turn, rate, baseline, and alert metrics. Implemented for read-only local snapshots.
-6. The injected lower-right meter with atomic Session switching. Injector code is implemented; live switching is pending.
+6. The injected lower-right meter with atomic Session switching. Injector code is implemented; live switching is blocked by host authorization.
 7. Unit fixtures for duplicate, partial, resumed, reset, and unknown-Session cases.
 8. Live tests covering Session switches, simultaneous Sessions, navigation, cleanup, and restart.
 9. Accuracy reconciliation against known transcript usage samples.
 10. Clear compatibility, privacy, uninstall, and recovery documentation.
 
-Until every applicable criterion passes, the public support matrix must continue to say **Not implemented end to end**.
+Until every applicable criterion passes, the public support matrix must continue to say **Host-blocked for UI injection**.
