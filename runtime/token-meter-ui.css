@@ -1,0 +1,322 @@
+:host {
+  all: initial;
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483000;
+  color-scheme: light dark;
+  pointer-events: none;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.meter-card {
+  --accent: #5f9d7c;
+  --accent-strong: #2d7754;
+  width: 286px;
+  box-sizing: border-box;
+  overflow: hidden;
+  color: #20211f;
+  background: rgb(247 247 244 / 0.94);
+  border: 1px solid rgb(28 31 28 / 0.14);
+  border-radius: 14px;
+  box-shadow: 0 14px 36px rgb(0 0 0 / 0.18), inset 0 1px 0 rgb(255 255 255 / 0.8);
+  backdrop-filter: blur(18px) saturate(1.1);
+  pointer-events: auto;
+  user-select: none;
+  cursor: default;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.meter-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 11px;
+  border-bottom: 1px solid rgb(28 31 28 / 0.09);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.meter-title {
+  font-weight: 700;
+}
+
+.session-id {
+  margin-left: auto;
+  color: rgb(32 33 31 / 0.55);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.meter-body {
+  display: grid;
+  grid-template-columns: 122px 1fr;
+  align-items: center;
+  min-height: 82px;
+  padding: 4px 10px 2px;
+}
+
+.gauge {
+  position: relative;
+  width: 122px;
+  height: 68px;
+}
+
+.gauge svg {
+  display: block;
+  width: 122px;
+  height: 64px;
+  overflow: visible;
+}
+
+.gauge-track,
+.gauge-progress {
+  fill: none;
+  stroke-width: 7;
+  stroke-linecap: round;
+}
+
+.gauge-track {
+  stroke: rgb(32 33 31 / 0.11);
+}
+
+.gauge-progress {
+  stroke: var(--accent);
+  stroke-dasharray: 157;
+  stroke-dashoffset: 157;
+  transition: stroke-dashoffset 520ms cubic-bezier(.2, .9, .25, 1), stroke 180ms ease;
+}
+
+.needle {
+  stroke: #242622;
+  stroke-width: 2;
+  stroke-linecap: round;
+  transform: rotate(-100deg);
+  transform-origin: 62px 54px;
+}
+
+.needle-pin {
+  fill: #242622;
+  stroke: rgb(247 247 244);
+  stroke-width: 2;
+}
+
+.rate {
+  position: absolute;
+  right: 0;
+  bottom: 1px;
+  left: 0;
+  text-align: center;
+  color: rgb(32 33 31 / 0.58);
+  font: 600 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-total-wrap {
+  min-width: 0;
+  padding-left: 7px;
+}
+
+.label,
+.metric-row small {
+  display: block;
+  color: rgb(32 33 31 / 0.52);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+}
+
+.session-total {
+  display: block;
+  margin: 3px 0 2px;
+  font-size: 28px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-count {
+  color: var(--accent-strong);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.metric-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid rgb(28 31 28 / 0.09);
+}
+
+.metric-row > span {
+  min-width: 0;
+  padding: 9px 11px 10px;
+}
+
+.metric-row > span + span {
+  border-left: 1px solid rgb(28 31 28 / 0.09);
+}
+
+.metric-row b {
+  display: block;
+  margin-top: 3px;
+  font: 650 15px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.details-row {
+  display: none;
+  grid-template-columns: 1fr auto;
+  gap: 5px 12px;
+  padding: 9px 11px;
+  border-top: 1px solid rgb(28 31 28 / 0.09);
+  color: rgb(32 33 31 / 0.58);
+  font-size: 10px;
+}
+
+.details-row b {
+  color: #20211f;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.expanded .details-row {
+  display: grid;
+}
+
+.warning,
+.unbound {
+  margin: 0 8px 8px;
+  padding: 8px 9px;
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.warning {
+  color: #6c260f;
+  background: rgb(221 98 44 / 0.13);
+  border: 1px solid rgb(221 98 44 / 0.25);
+}
+
+.warning strong,
+.warning span,
+.unbound strong,
+.unbound span {
+  display: block;
+}
+
+.warning span,
+.unbound span {
+  margin-top: 2px;
+  opacity: 0.75;
+}
+
+.unbound {
+  color: #454842;
+  background: rgb(32 33 31 / 0.06);
+  border: 1px solid rgb(32 33 31 / 0.09);
+}
+
+.meter-card[data-level="warning"],
+.meter-card[data-level="critical"] {
+  --accent: #dd622c;
+  --accent-strong: #a43c19;
+  border-color: rgb(221 98 44 / 0.5);
+  box-shadow: 0 14px 38px rgb(111 35 12 / 0.22), inset 0 1px 0 rgb(255 255 255 / 0.8);
+}
+
+.meter-card[data-level="critical"] {
+  --accent: #d64235;
+  --accent-strong: #9d211b;
+}
+
+.session-switch {
+  animation: session-switch 360ms cubic-bezier(.2, .8, .2, 1);
+}
+
+.usage-impact {
+  animation: usage-impact 520ms cubic-bezier(.2, .9, .25, 1);
+}
+
+@keyframes session-switch {
+  0% { opacity: 0.55; transform: translateY(5px) scale(0.985); }
+  100% { opacity: 1; transform: none; }
+}
+
+@keyframes usage-impact {
+  0% { transform: translateY(0); }
+  30% { transform: translateY(calc(-1px - var(--impact) * 2px)); }
+  100% { transform: translateY(0); }
+}
+
+@media (prefers-color-scheme: dark) {
+  .meter-card {
+    color: #eceee9;
+    background: rgb(28 29 27 / 0.92);
+    border-color: rgb(255 255 255 / 0.14);
+    box-shadow: 0 16px 40px rgb(0 0 0 / 0.4), inset 0 1px 0 rgb(255 255 255 / 0.08);
+  }
+
+  .meter-header,
+  .metric-row,
+  .details-row {
+    border-color: rgb(255 255 255 / 0.09);
+  }
+
+  .metric-row > span + span {
+    border-color: rgb(255 255 255 / 0.09);
+  }
+
+  .session-id,
+  .rate,
+  .label,
+  .metric-row small,
+  .details-row {
+    color: rgb(236 238 233 / 0.58);
+  }
+
+  .gauge-track {
+    stroke: rgb(255 255 255 / 0.12);
+  }
+
+  .needle {
+    stroke: #f1f2ef;
+  }
+
+  .needle-pin {
+    fill: #f1f2ef;
+    stroke: #1c1d1b;
+  }
+
+  .details-row b {
+    color: #eceee9;
+  }
+
+  .warning {
+    color: #ffcfbd;
+  }
+
+  .unbound {
+    color: #c7cac4;
+    background: rgb(255 255 255 / 0.06);
+    border-color: rgb(255 255 255 / 0.09);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meter-card,
+  .gauge-progress {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+

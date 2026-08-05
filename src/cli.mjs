@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { MetricsEngine } from "./core/metrics-engine.mjs";
+import { RolloutStore } from "./core/rollout-store.mjs";
+
+function parseArguments(argv) {
+  const [command = "snapshot", ...rest] = argv;
+  const options = { command };
+  for (let index = 0; index < rest.length; index += 1) {
+    const value = rest[index];
+    if (value === "--thread-id") options.threadId = rest[++index];
+    else if (value === "--sessions-dir") options.sessionsDirectory = rest[++index];
+    else if (value === "--cdp-port") options.cdpPort = Number(rest[++index]);
+    else throw new Error(`Unknown argument: ${value}`);
+  }
+  return options;
+}
+
+const options = parseArguments(process.argv.slice(2));
+const sessionsDirectory =
+  options.sessionsDirectory ?? path.join(os.homedir(), ".codex", "sessions");
+
+if (options.command === "snapshot") {
+  const store = new RolloutStore({ sessionsDirectory });
+  const files = await store.refresh({
+    activeThreadIds: options.threadId ? [options.threadId] : [],
+  });
+  const snapshot = new MetricsEngine().snapshot(files, {
+    threadId: options.threadId ?? null,
+  });
+  process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
+} else if (options.command === "inject") {
+  const modulePath = new URL("./codex/injector.mjs", import.meta.url);
+  const { runCodexInjector } = await import(modulePath);
+  await runCodexInjector({
+    sessionsDirectory,
+    cdpPort: options.cdpPort || 9334,
+  });
+} else if (options.command === "remove") {
+  const modulePath = new URL("./codex/injector.mjs", import.meta.url);
+  const { removeCodexMeter } = await import(modulePath);
+  const result = await removeCodexMeter({ cdpPort: options.cdpPort || 9334 });
+  process.stdout.write(`${JSON.stringify(result)}\n`);
+} else {
+  const script = fileURLToPath(import.meta.url);
+  throw new Error(
+    `Unknown command \"${options.command}\". Run ${script} snapshot, inject, or remove.`,
+  );
+}

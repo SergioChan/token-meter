@@ -1,0 +1,17 @@
+{
+  "name": "token-meter",
+  "version": "0.1.0",
+  "description": "A session-aware live token meter for Codex Desktop.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "snapshot": "node src/cli.mjs snapshot",
+    "codex:inject": "node src/cli.mjs inject",
+    "codex:remove": "node src/cli.mjs remove",
+    "test": "node --test"
+  }
+}

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Token Meter Component Preview</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #ecece8;
+        color: #242522;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          linear-gradient(90deg, rgb(0 0 0 / 0.035) 1px, transparent 1px) 0 0 / 64px 64px,
+          linear-gradient(rgb(0 0 0 / 0.035) 1px, transparent 1px) 0 0 / 64px 64px,
+          #ecece8;
+      }
+
+      main {
+        max-width: 720px;
+        padding: 56px;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 28px;
+        letter-spacing: -0.03em;
+      }
+
+      p {
+        max-width: 560px;
+        color: rgb(36 37 34 / 0.62);
+        line-height: 1.55;
+      }
+
+      .controls {
+        display: flex;
+        gap: 8px;
+        margin-top: 24px;
+      }
+
+      button {
+        padding: 8px 12px;
+        color: inherit;
+        background: rgb(255 255 255 / 0.6);
+        border: 1px solid rgb(0 0 0 / 0.12);
+        border-radius: 8px;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root,
+        body {
+          color: #eceee9;
+          background-color: #171816;
+        }
+
+        body {
+          background:
+            linear-gradient(90deg, rgb(255 255 255 / 0.035) 1px, transparent 1px) 0 0 / 64px 64px,
+            linear-gradient(rgb(255 255 255 / 0.035) 1px, transparent 1px) 0 0 / 64px 64px,
+            #171816;
+        }
+
+        p { color: rgb(236 238 233 / 0.62); }
+        button {
+          background: rgb(255 255 255 / 0.06);
+          border-color: rgb(255 255 255 / 0.12);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Token Meter renderer preview</h1>
+      <p>
+        This page runs the same shadow-DOM payload used by the Codex injector.
+        Values change only when a confirmed mock snapshot is pushed.
+      </p>
+      <div class="controls">
+        <button id="increment">Confirmed usage jump</button>
+        <button id="switch">Switch session</button>
+        <button id="warning">Toggle warning</button>
+      </div>
+    </main>
+    <script type="module">
+      const [runtime, stylesheet] = await Promise.all([
+        fetch("../runtime/token-meter-ui.js").then((response) => response.text()),
+        fetch("../runtime/token-meter-ui.css").then((response) => response.text()),
+      ]);
+      window.eval(
+        runtime.replace("__TOKEN_METER_CSS_JSON__", JSON.stringify(stylesheet)),
+      );
+
+      let sessionIndex = 0;
+      let total = 14_097_461;
+      let turn = 4_866_505;
+      let warning = false;
+      const sessions = [
+        "019fd06a-f146-7b03-9358-2c3dc15f50ac",
+        "019fd037-3cf5-7c83-a1e0-54e1e18b890d",
+      ];
+
+      function push() {
+        window.__tokenMeter.update({
+          status: "bound",
+          binding: { exact: true, source: "active-sidebar-row" },
+          sessionId: sessions[sessionIndex],
+          childAgentCount: sessionIndex === 0 ? 3 : 0,
+          session: { totalTokens: total, lastHourTokens: total },
+          turn: { tokens: turn },
+          account: { lastHourTokens: 1_151_425_679 },
+          rate: { tokensPerMinute: warning ? 2_140_000 : 534_042 },
+          anomaly: {
+            level: warning ? "warning" : "normal",
+            baseline: {
+              medianTokensPerMinute: 371_307,
+              p95TokensPerMinute: 1_020_000,
+            },
+          },
+        });
+      }
+
+      document.querySelector("#increment").addEventListener("click", () => {
+        total += 112_948;
+        turn += 112_948;
+        push();
+      });
+      document.querySelector("#switch").addEventListener("click", () => {
+        sessionIndex = sessionIndex === 0 ? 1 : 0;
+        total = sessionIndex === 0 ? 14_097_461 : 783_214;
+        turn = sessionIndex === 0 ? 4_866_505 : 96_422;
+        push();
+      });
+      document.querySelector("#warning").addEventListener("click", () => {
+        warning = !warning;
+        push();
+      });
+      push();
+    </script>
+  </body>
+</html>
