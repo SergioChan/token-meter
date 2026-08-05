@@ -58,7 +58,7 @@ async function listTargets(cdpPort) {
     response = await fetch(endpoint, { signal: AbortSignal.timeout(2_000) });
   } catch (error) {
     throw new Error(
-      `Claude CDP is not available at ${endpoint}. Restart Claude with the Token Meter launcher before injecting.`,
+      `Claude CDP is not available at ${endpoint}. Production Claude Desktop rejects remote-debugging flags unless the process has a valid Anthropic-signed CLAUDE_CDP_AUTH token bound to CLAUDE_USER_DATA_DIR.`,
       { cause: error },
     );
   }
