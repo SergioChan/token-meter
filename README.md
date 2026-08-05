@@ -18,7 +18,7 @@ Token Meter is an open-source, local-first telemetry overlay for Codex Desktop. 
 It is designed for the failure mode that percentages hide: a polluted context, retry loop, or background-agent spiral that makes one interaction cost several times more than normal.
 
 > [!IMPORTANT]
-> Token Meter currently supports **Codex Desktop on macOS**. Claude Code support is not implemented yet. See [Claude Code status](#claude-code-status).
+> Token Meter currently supports **Codex Desktop on macOS**. The planned Claude target is the **Code tab inside Claude Desktop**, with the same injected lower-right overlay—not the Claude Code CLI status line. Claude Desktop support is not implemented yet. See [Claude Desktop status](#claude-desktop-status).
 
 ## What it measures
 
@@ -54,7 +54,7 @@ _Screenshots are captured from the real injected Shadow DOM runtime with control
 | Host | Status | UI | Usage source |
 | --- | --- | --- | --- |
 | Codex Desktop, macOS | Supported | Injected lower-right overlay | Local rollout token events |
-| Claude Code | Not implemented | Planned native status line | Planned OpenTelemetry collector |
+| Claude Code in Claude Desktop, macOS | Not implemented | Planned injected lower-right overlay | Planned Desktop Session binding and transcript usage collector |
 | Codex Desktop, Windows/Linux | Not implemented | — | — |
 
 Validated locally against Codex Desktop `26.730.61639 (6234)`. Codex DOM and rollout formats are compatibility surfaces, so newer builds must pass the release checks in [the architecture document](docs/architecture.md).
@@ -134,7 +134,7 @@ flowchart LR
   G["Active Codex task UUID"] --> C
 ```
 
-The measurement core is host-independent. Codex-specific rollout and UI code lives behind adapters so a future Claude Code collector can reuse the same Session, window, turn, rate, and alert semantics.
+The measurement core is host-independent. Codex-specific rollout and UI code lives behind adapters so a future Claude Desktop adapter can reuse the same Session, window, turn, rate, and alert semantics.
 
 Read [docs/architecture.md](docs/architecture.md) for invariants and [the original feasibility study](docs/research/codex-token-meter-feasibility.md) for source-level research.
 
@@ -159,17 +159,21 @@ With an injected Codex instance running on port 9334, regenerate the README scre
 npm run screenshots
 ```
 
-## Claude Code status
+## Claude Desktop status
 
-**No: this repository does not support Claude Code today.** There is no Claude Code collector, plugin manifest, status-line renderer, installer, or test suite in the current tree.
+**No: this repository does not support Claude Code inside Claude Desktop today.** There is no Claude Desktop injector, selected-Session probe, usage collector, installer, or Claude-specific test suite in the current tree.
 
-Claude Code exposes the required building blocks, but they need a distinct adapter:
+The target is the graphical Code tab documented by Anthropic, not a terminal status line. The intended adapter is:
 
-- A native `statusLine` receives `session_id` and context/cost fields.
-- OpenTelemetry events expose `session.id`, `prompt.id`, and request-level token usage.
-- A local collector must aggregate those events into Session, rolling-hour, current-prompt, rate, and baseline snapshots.
+1. Inject the same Shadow DOM meter into the verified Claude Desktop main renderer.
+2. Read the exact Session selected in the Desktop sidebar; never infer it from the newest process or transcript.
+3. Map the Desktop Session identity to the underlying Claude Code transcript identity.
+4. Aggregate confirmed usage events into Session, trailing-hour, current-turn, rate, and baseline snapshots.
+5. Switch the complete meter atomically whenever the selected Desktop Session changes.
 
-The main status line also requires explicit user configuration; Claude Code plugin defaults currently support `agent` and `subagentStatusLine`, not the main `statusLine` key. The implementation contract and official references are documented in [docs/claude-code.md](docs/claude-code.md).
+Local inspection confirms that this architecture is plausible, but the relevant files and renderer structure are undocumented, version-sensitive compatibility surfaces. The exact selected-Session renderer binding still requires an explicit restart-approved live CDP probe. Until that probe, fixtures, and live accuracy checks pass, the support status remains **Not implemented**.
+
+See [the Claude Desktop adapter status](docs/claude-code.md). Anthropic's public product documentation confirms that [the Code tab is Claude Code's graphical Desktop interface](https://code.claude.com/docs/en/desktop).
 
 ## Contributing
 

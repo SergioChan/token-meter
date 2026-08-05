@@ -13,6 +13,7 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Corrected the Claude roadmap to target an injected meter in the Claude Desktop Code tab rather than the Claude Code CLI status line.
 - Renderer target verification now completes before persistent script registration.
 - Codex listener verification now checks the exact bundle path, signature, and signing Team ID.
 - Session-tree discovery includes child-Agent rollouts created on later dates.

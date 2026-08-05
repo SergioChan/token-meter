@@ -177,26 +177,29 @@ Required controls:
 - Remove injected DOM on shutdown.
 - Restart Codex normally to close the debugging port after disabling the meter.
 
-## 9. Claude Code follow-on
+## 9. Claude Code Desktop follow-on
 
-Claude Code has a documented native `statusLine`, but it is a terminal status line rather than a lower-right graphical widget. It runs a local command, receives session JSON on stdin, and can refresh once per second ([status line](https://code.claude.com/docs/en/statusline)).
+The Claude target is the Code tab inside Claude Desktop, not the Claude Code CLI `statusLine`. Anthropic documents this tab as a graphical interface for managing multiple Claude Code Sessions ([Claude Code Desktop](https://code.claude.com/docs/en/desktop)). Token Meter therefore needs the same product shape as Codex: an injected lower-right overlay bound to the exact Session selected in the Desktop sidebar.
 
-The stronger exact usage source is `claude_code.api_request` OpenTelemetry. Events include `session.id`, `prompt.id`, timestamp, input, output, cache-read, and cache-creation tokens. API calls caused by one user prompt share a prompt ID, which supports exact session, hour, and prompt aggregation ([monitoring](https://code.claude.com/docs/en/monitoring-usage)).
-
-Recommended Claude architecture:
+A read-only local feasibility inspection found version-specific Desktop metadata mapping a Desktop `sessionId` to an underlying `cliSessionId`, plus matching local JSONL transcripts with timestamped numerical usage fields. This suggests the following architecture:
 
 ```text
-Claude Code OTel events
+Claude Desktop selected Session probe
         |
         v
-Local collector and historical baseline
+Desktop sessionId -> transcript identity
         |
-        +--> native statusLine
+        v
+Bounded transcript usage collector
         |
-        +--> Stop hook warning
+        v
+Shared metrics and historical baseline
+        |
+        v
+Injected Shadow DOM meter
 ```
 
-A Claude plugin cannot currently install the main `statusLine` through its default settings alone, so setup requires an explicit user-approved settings step ([plugins](https://code.claude.com/docs/en/plugins), [plugin reference](https://code.claude.com/docs/en/plugins-reference)). Transcript parsing should remain a versioned fallback.
+These paths and fields are undocumented compatibility surfaces. They require fixture-based event de-duplication and a restart-approved live renderer probe before they can be used safely. The adapter must fail closed when selected-Session identity is unavailable and must never infer selection from process or file recency. See [the Claude Desktop adapter status](../claude-code.md).
 
 ## 10. Recommendation
 
@@ -209,6 +212,6 @@ Proceed in this order:
 5. Validate navigation, multiple windows, background agents, and resumed sessions.
 6. Add historical alerts.
 7. Package a safe macOS controller with explicit restart and restore flows.
-8. Add Claude Code using OTel plus its native status line.
+8. Add Claude Code Desktop through a verified main-renderer injection, exact selected-Session binding, and confirmed transcript usage collector.
 
 The concept is viable. The telemetry is sufficiently rich. The main product risk is presenting version-sensitive desktop injection as if it were a stable official Codex UI contribution point.

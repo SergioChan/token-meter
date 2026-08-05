@@ -12,7 +12,7 @@ The first implementation uses Codex rollout JSONL as a read-only compatibility a
 Current host support:
 
 - Codex Desktop on macOS: implemented.
-- Claude Code: adapter contract documented, implementation absent.
+- Claude Code in Claude Desktop on macOS: adapter contract documented, implementation absent.
 - Codex Desktop on Windows and Linux: implementation absent.
 
 ## Modules
@@ -36,7 +36,7 @@ CodexInjector
   shadow-DOM UI updates
 ```
 
-The seam between the core and a host adapter is the snapshot shape returned by `MetricsEngine`. A future Claude collector can satisfy the same shape from OpenTelemetry without changing the meter's measurement semantics.
+The seam between the core and a host adapter is the snapshot shape returned by `MetricsEngine`. A future Claude Desktop collector can satisfy the same shape from confirmed transcript usage events without changing the meter's measurement semantics.
 
 ## Invariants
 
@@ -79,6 +79,14 @@ Unknown builds fail closed until verified.
 
 The latest live validation recorded in this repository used Codex Desktop `26.730.61639 (6234)` on macOS.
 
-## Claude Code adapter boundary
+## Claude Desktop adapter boundary
 
-Claude Code cannot reuse the Codex UI or rollout adapters. It requires an OpenTelemetry collector keyed by `session.id` and `prompt.id`, plus a native status-line renderer and an explicit settings installation step. See [claude-code.md](claude-code.md).
+The Claude target is the Code tab inside Claude Desktop, not the Claude Code CLI status line. It can reuse the measurement and Shadow DOM presentation layers, but not the Codex Session probe, rollout reader, application verifier, or renderer allowlist.
+
+The planned macOS adapter has three host-specific responsibilities:
+
+1. Verify the official Claude application, loopback debugging listener, process ownership, and semantic main renderer before injection.
+2. Read the exact Session selected in the Desktop UI and map its Desktop identity to the underlying Claude Code transcript identity.
+3. Convert confirmed, de-duplicated transcript usage events into the shared snapshot model without retaining message content.
+
+Observed Desktop metadata and transcript formats are undocumented compatibility surfaces. Missing or ambiguous identity, remote-only telemetry, an unknown renderer, or an unsupported build must produce an unbound meter rather than a guessed Session. See [claude-code.md](claude-code.md).
