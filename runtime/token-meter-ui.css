@@ -147,10 +147,28 @@
   font-variant-numeric: tabular-nums;
 }
 
-.agent-count {
+.session-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 13px;
+}
+
+.agent-count,
+.usage-delta {
   color: var(--accent-strong);
   font-size: 10px;
   font-weight: 650;
+}
+
+.usage-delta {
+  opacity: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-delta.visible {
+  animation: confirmed-delta 1.1s cubic-bezier(.2, .9, .25, 1);
 }
 
 .metric-row {
@@ -273,6 +291,12 @@
   100% { transform: translateY(0); }
 }
 
+@keyframes confirmed-delta {
+  0% { opacity: 0; transform: translateY(3px); }
+  18%, 68% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-3px); }
+}
+
 @media (prefers-color-scheme: dark) {
   .meter-card {
     color: #eceee9;
@@ -324,8 +348,13 @@
 
 @media (prefers-reduced-motion: reduce) {
   .meter-card,
-  .gauge-progress {
+  .gauge-progress,
+  .usage-delta {
     animation: none !important;
     transition: none !important;
+  }
+
+  .usage-delta.visible {
+    opacity: 1;
   }
 }

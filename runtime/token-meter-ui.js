@@ -1,5 +1,5 @@
 ((cssText) => {
-  const VERSION = 2;
+  const VERSION = 3;
   const existing = window.__tokenMeter;
   if (existing?.version === VERSION) {
     existing.ensureMounted();
@@ -50,7 +50,10 @@
       <div class="session-total-wrap">
         <span class="label">SESSION</span>
         <strong class="session-total">0</strong>
-        <span class="agent-count"></span>
+        <span class="session-meta">
+          <span class="agent-count"></span>
+          <span class="usage-delta" aria-hidden="true"></span>
+        </span>
       </div>
     </div>
     <div class="metric-row">
@@ -81,6 +84,7 @@
     rate: card.querySelector(".rate"),
     baseline: card.querySelector(".baseline"),
     agentCount: card.querySelector(".agent-count"),
+    usageDelta: card.querySelector(".usage-delta"),
     needle: card.querySelector(".needle"),
     progress: card.querySelector(".gauge-progress"),
     warning: card.querySelector(".warning"),
@@ -91,11 +95,12 @@
   let currentSessionId = null;
   let lastSessionTotal = 0;
   let lastRate = null;
+  let deltaTimer = null;
 
   const format = (value) => {
     const number = Math.max(0, Number(value) || 0);
-    if (number >= 1_000_000_000) return `${(number / 1_000_000_000).toFixed(2)}B`;
-    if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(2)}M`;
+    if (number >= 1_000_000_000) return `${(number / 1_000_000_000).toFixed(3)}B`;
+    if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(3)}M`;
     if (number >= 100_000) return `${(number / 1_000).toFixed(1)}K`;
     if (number >= 10_000) return `${(number / 1_000).toFixed(1)}K`;
     if (number >= 1_000) return `${(number / 1_000).toFixed(2)}K`;
@@ -163,6 +168,7 @@
       elements.rate.textContent = "Awaiting session";
       elements.baseline.textContent = "—";
       elements.agentCount.textContent = "";
+      elements.usageDelta.textContent = "";
       currentSessionId = null;
       lastSessionTotal = 0;
       lastRate = null;
@@ -190,6 +196,14 @@
       card.classList.remove("usage-impact");
       void card.offsetWidth;
       card.classList.add("usage-impact");
+      elements.usageDelta.textContent = `+${format(delta)}`;
+      elements.usageDelta.classList.remove("visible");
+      void elements.usageDelta.offsetWidth;
+      elements.usageDelta.classList.add("visible");
+      clearTimeout(deltaTimer);
+      deltaTimer = setTimeout(() => {
+        elements.usageDelta.classList.remove("visible");
+      }, 1_100);
     }
 
     animateNumber("session", elements.sessionTotal, snapshot.session.totalTokens, sessionChanged);
@@ -216,6 +230,7 @@
   };
 
   const destroy = () => {
+    clearTimeout(deltaTimer);
     for (const animation of animations.values()) animation.cancel();
     host.remove();
     if (window.__tokenMeter?.version === VERSION) delete window.__tokenMeter;

@@ -106,6 +106,7 @@
       ];
 
       function push() {
+        const intensity = warning ? 0.95 : 0.58;
         window.__tokenMeter.update({
           status: "bound",
           binding: { exact: true, source: "active-sidebar-row" },
@@ -114,7 +115,12 @@
           session: { totalTokens: total, lastHourTokens: total },
           turn: { tokens: turn },
           account: { lastHourTokens: 1_151_425_679 },
-          rate: { tokensPerMinute: warning ? 2_140_000 : 534_042 },
+          rate: {
+            tokensPerMinute: warning ? 2_140_000 : 534_042,
+            intensity,
+            band: warning ? "red" : "yellow",
+            scaleTokensPerMinute: 2_250_000,
+          },
           anomaly: {
             level: warning ? "warning" : "normal",
             baseline: {
