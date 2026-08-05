@@ -147,6 +147,9 @@ export class MetricsEngine {
 
     const sessionId = root.meta.sessionId;
     const sessionFiles = files.filter((file) => file.meta?.sessionId === sessionId);
+    const latestRootUsage = root.usage.at(-1) ?? null;
+    const contextTokens = latestRootUsage?.last?.totalTokens ?? null;
+    const contextWindowTokens = latestRootUsage?.contextWindow ?? null;
     const sessionStartedAtMs = Math.min(
       ...sessionFiles.map((file) => file.meta?.timestampMs ?? Number.POSITIVE_INFINITY),
     );
@@ -206,6 +209,16 @@ export class MetricsEngine {
       turn: {
         tokens: currentTurnTokens,
         startedAtMs: turnStartedAtMs,
+      },
+      context: {
+        tokens: contextTokens,
+        windowTokens: contextWindowTokens,
+        percent:
+          contextTokens != null && contextWindowTokens != null
+            ? Math.min(100, Math.max(0, (contextTokens / contextWindowTokens) * 100))
+            : null,
+        compactionCount: root.contextCompactions?.length ?? 0,
+        lastCompactedAtMs: root.contextCompactions?.at(-1) ?? null,
       },
       account: {
         lastHourTokens: allHourTokens,

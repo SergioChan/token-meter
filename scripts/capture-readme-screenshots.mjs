@@ -13,6 +13,12 @@ const normalSnapshot = {
   childAgentCount: 3,
   session: { totalTokens: 2_483_920, lastHourTokens: 418_540 },
   turn: { tokens: 96_240 },
+  context: {
+    tokens: 41_754,
+    windowTokens: 353_400,
+    percent: 11.8149,
+    compactionCount: 1,
+  },
   account: { lastHourTokens: 1_854_980 },
   rate: {
     tokensPerMinute: 186_420,

@@ -130,7 +130,8 @@
 }
 
 .label,
-.metric-row small {
+.metric-row small,
+.context-row small {
   display: block;
   color: rgb(32 33 31 / 0.52);
   font-size: 9px;
@@ -191,6 +192,37 @@
   margin-top: 3px;
   font: 650 15px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
   font-variant-numeric: tabular-nums;
+}
+
+.context-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 11px 9px;
+  border-top: 1px solid rgb(28 31 28 / 0.09);
+}
+
+.context-row b {
+  display: block;
+  margin-top: 3px;
+  font: 650 13px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-row b i {
+  color: rgb(32 33 31 / 0.46);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 550;
+}
+
+.context-row em {
+  color: var(--rate-color);
+  font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  transition: color 180ms ease;
 }
 
 .details-row {
@@ -307,6 +339,7 @@
 
   .meter-header,
   .metric-row,
+  .context-row,
   .details-row {
     border-color: rgb(255 255 255 / 0.09);
   }
@@ -319,6 +352,7 @@
   .rate,
   .label,
   .metric-row small,
+  .context-row small,
   .details-row {
     color: rgb(236 238 233 / 0.58);
   }
@@ -333,6 +367,10 @@
 
   .details-row b {
     color: #eceee9;
+  }
+
+  .context-row b i {
+    color: rgb(236 238 233 / 0.48);
   }
 
   .warning {

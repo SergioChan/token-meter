@@ -4,7 +4,11 @@ import { MetricsEngine } from "../src/core/metrics-engine.mjs";
 
 const minute = 60_000;
 
-function usage(timestampMs, totalTokens) {
+function usage(
+  timestampMs,
+  totalTokens,
+  { contextTokens = totalTokens, contextWindow = 200000 } = {},
+) {
   return {
     kind: "usage",
     timestampMs,
@@ -15,8 +19,14 @@ function usage(timestampMs, totalTokens) {
       outputTokens: 0,
       reasoningOutputTokens: 0,
     },
-    last: null,
-    contextWindow: 200000,
+    last: {
+      totalTokens: contextTokens,
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      outputTokens: 0,
+      reasoningOutputTokens: 0,
+    },
+    contextWindow,
   };
 }
 
@@ -28,6 +38,7 @@ function rollout({
   usageEvents = [],
   userMessages = [],
   turnCompletions = [],
+  contextCompactions = [],
 }) {
   return {
     path: `/tmp/${id}.jsonl`,
@@ -45,6 +56,7 @@ function rollout({
     userMessages,
     turnCompletions,
     turnAborts: [],
+    contextCompactions,
   };
 }
 
@@ -90,6 +102,30 @@ test("snapshot does not substitute another session when the UI thread is unknown
   });
   assert.equal(snapshot.status, "unbound");
   assert.equal(snapshot.requestedThreadId, "missing");
+});
+
+test("snapshot exposes Codex-reported active context after compaction", () => {
+  const file = rollout({
+    id: "compacted",
+    usageEvents: [
+      usage(1, 293_394, { contextTokens: 293_394, contextWindow: 353_400 }),
+      usage(2, 293_394, { contextTokens: 26_976, contextWindow: 353_400 }),
+      usage(3, 324_098, { contextTokens: 30_704, contextWindow: 353_400 }),
+    ],
+    contextCompactions: [2],
+  });
+
+  const snapshot = new MetricsEngine().snapshot([file], {
+    threadId: "compacted",
+    nowMs: 3,
+  });
+
+  assert.equal(snapshot.session.totalTokens, 324_098);
+  assert.equal(snapshot.context.tokens, 30_704);
+  assert.equal(snapshot.context.windowTokens, 353_400);
+  assert.equal(snapshot.context.compactionCount, 1);
+  assert.equal(snapshot.context.lastCompactedAtMs, 2);
+  assert.ok(Math.abs(snapshot.context.percent - 8.68817) < 0.0001);
 });
 
 test("anomaly warning compares current rate against completed historical turns", () => {

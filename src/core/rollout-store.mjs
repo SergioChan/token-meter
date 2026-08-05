@@ -72,6 +72,9 @@ export function parseRolloutLine(line) {
   if (payload.type === "turn_aborted" && timestampMs != null) {
     return { kind: "turnAborted", timestampMs };
   }
+  if (payload.type === "context_compacted" && timestampMs != null) {
+    return { kind: "contextCompacted", timestampMs };
+  }
   return null;
 }
 
@@ -100,6 +103,7 @@ function createFileState(filePath, discoveredId, modifiedMs) {
     userMessages: [],
     turnCompletions: [],
     turnAborts: [],
+    contextCompactions: [],
   };
 }
 
@@ -295,6 +299,7 @@ export class RolloutStore {
       file.userMessages = [];
       file.turnCompletions = [];
       file.turnAborts = [];
+      file.contextCompactions = [];
     }
     if (fileStat.size === file.offset) {
       file.modifiedMs = fileStat.mtimeMs;
@@ -345,6 +350,8 @@ export class RolloutStore {
       file.turnCompletions.push(event.timestampMs);
     } else if (event.kind === "turnAborted") {
       file.turnAborts.push(event.timestampMs);
+    } else if (event.kind === "contextCompacted") {
+      file.contextCompactions.push(event.timestampMs);
     }
   }
 }

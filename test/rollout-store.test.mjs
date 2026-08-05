@@ -66,6 +66,20 @@ test("rollout parser ignores user message bodies", () => {
   assert.equal(JSON.stringify(parsed).includes("private prompt"), false);
 });
 
+test("rollout parser records context compaction without retaining content", () => {
+  const parsed = parseRolloutLine(
+    JSON.stringify({
+      timestamp: "2026-08-05T00:00:00.000Z",
+      type: "event_msg",
+      payload: { type: "context_compacted" },
+    }),
+  );
+  assert.deepEqual(parsed, {
+    kind: "contextCompacted",
+    timestampMs: Date.parse("2026-08-05T00:00:00.000Z"),
+  });
+});
+
 test("rollout files are read through bounded chunks", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "token-meter-rollout-"));
   context.after(() => rm(directory, { recursive: true, force: true }));

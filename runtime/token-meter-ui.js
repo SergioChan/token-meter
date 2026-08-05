@@ -1,5 +1,5 @@
 ((cssText) => {
-  const VERSION = 3;
+  const VERSION = 4;
   const existing = window.__tokenMeter;
   if (existing?.version === VERSION) {
     existing.ensureMounted();
@@ -60,9 +60,17 @@
       <span><small>1H SESSION</small><b class="hour-total">0</b></span>
       <span><small>CURRENT TURN</small><b class="turn-total">0</b></span>
     </div>
+    <div class="context-row">
+      <span>
+        <small>ACTIVE CONTEXT</small>
+        <b><span class="context-total">0</span><i> / <span class="context-window">0</span></i></b>
+      </span>
+      <em class="context-percent">0%</em>
+    </div>
     <div class="details-row">
       <span>All sessions · 1H</span><b class="account-hour">0</b>
       <span>Historical baseline</span><b class="baseline">Learning</b>
+      <span>Context compactions</span><b class="compaction-count">0</b>
     </div>
     <div class="warning" hidden>
       <strong>Unusually high token rate</strong>
@@ -80,6 +88,10 @@
     sessionTotal: card.querySelector(".session-total"),
     hourTotal: card.querySelector(".hour-total"),
     turnTotal: card.querySelector(".turn-total"),
+    contextTotal: card.querySelector(".context-total"),
+    contextWindow: card.querySelector(".context-window"),
+    contextPercent: card.querySelector(".context-percent"),
+    compactionCount: card.querySelector(".compaction-count"),
     accountHour: card.querySelector(".account-hour"),
     rate: card.querySelector(".rate"),
     baseline: card.querySelector(".baseline"),
@@ -164,6 +176,10 @@
       elements.sessionTotal.textContent = "—";
       elements.hourTotal.textContent = "—";
       elements.turnTotal.textContent = "—";
+      elements.contextTotal.textContent = "—";
+      elements.contextWindow.textContent = "—";
+      elements.contextPercent.textContent = "—";
+      elements.compactionCount.textContent = "—";
       elements.accountHour.textContent = "—";
       elements.rate.textContent = "Awaiting session";
       elements.baseline.textContent = "—";
@@ -210,6 +226,23 @@
     animateNumber("hour", elements.hourTotal, snapshot.session.lastHourTokens, sessionChanged);
     animateNumber("turn", elements.turnTotal, snapshot.turn.tokens, sessionChanged);
     animateNumber("account", elements.accountHour, snapshot.account.lastHourTokens, sessionChanged);
+    if (snapshot.context?.tokens == null) {
+      elements.contextTotal.textContent = "—";
+      elements.contextWindow.textContent = "—";
+      elements.contextPercent.textContent = "—";
+    } else {
+      animateNumber(
+        "context",
+        elements.contextTotal,
+        snapshot.context.tokens,
+        sessionChanged,
+      );
+      elements.contextWindow.textContent =
+        snapshot.context.windowTokens == null ? "—" : format(snapshot.context.windowTokens);
+      elements.contextPercent.textContent =
+        snapshot.context.percent == null ? "—" : `${snapshot.context.percent.toFixed(1)}%`;
+    }
+    elements.compactionCount.textContent = String(snapshot.context?.compactionCount ?? 0);
 
     const rate = snapshot.rate.tokensPerMinute;
     const median = snapshot.anomaly.baseline.medianTokensPerMinute || 0;
