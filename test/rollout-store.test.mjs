@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, open, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -148,4 +148,83 @@ test("an exact active thread bypasses throttled file discovery", async (context)
 
   const files = await store.refresh({ activeThreadIds: [id] });
   assert.equal(files[0].meta.id, id);
+});
+
+test("an active session includes child rollouts created on another date", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "token-meter-session-tree-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const rootId = "00000000-0000-0000-0000-000000000010";
+  const childId = "00000000-0000-0000-0000-000000000011";
+  const rootDirectory = path.join(directory, "2026", "08", "04");
+  const childDirectory = path.join(directory, "2026", "08", "05");
+  await Promise.all([
+    mkdir(rootDirectory, { recursive: true }),
+    mkdir(childDirectory, { recursive: true }),
+  ]);
+  await Promise.all([
+    writeFile(
+      path.join(rootDirectory, `rollout-root-${rootId}.jsonl`),
+      `${JSON.stringify({
+        timestamp: "2026-08-04T23:59:00.000Z",
+        type: "session_meta",
+        payload: {
+          id: rootId,
+          session_id: rootId,
+          source: "vscode",
+          thread_source: "user",
+        },
+      })}\n`,
+    ),
+    writeFile(
+      path.join(childDirectory, `rollout-child-${childId}.jsonl`),
+      `${JSON.stringify({
+        timestamp: "2026-08-05T00:01:00.000Z",
+        type: "session_meta",
+        payload: {
+          id: childId,
+          session_id: rootId,
+          source: { subagent: {} },
+          thread_source: "subagent",
+        },
+      })}\n`,
+    ),
+  ]);
+
+  const store = new RolloutStore({
+    sessionsDirectory: directory,
+    historyFileLimit: 0,
+  });
+  const files = await store.refresh({ activeThreadIds: [rootId] });
+
+  assert.deepEqual(
+    files.map((file) => file.discoveredId).sort(),
+    [rootId, childId],
+  );
+});
+
+test("a deleted rollout is removed from the live index without stopping refresh", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "token-meter-deleted-rollout-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const id = "00000000-0000-0000-0000-000000000020";
+  const filePath = path.join(directory, `rollout-deleted-${id}.jsonl`);
+  await writeFile(
+    filePath,
+    `${JSON.stringify({
+      timestamp: "2026-08-05T00:00:00.000Z",
+      type: "session_meta",
+      payload: {
+        id,
+        session_id: id,
+        source: "vscode",
+        thread_source: "user",
+      },
+    })}\n`,
+  );
+  const store = new RolloutStore({ sessionsDirectory: directory });
+  assert.equal((await store.refresh({ activeThreadIds: [id] })).length, 1);
+
+  await rm(filePath);
+  await store.discover({ force: true });
+
+  assert.deepEqual(await store.refresh({ activeThreadIds: [id] }), []);
 });

@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -13,8 +13,43 @@ const projectRoot = path.resolve(moduleDirectory, "../..");
 const runtimePath = path.join(projectRoot, "runtime", "token-meter-ui.js");
 const stylesheetPath = path.join(projectRoot, "runtime", "token-meter-ui.css");
 const execFileAsync = promisify(execFile);
-const CODEX_MAIN_PROCESS_PATTERN =
-  /\/(?:ChatGPT|Codex)\.app\/Contents\/MacOS\/(?:ChatGPT|Codex)(?:\s|$)/;
+const defaultCodexAppPath = "/Applications/ChatGPT.app";
+const codexBundleId = "com.openai.codex";
+const openAiTeamId = "2DC432GLL2";
+
+export function verifyCodexBundleIdentity({ bundleId, teamId }) {
+  if (bundleId !== codexBundleId || teamId !== openAiTeamId) {
+    throw new Error("Refusing a Codex application with an unexpected signing identity");
+  }
+}
+
+async function verifyMacApplicationBundle(appPath) {
+  const expectedPath = path.resolve(appPath);
+  const canonicalPath = await realpath(expectedPath).catch(() => null);
+  if (canonicalPath !== expectedPath) {
+    throw new Error("Refusing a missing or symlinked Codex application bundle");
+  }
+
+  const { stdout: bundleId } = await execFileAsync("/usr/libexec/PlistBuddy", [
+    "-c",
+    "Print :CFBundleIdentifier",
+    path.join(canonicalPath, "Contents", "Info.plist"),
+  ]);
+  await execFileAsync("/usr/bin/codesign", [
+    "--verify",
+    "--deep",
+    "--strict",
+    canonicalPath,
+  ]);
+  const { stderr: signature } = await execFileAsync("/usr/bin/codesign", [
+    "-dv",
+    "--verbose=4",
+    canonicalPath,
+  ]);
+  const teamId = String(signature).match(/^TeamIdentifier=(.+)$/m)?.[1]?.trim() ?? null;
+  verifyCodexBundleIdentity({ bundleId: bundleId.trim(), teamId });
+  return canonicalPath;
+}
 
 async function loadPayload() {
   const [runtime, stylesheet] = await Promise.all([
@@ -71,7 +106,11 @@ export function parseLsofListenerRecords(stdout) {
   return records.filter((record) => /^\d+$/.test(record.pid));
 }
 
-export function verifyCodexListenerRecords(records, commandsByPid) {
+export function verifyCodexListenerRecords(
+  records,
+  commandsByPid,
+  { appPath = defaultCodexAppPath } = {},
+) {
   if (records.length === 0) {
     throw new Error("No process owns the expected CDP listener");
   }
@@ -84,11 +123,20 @@ export function verifyCodexListenerRecords(records, commandsByPid) {
     throw new Error("Expected one Codex CDP listening socket");
   }
 
-  const owners = records.filter((record) =>
-    CODEX_MAIN_PROCESS_PATTERN.test(commandsByPid.get(record.pid) ?? ""),
+  const applicationPath = path.resolve(appPath);
+  const allowedExecutables = ["ChatGPT", "Codex"].map((name) =>
+    path.join(applicationPath, "Contents", "MacOS", name),
   );
+  const owners = records.filter((record) => {
+    const command = String(commandsByPid.get(record.pid) ?? "").trim();
+    return allowedExecutables.some(
+      (executable) => command === executable || command.startsWith(`${executable} `),
+    );
+  });
   if (owners.length !== 1) {
-    throw new Error("Refusing a CDP listener that is not owned by the Codex application");
+    throw new Error(
+      "Refusing a CDP listener that is not owned by the expected Codex application",
+    );
   }
 
   const ownerPid = owners[0].pid;
@@ -110,8 +158,9 @@ export function verifyCodexListenerRecords(records, commandsByPid) {
   return ownerPid;
 }
 
-async function verifyMacListenerOwner(cdpPort) {
+async function verifyMacListenerOwner(cdpPort, { appPath = defaultCodexAppPath } = {}) {
   if (process.platform !== "darwin") return;
+  const verifiedAppPath = await verifyMacApplicationBundle(appPath);
   let stdout;
   try {
     ({ stdout } = await execFileAsync("/usr/sbin/lsof", [
@@ -135,26 +184,35 @@ async function verifyMacListenerOwner(cdpPort) {
       return [pid, command];
     }),
   );
-  verifyCodexListenerRecords(records, new Map(commands));
+  verifyCodexListenerRecords(records, new Map(commands), {
+    appPath: verifiedAppPath,
+  });
 }
 
-async function attachTarget(target, payload) {
-  const client = await CdpClient.connect(target.webSocketDebuggerUrl);
+export async function attachCodexTarget(
+  target,
+  payload,
+  { connect = CdpClient.connect } = {},
+) {
+  const client = await connect(target.webSocketDebuggerUrl);
   await client.call("Runtime.enable");
-  await client.call("Page.enable");
-  await client.call("Page.addScriptToEvaluateOnNewDocument", { source: payload });
   const probe = await client.evaluate(buildSessionProbeExpression());
   if (!probe?.eligible) {
     client.close();
     return null;
   }
+  await client.call("Page.enable");
+  await client.call("Page.addScriptToEvaluateOnNewDocument", { source: payload });
   await client.evaluate(payload);
   return { id: target.id, client, probe };
 }
 
-export async function removeCodexMeter({ cdpPort = 9334 } = {}) {
+export async function removeCodexMeter({
+  cdpPort = 9334,
+  appPath = process.env.CODEX_APP_PATH ?? defaultCodexAppPath,
+} = {}) {
   try {
-    await verifyMacListenerOwner(cdpPort);
+    await verifyMacListenerOwner(cdpPort, { appPath });
   } catch (error) {
     if (/No process owns/.test(error.message)) {
       return { cdpAvailable: false, removedTargets: 0 };
@@ -198,6 +256,7 @@ function waitForNextPoll(timeoutMs, signal) {
 export async function runCodexInjector({
   sessionsDirectory,
   cdpPort = 9334,
+  appPath = process.env.CODEX_APP_PATH ?? defaultCodexAppPath,
   pollIntervalMs = 1_000,
   targetDiscoveryIntervalMs = 5_000,
   historyFileLimit = 100,
@@ -228,14 +287,14 @@ export async function runCodexInjector({
   signal?.addEventListener("abort", () => void stop(), { once: true });
 
   try {
-    await verifyMacListenerOwner(cdpPort);
+    await verifyMacListenerOwner(cdpPort, { appPath });
     while (!stopping) {
       const nowMs = Date.now();
       if (nowMs - lastDiscoveryMs >= targetDiscoveryIntervalMs) {
         const targets = await listTargets(cdpPort);
         for (const target of targets) {
           if (attached.has(target.id)) continue;
-          const connection = await attachTarget(target, payload).catch(() => null);
+          const connection = await attachCodexTarget(target, payload).catch(() => null);
           if (connection) attached.set(target.id, connection);
         }
         lastDiscoveryMs = nowMs;

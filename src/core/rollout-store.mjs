@@ -173,6 +173,10 @@ export class RolloutStore {
     if (!force && now - this.lastDiscoveryMs < this.discoveryIntervalMs) return;
     const discovered = [];
     await walk(this.sessionsDirectory, discovered);
+    const discoveredPaths = new Set(discovered.map((file) => file.path));
+    for (const filePath of this.files.keys()) {
+      if (!discoveredPaths.has(filePath)) this.files.delete(filePath);
+    }
     for (const file of discovered) {
       const existing = this.files.get(file.path);
       if (existing == null) {
@@ -201,11 +205,19 @@ export class RolloutStore {
     );
     const selected = new Set(files.slice(0, this.historyFileLimit));
     const exactActiveFiles = files.filter((file) => activeIds.has(file.discoveredId));
-    const activeDirectories = new Set(
-      exactActiveFiles.map((file) => path.dirname(file.path)),
+    await runWithConcurrency(
+      exactActiveFiles,
+      this.readConcurrency,
+      (file) => this.#readMetadata(file),
+    );
+    const activeStartedAtMs = Math.min(
+      ...exactActiveFiles.map(
+        (file) => file.meta?.timestampMs ?? file.modifiedMs ?? Number.POSITIVE_INFINITY,
+      ),
     );
     const activeCandidates = files.filter((file) =>
-      activeDirectories.has(path.dirname(file.path)),
+      exactActiveFiles.includes(file) ||
+      (Number.isFinite(activeStartedAtMs) && file.modifiedMs >= activeStartedAtMs),
     );
     await runWithConcurrency(
       activeCandidates,
