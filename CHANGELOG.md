@@ -8,6 +8,7 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A reproducible, privacy-safe Codex demo scene and social video using the production Token Meter renderer.
 - Public project documentation, reproducible screenshots, CI, contribution guidance, and security policy.
 - Explicit Codex and Claude Code support matrix.
 
