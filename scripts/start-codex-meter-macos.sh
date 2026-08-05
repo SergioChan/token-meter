@@ -45,23 +45,7 @@ case "$PORT" in
     ;;
 esac
 
-if [ ! -d "$APP_PATH" ]; then
-  printf 'Codex application not found at %s\n' "$APP_PATH" >&2
-  printf 'Set CODEX_APP_PATH to the current application bundle.\n' >&2
-  exit 1
-fi
-
-BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Contents/Info.plist")"
-if [ "$BUNDLE_ID" != "com.openai.codex" ]; then
-  printf 'Refusing an application whose bundle identifier is %s\n' "$BUNDLE_ID" >&2
-  exit 1
-fi
-
-NODE="$APP_PATH/Contents/Resources/cua_node/bin/node"
-if [ ! -x "$NODE" ]; then
-  printf 'The bundled Codex Node runtime is missing: %s\n' "$NODE" >&2
-  exit 1
-fi
+NODE="$("$ROOT/scripts/verify-codex-app-macos.sh" "$APP_PATH")"
 
 ENDPOINT="http://127.0.0.1:$PORT/json/version"
 if ! /usr/bin/curl --silent --fail --max-time 1 "$ENDPOINT" >/dev/null 2>&1; then

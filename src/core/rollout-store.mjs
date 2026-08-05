@@ -166,13 +166,30 @@ export class RolloutStore {
     this.readConcurrency = readConcurrency;
     this.files = new Map();
     this.lastDiscoveryMs = 0;
+    this.discoveryDirty = true;
+  }
+
+  markDiscoveryDirty() {
+    this.discoveryDirty = true;
   }
 
   async discover({ force = false } = {}) {
     const now = Date.now();
-    if (!force && now - this.lastDiscoveryMs < this.discoveryIntervalMs) return;
+    if (
+      !force &&
+      !this.discoveryDirty &&
+      now - this.lastDiscoveryMs < this.discoveryIntervalMs
+    ) {
+      return;
+    }
+    this.discoveryDirty = false;
     const discovered = [];
-    await walk(this.sessionsDirectory, discovered);
+    try {
+      await walk(this.sessionsDirectory, discovered);
+    } catch (error) {
+      this.discoveryDirty = true;
+      throw error;
+    }
     const discoveredPaths = new Set(discovered.map((file) => file.path));
     for (const filePath of this.files.keys()) {
       if (!discoveredPaths.has(filePath)) this.files.delete(filePath);

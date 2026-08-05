@@ -228,3 +228,51 @@ test("a deleted rollout is removed from the live index without stopping refresh"
 
   assert.deepEqual(await store.refresh({ activeThreadIds: [id] }), []);
 });
+
+test("a filesystem notification makes a new child Agent discoverable immediately", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "token-meter-dirty-index-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const rootId = "00000000-0000-0000-0000-000000000030";
+  const childId = "00000000-0000-0000-0000-000000000031";
+  const rootPath = path.join(directory, `rollout-root-${rootId}.jsonl`);
+  await writeFile(
+    rootPath,
+    `${JSON.stringify({
+      timestamp: "2026-08-05T00:00:00.000Z",
+      type: "session_meta",
+      payload: {
+        id: rootId,
+        session_id: rootId,
+        source: "vscode",
+        thread_source: "user",
+      },
+    })}\n`,
+  );
+  const store = new RolloutStore({
+    sessionsDirectory: directory,
+    historyFileLimit: 0,
+    discoveryIntervalMs: 60_000,
+  });
+  await store.refresh({ activeThreadIds: [rootId] });
+  await writeFile(
+    path.join(directory, `rollout-child-${childId}.jsonl`),
+    `${JSON.stringify({
+      timestamp: "2026-08-05T00:00:01.000Z",
+      type: "session_meta",
+      payload: {
+        id: childId,
+        session_id: rootId,
+        source: { subagent: {} },
+        thread_source: "subagent",
+      },
+    })}\n`,
+  );
+
+  store.markDiscoveryDirty();
+  const files = await store.refresh({ activeThreadIds: [rootId] });
+
+  assert.deepEqual(
+    files.map((file) => file.discoveredId).sort(),
+    [rootId, childId],
+  );
+});

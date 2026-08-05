@@ -1,4 +1,5 @@
 import { readFile, realpath } from "node:fs/promises";
+import { watch } from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -189,6 +190,27 @@ async function verifyMacListenerOwner(cdpPort, { appPath = defaultCodexAppPath }
   });
 }
 
+export async function connectVerifiedCodexRenderer({
+  cdpPort = 9334,
+  appPath = process.env.CODEX_APP_PATH ?? defaultCodexAppPath,
+} = {}) {
+  await verifyMacListenerOwner(cdpPort, { appPath });
+  const targets = await listTargets(cdpPort);
+  for (const target of targets) {
+    const client = await CdpClient.connect(target.webSocketDebuggerUrl).catch(() => null);
+    if (client == null) continue;
+    try {
+      await client.call("Runtime.enable");
+      const probe = await client.evaluate(buildSessionProbeExpression());
+      if (probe?.eligible) return { client, target, probe };
+    } catch {
+      // Try the next validated app target.
+    }
+    client.close();
+  }
+  throw new Error("No verified Codex main renderer is available");
+}
+
 export async function attachCodexTarget(
   target,
   payload,
@@ -268,6 +290,19 @@ export async function runCodexInjector({
   const store = new RolloutStore({ sessionsDirectory, historyFileLimit: 0 });
   const engine = new MetricsEngine();
   const attached = new Map();
+  const sessionWatcher = (() => {
+    try {
+      const watcher = watch(
+        sessionsDirectory,
+        { recursive: true, persistent: false },
+        () => store.markDiscoveryDirty(),
+      );
+      watcher.on("error", () => store.markDiscoveryDirty());
+      return watcher;
+    } catch {
+      return null;
+    }
+  })();
   let lastDiscoveryMs = 0;
   let warmedHistoryFileLimit = 0;
   let stopping = false;
@@ -342,6 +377,7 @@ export async function runCodexInjector({
       await waitForNextPoll(pollIntervalMs, signal);
     }
   } finally {
+    sessionWatcher?.close();
     await stop();
   }
 }

@@ -34,11 +34,7 @@ case "$PORT" in
     ;;
 esac
 
-NODE="$APP_PATH/Contents/Resources/cua_node/bin/node"
-if [ ! -x "$NODE" ]; then
-  printf 'The bundled Codex Node runtime is missing: %s\n' "$NODE" >&2
-  exit 1
-fi
+NODE="$("$ROOT/scripts/verify-codex-app-macos.sh" "$APP_PATH")"
 
 PIDS="$(/usr/bin/pgrep -f "$ROOT/src/cli.mjs inject" || true)"
 for PID in $PIDS; do
