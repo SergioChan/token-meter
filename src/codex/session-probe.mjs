@@ -5,6 +5,12 @@ export function isThreadId(value) {
   return typeof value === "string" && THREAD_ID_PATTERN.test(value);
 }
 
+export function normalizeThreadId(value) {
+  if (typeof value !== "string") return null;
+  const candidate = value.startsWith("local:") ? value.slice(6) : value;
+  return isThreadId(candidate) ? candidate : null;
+}
+
 export function buildSessionProbeExpression() {
   const threadIdSource = THREAD_ID_PATTERN.source;
   return `(() => {
@@ -17,15 +23,24 @@ export function buildSessionProbeExpression() {
     const activeRow = document.querySelector(
       '[data-app-action-sidebar-thread-active="true"][data-app-action-sidebar-thread-id]'
     );
-    const activeId = activeRow?.getAttribute('data-app-action-sidebar-thread-id') ?? null;
+    const normalizeThreadId = (value) => {
+      if (typeof value !== 'string') return null;
+      const candidate = value.startsWith('local:') ? value.slice(6) : value;
+      return uuid.test(candidate) ? candidate : null;
+    };
+    const activeId = normalizeThreadId(
+      activeRow?.getAttribute('data-app-action-sidebar-thread-id') ?? null
+    );
     const routeMatch = String(location.pathname).match(/\\/thread\\/([^/?#]+)/);
-    const routeId = routeMatch == null ? null : decodeURIComponent(routeMatch[1]);
+    const routeId = normalizeThreadId(
+      routeMatch == null ? null : decodeURIComponent(routeMatch[1])
+    );
     let threadId = null;
     let bindingSource = null;
-    if (uuid.test(activeId ?? '')) {
+    if (activeId != null) {
       threadId = activeId;
       bindingSource = 'active-sidebar-row';
-    } else if (uuid.test(routeId ?? '')) {
+    } else if (routeId != null) {
       threadId = routeId;
       bindingSource = 'thread-route';
     }

@@ -45,6 +45,16 @@ test("session probe binds to the exact active sidebar thread", () => {
   assert.equal(result.bindingSource, "active-sidebar-row");
 });
 
+test("session probe normalizes Codex local thread identifiers", () => {
+  const result = runProbe({
+    activeId: `local:${threadId}`,
+    pathname: "/index.html",
+  });
+  assert.equal(result.eligible, true);
+  assert.equal(result.threadId, threadId);
+  assert.equal(result.bindingSource, "active-sidebar-row");
+});
+
 test("session probe falls back to the exact route and rejects ambiguous labels", () => {
   const result = runProbe({ activeId: "not-a-thread-id" });
   assert.equal(result.threadId, threadId);
