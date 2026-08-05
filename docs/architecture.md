@@ -12,7 +12,7 @@ The first implementation uses Codex rollout JSONL as a read-only compatibility a
 Current host support:
 
 - Codex Desktop on macOS: implemented.
-- Claude Code in Claude Desktop on macOS: adapter contract documented, implementation absent.
+- Claude Code in Claude Desktop on macOS: offline Session resolver, transcript collector, metrics adapter, and application identity verifier implemented; live renderer injection absent.
 - Codex Desktop on Windows and Linux: implementation absent.
 
 ## Modules
@@ -37,13 +37,28 @@ CodexInjector
   shadow-DOM UI updates
 ```
 
-The seam between the core and a host adapter is the snapshot shape returned by `MetricsEngine`. A future Claude Desktop collector can satisfy the same shape from confirmed transcript usage events without changing the meter's measurement semantics.
+The seam between the core and a host adapter is the snapshot shape returned by `MetricsEngine`. The Claude Desktop collector now satisfies that shape from confirmed transcript usage events; the live Claude renderer and lifecycle adapters remain pending.
+
+```text
+ClaudeDesktopSessionStore
+  exact Desktop sessionId -> cliSessionId mapping
+        |
+        v
+ClaudeTranscriptStore
+  bounded incremental reads
+  response-ID de-duplication
+  root + child-Agent aggregation
+        |
+        v
+MetricsEngine
+  shared Session, window, turn, rate, and alert snapshot
+```
 
 ## Invariants
 
 - A requested but unknown thread produces `status: "unbound"`; it never falls back to another thread.
 - Session totals include every loaded rollout with the same root `session_id`.
-- Cached input is retained as a breakdown but is not added on top of total tokens.
+- Codex uses its reported cumulative total directly, where cached input is already a subset of input. Claude transcript usage adds uncached input, cache creation, cache reads, and output because Anthropic reports those as separate fields.
 - Cumulative Session usage never decreases on compaction; active Context comes from the latest root-thread `last_token_usage` and may decrease.
 - A `context_compacted` event is retained only as a timestamp; no compacted summary or conversation content is retained.
 - Current-turn usage is a cumulative delta since the latest root user message, not `last_token_usage`.
@@ -107,10 +122,10 @@ The latest live validation recorded in this repository used Codex Desktop `26.73
 
 The Claude target is the Code tab inside Claude Desktop, not the Claude Code CLI status line. It can reuse the measurement and Shadow DOM presentation layers, but not the Codex Session probe, rollout reader, application verifier, or renderer allowlist.
 
-The planned macOS adapter has three host-specific responsibilities:
+The macOS adapter has three host-specific responsibilities:
 
-1. Verify the official Claude application, loopback debugging listener, process ownership, and semantic main renderer before injection.
-2. Read the exact Session selected in the Desktop UI and map its Desktop identity to the underlying Claude Code transcript identity.
-3. Convert confirmed, de-duplicated transcript usage events into the shared snapshot model without retaining message content.
+1. Verify the official Claude application, loopback debugging listener, process ownership, and semantic main renderer before injection. Application identity verification is implemented; listener and renderer verification remain pending.
+2. Read the exact Session selected in the Desktop UI and map its Desktop identity to the underlying Claude Code transcript identity. The fail-closed identity mapper is implemented; the live renderer probe remains pending.
+3. Convert confirmed, de-duplicated transcript usage events into the shared snapshot model without retaining message content. The bounded incremental collector and shared metrics path are implemented.
 
 Observed Desktop metadata and transcript formats are undocumented compatibility surfaces. Missing or ambiguous identity, remote-only telemetry, an unknown renderer, or an unsupported build must produce an unbound meter rather than a guessed Session. See [claude-code.md](claude-code.md).

@@ -8,7 +8,17 @@ The Claude Code CLI `statusLine` is explicitly out of scope for this adapter. It
 
 ## Current status
 
-Claude Code Desktop is **not supported by the current release**. The repository does not yet contain a Claude application verifier, renderer probe, injector, selected-Session resolver, transcript collector, installer, or Claude-specific live tests.
+Claude Code Desktop is **not supported end to end by the current release**. The offline measurement path is implemented, but the repository does not yet contain a live Claude renderer probe, injector, lifecycle controller, installer, or restart-approved UI tests.
+
+Implemented offline components:
+
+- A macOS application verifier for the canonical path, bundle identifier, code signature, Anthropic Team ID, and executable.
+- A bounded metadata index that resolves one exact Desktop `local_<uuid>` Session to one `cliSessionId` and fails closed on invalid, missing, or ambiguous identities.
+- A bounded incremental transcript collector for the exact root transcript and every discovered child-Agent transcript under that Session.
+- Response-level de-duplication that keeps one usage contribution per `message.id` and replaces an earlier partial snapshot when a later row updates the same response.
+- Content-discarding root-turn, terminal, abort, and compaction boundaries.
+- Shared Session, trailing-hour, current-turn, rate, historical baseline, alert, and child-Agent metrics.
+- A development-only `claude-snapshot` command and Claude-specific unit fixtures.
 
 Anthropic documents the Code tab as Claude Code's graphical Desktop interface, with multiple parallel sessions managed in a sidebar. Desktop uses the same underlying engine as the CLI but maintains separate Session history.
 
@@ -22,11 +32,12 @@ A read-only inspection of Claude Desktop for macOS on 2026-08-05 established the
 - The Code tab starts a bundled Claude Code engine with structured streaming enabled and a distinct resume identifier for each running Session.
 - Desktop Session metadata observed under `~/Library/Application Support/Claude/` contains both a Desktop-facing `sessionId` and an underlying `cliSessionId`.
 - Matching Claude Code JSONL transcripts under `~/.claude/projects/` contain timestamped assistant usage objects with input, output, cache-read, and cache-creation token fields.
+- The same response `message.id` can appear in several transcript rows. Root transcript samples repeated identical final usage, while child-Agent samples also contained partial-to-final usage updates. Summing rows would therefore materially overcount the workload.
 - Multiple Claude Code Session processes can run concurrently, so process recency cannot identify the Session currently selected in the UI.
 
 These observations demonstrate a plausible read-only identity and usage path. They are not public Anthropic APIs and must not be treated as stable contracts. Field names, paths, event semantics, and renderer structure may change between Desktop releases.
 
-## Planned architecture
+## Adapter architecture
 
 ```text
 Verified Claude Desktop main renderer
@@ -51,7 +62,25 @@ The complete meter must switch atomically when the user selects another Desktop 
 
 ## Usage accounting requirements
 
-Raw transcript events cannot be summed until their streaming and replay semantics are verified. The collector must prove how it handles partial messages, repeated message identifiers, resumed Sessions, retries, compaction, child agents, and counter resets.
+The collector never sums raw transcript rows. It applies this response-level procedure:
+
+1. Resolve the exact Desktop Session to its `cliSessionId` and project directory.
+2. Read only that root transcript and the child-Agent transcripts nested under that Session.
+3. Retain only response IDs, timestamps, event types, turn boundaries, and numerical usage fields.
+4. Key assistant usage by `message.id`. Identical repeated rows contribute once; if a later row has updated usage for the same ID, it replaces the earlier snapshot.
+5. Use the top-level response `usage` object and do not add its internal `iterations` breakdown again.
+6. Add one confirmed raw-workload contribution per unique response:
+
+```text
+raw tokens = input_tokens
+           + cache_creation_input_tokens
+           + cache_read_input_tokens
+           + output_tokens
+```
+
+Anthropic documents that `input_tokens` contains the uncached input after the final cache breakpoint, while cache creation and cache reads are reported separately. The total input processed is therefore their sum. See [Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) and the [Messages usage reference](https://platform.claude.com/docs/en/api/messages/create).
+
+This is a local raw-workload metric. It does not claim to reproduce Claude subscription-plan limits, API billing, or any undisclosed backend weighting.
 
 For each selected Session, the adapter must produce:
 
@@ -61,11 +90,24 @@ For each selected Session, the adapter must produce:
 - **Rate:** confirmed positive deltas in the trailing 60-second window, normalized to tokens per minute.
 - **Baseline and alert:** the same completed-turn historical model used by the Codex adapter.
 
+Claude's active context occupancy is intentionally unavailable in the current offline adapter. Transcript response usage proves processed workload, but it does not expose a stable, documented per-Session context-window occupancy value equivalent to Codex's active-context telemetry. The adapter returns `null` instead of guessing.
+
 The UI may animate between confirmed samples for responsiveness, but numerical totals must never invent unconfirmed usage.
+
+## Read-only development snapshot
+
+An exact local Session can be measured without restarting Claude or opening a debugging port:
+
+```bash
+npm run claude:snapshot -- \
+  --desktop-session-id local_<desktop-session-uuid>
+```
+
+The Desktop identity is the `local_<uuid>` metadata filename under `~/Library/Application Support/Claude/claude-code-sessions/`. This command is a development and reconciliation surface, not the final user workflow; the injected adapter must obtain the selected identity from the verified renderer automatically.
 
 ## Injection and security boundary
 
-The Claude adapter should follow the Codex adapter's fail-closed principles while using Claude-specific identifiers and renderer markers:
+The Claude adapter follows the Codex adapter's fail-closed principles while using Claude-specific identifiers and renderer markers:
 
 1. Verify the exact application path, bundle identifier, code signature, and Anthropic signing Team ID.
 2. Bind the Chromium debugging endpoint to `127.0.0.1` only.
@@ -84,7 +126,7 @@ The following items require a restart-approved live probe against Claude Desktop
 - The correct main-renderer target and the rejection rules for every auxiliary window.
 - Navigation behavior when moving between Chat, Cowork, and Code.
 - Session switching across local, SSH, and remote environments.
-- Exact de-duplication rules for streamed and resumed transcript usage events.
+- Resumed-Session behavior across Desktop upgrades and transcript relocation.
 - Whether remote and SSH Sessions expose sufficient local confirmed usage for the same accounting guarantees.
 
 No public Claude Desktop extension API currently documented by Anthropic provides a persistent arbitrary host-UI overlay. Desktop Extensions and Claude Code plugins expose MCP, skills, agents, hooks, and related capabilities; they are not a documented API for injecting a permanent widget into the Desktop shell. The planned overlay is therefore an unofficial, version-sensitive local compatibility adapter.
@@ -93,15 +135,15 @@ No public Claude Desktop extension API currently documented by Anthropic provide
 
 Claude Code Desktop support must not be marked complete until the repository provides:
 
-1. A Claude-specific application verifier and safe macOS start/stop flow.
+1. A Claude-specific application verifier and safe macOS start/stop flow. The verifier is implemented; lifecycle flow is pending.
 2. A semantic main-renderer and exact selected-Session probe.
-3. A versioned Desktop `sessionId` to transcript identity resolver.
-4. A bounded, content-discarding, de-duplicating usage collector.
-5. Session, trailing-hour, current-turn, rate, baseline, and alert metrics.
+3. A versioned Desktop `sessionId` to transcript identity resolver. Implemented for the inspected local metadata format.
+4. A bounded, content-discarding, de-duplicating usage collector. Implemented for local root and child-Agent transcripts.
+5. Session, trailing-hour, current-turn, rate, baseline, and alert metrics. Implemented for read-only local snapshots.
 6. The injected lower-right meter with atomic Session switching.
 7. Unit fixtures for duplicate, partial, resumed, reset, and unknown-Session cases.
 8. Live tests covering Session switches, simultaneous Sessions, navigation, cleanup, and restart.
 9. Accuracy reconciliation against known transcript usage samples.
 10. Clear compatibility, privacy, uninstall, and recovery documentation.
 
-Until every applicable criterion passes, the public support matrix must continue to say **Not implemented**.
+Until every applicable criterion passes, the public support matrix must continue to say **Not implemented end to end**.
