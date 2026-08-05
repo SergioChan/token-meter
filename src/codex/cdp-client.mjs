@@ -42,14 +42,14 @@ export class CdpClient {
       socket.addEventListener("open", resolve, { once: true });
       socket.addEventListener(
         "error",
-        () => reject(new Error("Unable to connect to the Codex CDP target")),
+        () => reject(new Error("Unable to connect to the desktop CDP target")),
         { once: true },
       );
     });
     await withTimeout(
       opened,
       timeoutMs,
-      "Timed out connecting to the Codex CDP target",
+      "Timed out connecting to the desktop CDP target",
     );
     return new CdpClient(socket);
   }
@@ -82,7 +82,7 @@ export class CdpClient {
       throw new Error(
         response.exceptionDetails.exception?.description ??
           response.exceptionDetails.text ??
-          "Codex renderer evaluation failed",
+          "Desktop renderer evaluation failed",
       );
     }
     return response.result?.value;
