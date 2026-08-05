@@ -276,3 +276,57 @@ test("a filesystem notification makes a new child Agent discoverable immediately
     [rootId, childId],
   );
 });
+
+test("refresh survives a rollout file removed between discovery and read", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "token-meter-rollout-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const threadId = "019fc0bf-d10c-7472-bb0e-fd6f0df8ab3e";
+  const filePath = path.join(
+    directory,
+    `rollout-2026-08-01T21-33-44-${threadId}.jsonl`,
+  );
+  await writeFile(
+    filePath,
+    `${JSON.stringify({
+      timestamp: "2026-08-01T21:33:44.000Z",
+      type: "session_meta",
+      payload: {
+        id: threadId,
+        session_id: threadId,
+        source: "vscode",
+        thread_source: "user",
+      },
+    })}\n`,
+  );
+
+  const store = new RolloutStore({
+    sessionsDirectory: directory,
+    discoveryIntervalMs: 60_000,
+  });
+
+  // Discover first, then remove the file before any metadata/appended read.
+  await store.discover({ force: true });
+  await rm(filePath);
+  const files = await store.refresh({ activeThreadIds: [threadId] });
+  assert.deepEqual(files, []);
+
+  // Also exercise the appended-read path: cached state, then file disappears.
+  await writeFile(
+    filePath,
+    `${JSON.stringify({
+      timestamp: "2026-08-01T21:33:44.000Z",
+      type: "session_meta",
+      payload: {
+        id: threadId,
+        session_id: threadId,
+        source: "vscode",
+        thread_source: "user",
+      },
+    })}\n`,
+  );
+  await store.markDiscoveryDirty();
+  await store.refresh({ activeThreadIds: [threadId] });
+  await rm(filePath);
+  const cached = await store.refresh({ activeThreadIds: [threadId] });
+  assert.equal(cached.length, 1);
+});
