@@ -229,7 +229,7 @@ The offline adapter foundation is now implemented and tested:
 - The macOS verifier checks the canonical Claude application path, bundle identifier, code signature, Anthropic Team ID, and executable.
 - The Session resolver maps one exact Desktop `local_<uuid>` identity to its underlying Claude Code transcript identity and fails closed on missing or ambiguous metadata.
 - The bounded incremental collector reads the exact root transcript plus its child-Agent transcripts, discards message content, de-duplicates repeated response rows by `message.id`, and replaces partial usage snapshots with the latest confirmed snapshot.
-- The shared metrics engine produces Session, trailing-hour, current-turn, rate, baseline, alert, compaction, and child-Agent readings from those events.
+- The shared metrics engine produces Session, trailing-hour, current-turn, rate, baseline, alert, compaction, child-Agent, and latest root-context readings from those events.
 - Fixtures cover duplicate, partial, appended, truncated, oversized, switched, unknown, and ambiguous Session cases.
 - The dormant fail-closed injector verifies the Claude application and CDP listener owner, rejects untrusted targets, requires an exact `/code/<local_uuid>` binding with semantic Code-page markers, and registers the UI script only after that probe passes. It is not exposed as a public launcher while the host authorization prerequisite is unavailable.
 
@@ -250,6 +250,16 @@ raw tokens = input_tokens
 ```
 
 Repeated transcript rows are not added again. This follows Anthropic's documented cache-token breakdown, where `input_tokens` excludes cache-read and cache-creation tokens. It remains a local observability metric, not a subscription-plan or billing total. See [Anthropic's prompt caching documentation](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+
+Claude `ACTIVE CONTEXT` uses the selected root transcript's most recent input-side usage snapshot:
+
+```text
+active context = input_tokens
+               + cache_creation_input_tokens
+               + cache_read_input_tokens
+```
+
+This is current context occupancy, not cumulative Session workload, and matches Claude Code's documented status-line semantics. Output tokens are excluded from the context percentage. A compaction clears the reading until the next API response supplies a fresh usage snapshot. The transcript does not contain the model context-window size; a native Desktop companion can read the exact formatted denominator from the eligible Code window's Accessibility context label, while the standalone `claude-snapshot` command leaves that denominator unavailable instead of inferring it from a model name. See [Claude Code status-line data](https://code.claude.com/docs/en/statusline#available-data).
 
 The target is the graphical Code tab documented by Anthropic, not a terminal status line. The intended adapter is:
 

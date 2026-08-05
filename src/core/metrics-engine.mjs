@@ -151,7 +151,15 @@ export class MetricsEngine {
     const sessionId = root.meta.sessionId;
     const sessionFiles = files.filter((file) => file.meta?.sessionId === sessionId);
     const latestRootUsage = root.usage.at(-1) ?? null;
-    const contextTokens = latestRootUsage?.last?.totalTokens ?? null;
+    const latestCompactedAtMs = root.contextCompactions?.at(-1) ?? null;
+    const hasFreshContextUsage =
+      latestRootUsage != null &&
+      (latestCompactedAtMs == null ||
+        latestRootUsage.timestampMs > latestCompactedAtMs);
+    const contextTokens =
+      hasFreshContextUsage
+        ? (latestRootUsage.contextTokens ?? latestRootUsage.last?.totalTokens ?? null)
+        : null;
     const contextWindowTokens = latestRootUsage?.contextWindow ?? null;
     const sessionStartedAtMs = Math.min(
       ...sessionFiles.map((file) => file.meta?.timestampMs ?? Number.POSITIVE_INFINITY),

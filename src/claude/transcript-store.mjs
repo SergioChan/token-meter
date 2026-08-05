@@ -460,6 +460,7 @@ export class ClaudeTranscriptStore {
         timestampMs: event.timestampMs,
         total: addBreakdown(cumulative, event.usage),
         last: null,
+        contextTokens: file.isRoot ? event.usage.inputTokens : null,
         contextWindow: null,
       }));
       const earliestTimestampMs = earliestEventTimestamp(

@@ -261,6 +261,97 @@ test("collector consumes appended rows incrementally and resets after truncation
   assert.deepEqual(files[0].userMessages, [10]);
 });
 
+test("collector exposes the latest root input usage as active context", async (context) => {
+  const paths = await fixture(context);
+  await writeFile(
+    paths.rootPath,
+    jsonl([
+      user(0),
+      assistant(
+        1,
+        "msg-context-1",
+        {
+          input_tokens: 10,
+          cache_creation_input_tokens: 20,
+          cache_read_input_tokens: 30,
+          output_tokens: 40,
+        },
+        { stopReason: "end_turn" },
+      ),
+      user(2),
+      assistant(
+        3,
+        "msg-context-2",
+        {
+          input_tokens: 100,
+          cache_creation_input_tokens: 200,
+          cache_read_input_tokens: 300,
+          output_tokens: 400,
+        },
+        { stopReason: "end_turn" },
+      ),
+    ]),
+  );
+
+  const store = new ClaudeTranscriptStore({
+    projectsDirectory: paths.projectsDirectory,
+  });
+  const files = await store.refresh({ session: resolvedSession() });
+  const snapshot = new MetricsEngine().snapshot(files, {
+    threadId: desktopSessionId,
+    nowMs: 4,
+    hostName: "Claude Desktop",
+  });
+
+  assert.equal(snapshot.session.totalTokens, 1_100);
+  assert.equal(snapshot.context.tokens, 600);
+  assert.equal(snapshot.context.windowTokens, null);
+  assert.equal(snapshot.context.percent, null);
+
+  await appendFile(
+    paths.rootPath,
+    jsonl([
+      user(5, "private compacted context", {
+        isCompactSummary: true,
+        isVisibleInTranscriptOnly: true,
+      }),
+    ]),
+  );
+  let refreshed = await store.refresh({ session: resolvedSession() });
+  let refreshedSnapshot = new MetricsEngine().snapshot(refreshed, {
+    threadId: desktopSessionId,
+    nowMs: 6,
+    hostName: "Claude Desktop",
+  });
+  assert.equal(refreshedSnapshot.session.totalTokens, 1_100);
+  assert.equal(refreshedSnapshot.context.tokens, null);
+
+  await appendFile(
+    paths.rootPath,
+    jsonl([
+      assistant(
+        7,
+        "msg-context-3",
+        {
+          input_tokens: 100,
+          cache_creation_input_tokens: 200,
+          cache_read_input_tokens: 400,
+          output_tokens: 500,
+        },
+        { stopReason: "end_turn" },
+      ),
+    ]),
+  );
+  refreshed = await store.refresh({ session: resolvedSession() });
+  refreshedSnapshot = new MetricsEngine().snapshot(refreshed, {
+    threadId: desktopSessionId,
+    nowMs: 8,
+    hostName: "Claude Desktop",
+  });
+  assert.equal(refreshedSnapshot.session.totalTokens, 2_300);
+  assert.equal(refreshedSnapshot.context.tokens, 700);
+});
+
 test("collector reads through bounded chunks and skips oversized transcript rows", async (context) => {
   const paths = await fixture(context);
   await writeFile(

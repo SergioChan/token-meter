@@ -106,7 +106,9 @@ For each selected Session, the adapter must produce:
 - **Rate:** confirmed positive deltas in the trailing 60-second window, normalized to tokens per minute.
 - **Baseline and alert:** the same completed-turn historical model used by the Codex adapter.
 
-Claude's active context occupancy is intentionally unavailable in the current offline adapter. Transcript response usage proves processed workload, but it does not expose a stable, documented per-Session context-window occupancy value equivalent to Codex's active-context telemetry. The adapter returns `null` instead of guessing.
+Claude active-context occupancy comes from the selected root transcript's latest assistant usage snapshot. The numerator is `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`; output tokens are intentionally excluded because Anthropic documents `used_percentage` as input-side usage. This latest snapshot is current context, while the cumulative sum of de-duplicated response usage remains the raw-workload Session meter. A compaction invalidates current context until the next API response repopulates usage.
+
+The transcript does not contain `context_window_size`. The tested Desktop Code surface exposes a formatted ratio such as `596.0k / 1.0M` through Accessibility, so a native companion can combine the exact transcript numerator with that window denominator. The read-only CLI snapshot has no window-bound Accessibility source and returns a `null` denominator instead of inferring one from the model name. See [Claude Code status-line data](https://code.claude.com/docs/en/statusline#available-data) and [selected-Session signal research](research/claude-selected-session-signals.md).
 
 The UI may animate between confirmed samples for responsiveness, but numerical totals must never invent unconfirmed usage.
 

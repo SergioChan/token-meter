@@ -65,6 +65,7 @@ ClaudeInjector
 - A requested but unknown thread produces `status: "unbound"`; it never falls back to another thread.
 - Session totals include every loaded rollout with the same root `session_id`.
 - Codex uses its reported cumulative total directly, where cached input is already a subset of input. Claude transcript usage adds uncached input, cache creation, cache reads, and output because Anthropic reports those as separate fields.
+- Claude active Context is a separate non-cumulative reading from the selected root response: uncached input plus cache creation plus cache reads. Output is excluded. A root compaction invalidates it until the next response. The transcript does not carry the context-window size, so only a verified window adapter may supply that denominator.
 - Cumulative Session usage never decreases on compaction; active Context comes from the latest root-thread `last_token_usage` and may decrease.
 - A `context_compacted` event is retained only as a timestamp; no compacted summary or conversation content is retained.
 - Current-turn usage is a cumulative delta since the latest root user message, not `last_token_usage`.
