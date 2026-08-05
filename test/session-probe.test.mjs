@@ -5,7 +5,7 @@ import {
   isThreadId,
 } from "../src/codex/session-probe.mjs";
 
-const threadId = "019fd06a-f146-7b03-9358-2c3dc15f50ac";
+const threadId = "11111111-2222-4333-8444-555555555555";
 
 function runProbe({ activeId = threadId, pathname = `/thread/${threadId}` } = {}) {
   const mainSurface = {};

@@ -10,7 +10,7 @@ Reference revisions:
 
 ## Executive summary
 
-A persistent Token Meter in the lower-right corner of the existing Codex Desktop interface is feasible, but it is not supported by the documented Codex plugin UI surface. The practical MVP therefore needs two independent mechanisms:
+A persistent Token Meter in the lower-right corner of the existing Codex Desktop interface is feasible, but it is not supported by the documented Codex plugin UI surface. The practical implementation therefore needs two independent mechanisms:
 
 1. A local, read-only collector that tails trusted token-usage events and maintains session, rolling-hour, per-turn, rate, and historical anomaly state.
 2. An unofficial Chromium DevTools Protocol (CDP) injector, modeled on Codex Dream Skin, that mounts a small shadow-DOM meter in the existing renderer.
@@ -151,7 +151,7 @@ Codex records token usage after a model completion rather than once per streamed
 
 ## 7. Anomaly detection
 
-A global arithmetic average is too sensitive to outliers and ignores model, reasoning effort, tools, and subagents. The MVP uses completed historical turns to derive a median, median absolute deviation, mean, and high percentile. It requires a minimum observation time and token count before alerting.
+A global arithmetic average is too sensitive to outliers and ignores model, reasoning effort, tools, and subagents. Token Meter uses completed historical turns to derive a median, median absolute deviation, mean, and high percentile. It requires a minimum observation time and token count before alerting.
 
 The initial warning threshold is the greater of:
 
@@ -212,4 +212,3 @@ Proceed in this order:
 8. Add Claude Code using OTel plus its native status line.
 
 The concept is viable. The telemetry is sufficiently rich. The main product risk is presenting version-sensitive desktop injection as if it were a stable official Codex UI contribution point.
-

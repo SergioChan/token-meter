@@ -1,14 +1,36 @@
 {
   "name": "token-meter",
   "version": "0.1.0",
-  "description": "A session-aware live token meter for Codex Desktop.",
+  "description": "An open-source, session-aware live token meter for Codex Desktop.",
   "type": "module",
   "private": true,
+  "license": "MIT",
+  "author": "Sergio Chan",
+  "homepage": "https://github.com/SergioChan/token-meter#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SergioChan/token-meter.git"
+  },
+  "bugs": {
+    "url": "https://github.com/SergioChan/token-meter/issues"
+  },
+  "keywords": [
+    "codex",
+    "token-meter",
+    "agent-observability",
+    "token-usage",
+    "macos"
+  ],
+  "os": [
+    "darwin"
+  ],
   "engines": {
     "node": ">=22.12.0"
   },
   "scripts": {
     "check": "node scripts/check.mjs",
+    "ci": "npm run check && npm test",
+    "screenshots": "node scripts/capture-readme-screenshots.mjs",
     "snapshot": "node src/cli.mjs snapshot",
     "codex:inject": "node src/cli.mjs inject",
     "codex:remove": "node src/cli.mjs remove",

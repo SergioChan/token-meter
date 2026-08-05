@@ -9,6 +9,12 @@ Token Meter is a local desktop enhancement with a small core and host adapters. 
 
 The first implementation uses Codex rollout JSONL as a read-only compatibility adapter and loopback CDP as an unofficial UI adapter.
 
+Current host support:
+
+- Codex Desktop on macOS: implemented.
+- Claude Code: adapter contract documented, implementation absent.
+- Codex Desktop on Windows and Linux: implementation absent.
+
 ## Modules
 
 ```text
@@ -42,10 +48,12 @@ The seam between the core and a host adapter is the snapshot shape returned by `
 - Prompt, reasoning, tool, and assistant content are never retained by the parser.
 - Numerical UI values move only toward confirmed snapshots.
 - CDP connections are loopback-only and main-renderer-only.
+- The official Codex bundle path, bundle ID, code signature, and signing Team ID are verified before attachment.
+- A renderer must pass the semantic probe before any persistent injection script is registered.
 
 ## Session switching
 
-The Codex adapter polls the verified semantic active-thread attribute once per second. When the UUID changes, it requests a snapshot for the new root thread and atomically updates the entire meter. A missing or invalid UUID produces an unbound card.
+The Codex adapter polls the verified semantic active-thread attribute once per second. When the UUID changes, it requests a snapshot for the new root thread and atomically updates the entire meter. A missing or invalid UUID produces an unbound card. Child rollouts are indexed by root Session identity even when they were created in a later date directory. A recursive filesystem watcher invalidates the rollout index when a new child appears; the ten-second discovery interval remains a fallback rather than the normal update path.
 
 ## Session versus thread
 
@@ -68,3 +76,9 @@ Desktop injection is version-sensitive. Supporting a Codex release requires:
 - A live navigation and cleanup smoke test.
 
 Unknown builds fail closed until verified.
+
+The latest live validation recorded in this repository used Codex Desktop `26.730.61639 (6234)` on macOS.
+
+## Claude Code adapter boundary
+
+Claude Code cannot reuse the Codex UI or rollout adapters. It requires an OpenTelemetry collector keyed by `session.id` and `prompt.id`, plus a native status-line renderer and an explicit settings installation step. See [claude-code.md](claude-code.md).
