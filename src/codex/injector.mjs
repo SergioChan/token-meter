@@ -323,56 +323,89 @@ export async function runCodexInjector({
 
   try {
     await verifyMacListenerOwner(cdpPort, { appPath });
+    let cdpVerified = true;
+    let lastCdpErrorLoggedMs = 0;
     while (!stopping) {
-      const nowMs = Date.now();
-      if (nowMs - lastDiscoveryMs >= targetDiscoveryIntervalMs) {
-        const targets = await listTargets(cdpPort);
-        for (const target of targets) {
-          if (attached.has(target.id)) continue;
-          const connection = await attachCodexTarget(target, payload).catch(() => null);
-          if (connection) attached.set(target.id, connection);
-        }
-        lastDiscoveryMs = nowMs;
-      }
-
-      const probes = [];
-      for (const connection of attached.values()) {
-        try {
-          connection.probe = await connection.client.evaluate(
-            buildSessionProbeExpression(),
+      try {
+        if (!cdpVerified) {
+          await verifyMacListenerOwner(cdpPort, { appPath });
+          cdpVerified = true;
+          console.error(
+            `[token-meter] CDP listener on port ${cdpPort} is available again; resuming.`,
           );
-          probes.push(connection.probe);
-        } catch {
-          connection.failed = true;
         }
-      }
-      for (const [id, connection] of attached) {
-        if (connection.failed || !connection.probe?.eligible) {
-          connection.client.close();
-          attached.delete(id);
+        const nowMs = Date.now();
+        if (nowMs - lastDiscoveryMs >= targetDiscoveryIntervalMs) {
+          const targets = await listTargets(cdpPort);
+          for (const target of targets) {
+            if (attached.has(target.id)) continue;
+            const connection = await attachCodexTarget(target, payload).catch(() => null);
+            if (connection) attached.set(target.id, connection);
+          }
+          lastDiscoveryMs = nowMs;
+        }
+      } catch (error) {
+        cdpVerified = false;
+        for (const connection of attached.values()) connection.failed = true;
+        const nowMs = Date.now();
+        if (nowMs - lastCdpErrorLoggedMs >= 60_000) {
+          lastCdpErrorLoggedMs = nowMs;
+          console.error(
+            `[token-meter] CDP temporarily unavailable (${error?.message ?? error}); retrying.`,
+          );
         }
       }
 
-      const activeThreadIds = probes.map((probe) => probe.threadId).filter(Boolean);
-      store.historyFileLimit = warmedHistoryFileLimit;
-      const files = await store.refresh({ activeThreadIds });
-      for (const connection of attached.values()) {
-        const snapshot = engine.snapshot(files, {
-          threadId: connection.probe.threadId,
-          nowMs,
-        });
-        snapshot.binding = {
-          source: connection.probe.bindingSource,
-          exact: Boolean(connection.probe.threadId),
-        };
-        await connection.client.evaluate(updateExpression(snapshot)).catch(() => {
-          connection.failed = true;
-        });
+      if (cdpVerified && !stopping) {
+        const probes = [];
+        for (const connection of attached.values()) {
+          try {
+            connection.probe = await connection.client.evaluate(
+              buildSessionProbeExpression(),
+            );
+            probes.push(connection.probe);
+          } catch {
+            connection.failed = true;
+          }
+        }
+        for (const [id, connection] of attached) {
+          if (connection.failed || !connection.probe?.eligible) {
+            connection.client.close();
+            attached.delete(id);
+          }
+        }
+
+        const activeThreadIds = probes.map((probe) => probe.threadId).filter(Boolean);
+        store.historyFileLimit = warmedHistoryFileLimit;
+        try {
+          const files = await store.refresh({ activeThreadIds });
+          for (const connection of attached.values()) {
+            const snapshot = engine.snapshot(files, {
+              threadId: connection.probe.threadId,
+              nowMs: Date.now(),
+            });
+            snapshot.binding = {
+              source: connection.probe.bindingSource,
+              exact: Boolean(connection.probe.threadId),
+            };
+            await connection.client.evaluate(updateExpression(snapshot)).catch(() => {
+              connection.failed = true;
+            });
+          }
+        } catch (error) {
+          const nowMs = Date.now();
+          if (nowMs - lastCdpErrorLoggedMs >= 60_000) {
+            lastCdpErrorLoggedMs = nowMs;
+            console.error(
+              `[token-meter] poll error (${error?.message ?? error}); continuing.`,
+            );
+          }
+        }
+        warmedHistoryFileLimit = Math.min(
+          historyFileLimit,
+          warmedHistoryFileLimit + historyFilesPerPoll,
+        );
       }
-      warmedHistoryFileLimit = Math.min(
-        historyFileLimit,
-        warmedHistoryFileLimit + historyFilesPerPoll,
-      );
 
       await waitForNextPoll(pollIntervalMs, signal);
     }
