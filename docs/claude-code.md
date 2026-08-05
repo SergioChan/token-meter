@@ -8,7 +8,7 @@ The Claude Code CLI `statusLine` is explicitly out of scope for this adapter. It
 
 ## Current status
 
-Claude Code Desktop is **not supported end to end by the current release**. The offline measurement path is implemented, but the repository does not yet contain a live Claude renderer probe, injector, lifecycle controller, installer, or restart-approved UI tests.
+Claude Code Desktop is **not supported end to end by the current release**. The offline measurement path and injector adapter are implemented, but the renderer adapter has not been attached to a live Claude process. The repository does not yet contain a restart-safe Claude lifecycle controller, installer, or restart-approved UI tests.
 
 Implemented offline components:
 
@@ -19,6 +19,8 @@ Implemented offline components:
 - Content-discarding root-turn, terminal, abort, and compaction boundaries.
 - Shared Session, trailing-hour, current-turn, rate, historical baseline, alert, and child-Agent metrics.
 - A development-only `claude-snapshot` command and Claude-specific unit fixtures.
+- A fail-closed Code renderer probe derived from the installed application's `/code/<local_uuid>` route, active-link `aria-current`, and semantic Session-header marker.
+- A Claude injector adapter that verifies the signed application and listener process tree, rejects untrusted CDP targets, and registers the persistent script only after the semantic probe succeeds.
 
 Anthropic documents the Code tab as Claude Code's graphical Desktop interface, with multiple parallel sessions managed in a sidebar. Desktop uses the same underlying engine as the CLI but maintains separate Session history.
 
@@ -136,11 +138,11 @@ No public Claude Desktop extension API currently documented by Anthropic provide
 Claude Code Desktop support must not be marked complete until the repository provides:
 
 1. A Claude-specific application verifier and safe macOS start/stop flow. The verifier is implemented; lifecycle flow is pending.
-2. A semantic main-renderer and exact selected-Session probe.
+2. A semantic main-renderer and exact selected-Session probe. Implemented from static bundle evidence; live validation is pending.
 3. A versioned Desktop `sessionId` to transcript identity resolver. Implemented for the inspected local metadata format.
 4. A bounded, content-discarding, de-duplicating usage collector. Implemented for local root and child-Agent transcripts.
 5. Session, trailing-hour, current-turn, rate, baseline, and alert metrics. Implemented for read-only local snapshots.
-6. The injected lower-right meter with atomic Session switching.
+6. The injected lower-right meter with atomic Session switching. Injector code is implemented; live switching is pending.
 7. Unit fixtures for duplicate, partial, resumed, reset, and unknown-Session cases.
 8. Live tests covering Session switches, simultaneous Sessions, navigation, cleanup, and restart.
 9. Accuracy reconciliation against known transcript usage samples.

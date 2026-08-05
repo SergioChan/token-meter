@@ -13,6 +13,7 @@ The project follows [Semantic Versioning](https://semver.org/).
 - A visible active-Context reading that follows Codex compaction independently from cumulative Session usage.
 - A per-user macOS LaunchAgent installer and uninstaller for normal Dock launches and login persistence.
 - An offline Claude Desktop Session resolver, de-duplicating transcript collector, read-only snapshot command, and application identity verifier.
+- A fail-closed Claude Desktop Code renderer probe and injector adapter, pending restart-approved live validation.
 
 ### Changed
 

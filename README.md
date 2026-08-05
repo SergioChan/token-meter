@@ -98,7 +98,7 @@ _Screenshots are captured from the real injected Shadow DOM runtime with control
 | Host | Status | UI | Usage source |
 | --- | --- | --- | --- |
 | Codex Desktop, macOS | Supported | Injected lower-right overlay | Local rollout token events |
-| Claude Code in Claude Desktop, macOS | Not implemented end to end | Planned injected lower-right overlay | Offline Desktop Session resolver and transcript collector implemented; live UI binding pending |
+| Claude Code in Claude Desktop, macOS | Not implemented end to end | Offline injector adapter implemented; live validation pending | Offline Desktop Session resolver and transcript collector implemented |
 | Codex Desktop, Windows/Linux | Not implemented | — | — |
 
 Validated locally against Codex Desktop `26.730.61639 (6234)`. Codex DOM and rollout formats are compatibility surfaces, so newer builds must pass the release checks in [the architecture document](docs/architecture.md).
@@ -218,7 +218,7 @@ npm run screenshots
 
 ## Claude Desktop status
 
-**No: this repository does not yet support the complete Token Meter experience inside Claude Desktop.** The live renderer probe, injected overlay, lifecycle controller, and restart-approved UI validation are still missing.
+**No: this repository does not yet support the complete Token Meter experience inside Claude Desktop.** The renderer probe and injector adapter are implemented from static application evidence and tested with fixtures, but they have not been connected to a live Claude renderer. The restart-safe lifecycle controller, installer, and restart-approved UI validation are still missing.
 
 The offline adapter foundation is now implemented and tested:
 
@@ -227,6 +227,7 @@ The offline adapter foundation is now implemented and tested:
 - The bounded incremental collector reads the exact root transcript plus its child-Agent transcripts, discards message content, de-duplicates repeated response rows by `message.id`, and replaces partial usage snapshots with the latest confirmed snapshot.
 - The shared metrics engine produces Session, trailing-hour, current-turn, rate, baseline, alert, compaction, and child-Agent readings from those events.
 - Fixtures cover duplicate, partial, appended, truncated, oversized, switched, unknown, and ambiguous Session cases.
+- The fail-closed injector verifies the Claude application and CDP listener owner, rejects untrusted targets, requires an exact `/code/<local_uuid>` binding with semantic Code-page markers, and registers the persistent UI script only after that probe passes.
 
 A development-only read-only snapshot can be generated without opening a debugging port or restarting Claude:
 
@@ -254,7 +255,7 @@ The target is the graphical Code tab documented by Anthropic, not a terminal sta
 4. Use the implemented content-discarding collector to aggregate confirmed usage events into Session, trailing-hour, current-turn, rate, and baseline snapshots.
 5. Switch the complete meter atomically whenever the selected Desktop Session changes.
 
-The local files and renderer structure are undocumented, version-sensitive compatibility surfaces. The exact selected-Session renderer binding still requires an explicit restart-approved live CDP probe. Until the injector, restart-safe lifecycle, Session-switch tests, and live accuracy checks pass, the support status remains **Not implemented end to end**.
+The local files and renderer structure are undocumented, version-sensitive compatibility surfaces. The selected-Session probe and injector still require an explicit restart-approved live CDP validation. Until the restart-safe lifecycle, real Session-switch tests, and live accuracy checks pass, the support status remains **Not implemented end to end**.
 
 See [the Claude Desktop adapter status](docs/claude-code.md). Anthropic's public product documentation confirms that [the Code tab is Claude Code's graphical Desktop interface](https://code.claude.com/docs/en/desktop).
 

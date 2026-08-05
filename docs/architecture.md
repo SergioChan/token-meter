@@ -12,7 +12,7 @@ The first implementation uses Codex rollout JSONL as a read-only compatibility a
 Current host support:
 
 - Codex Desktop on macOS: implemented.
-- Claude Code in Claude Desktop on macOS: offline Session resolver, transcript collector, metrics adapter, and application identity verifier implemented; live renderer injection absent.
+- Claude Code in Claude Desktop on macOS: offline Session resolver, transcript collector, metrics adapter, application verifier, renderer probe, and injector adapter implemented; live renderer validation and lifecycle integration absent.
 - Codex Desktop on Windows and Linux: implementation absent.
 
 ## Modules
@@ -52,6 +52,12 @@ ClaudeTranscriptStore
         v
 MetricsEngine
   shared Session, window, turn, rate, and alert snapshot
+        |
+        v
+ClaudeInjector
+  verified listener ownership
+  semantic Code renderer probe
+  Shadow DOM updates
 ```
 
 ## Invariants
@@ -124,8 +130,8 @@ The Claude target is the Code tab inside Claude Desktop, not the Claude Code CLI
 
 The macOS adapter has three host-specific responsibilities:
 
-1. Verify the official Claude application, loopback debugging listener, process ownership, and semantic main renderer before injection. Application identity verification is implemented; listener and renderer verification remain pending.
-2. Read the exact Session selected in the Desktop UI and map its Desktop identity to the underlying Claude Code transcript identity. The fail-closed identity mapper is implemented; the live renderer probe remains pending.
+1. Verify the official Claude application, loopback debugging listener, process ownership, and semantic main renderer before injection. The fail-closed verification code is implemented; live process and renderer validation remain pending.
+2. Read the exact Session selected in the Desktop UI and map its Desktop identity to the underlying Claude Code transcript identity. The route/current-link conflict detector and fail-closed identity mapper are implemented; live Session-switch validation remains pending.
 3. Convert confirmed, de-duplicated transcript usage events into the shared snapshot model without retaining message content. The bounded incremental collector and shared metrics path are implemented.
 
 Observed Desktop metadata and transcript formats are undocumented compatibility surfaces. Missing or ambiguous identity, remote-only telemetry, an unknown renderer, or an unsupported build must produce an unbound meter rather than a guessed Session. See [claude-code.md](claude-code.md).
