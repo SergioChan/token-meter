@@ -7,11 +7,22 @@ import {
 
 const threadId = "11111111-2222-4333-8444-555555555555";
 
-function runProbe({ activeId = threadId, pathname = `/thread/${threadId}` } = {}) {
+function runProbe({
+  activeId = threadId,
+  pathname = `/thread/${threadId}`,
+  contentConversationId = null,
+} = {}) {
   const mainSurface = {};
   const activeRow = {
     getAttribute(name) {
       return name === "data-app-action-sidebar-thread-id" ? activeId : null;
+    },
+  };
+  const contentElement = contentConversationId == null ? null : {
+    getAttribute(name) {
+      return name === "data-response-annotation-conversation"
+        ? contentConversationId
+        : null;
     },
   };
   const document = {
@@ -21,6 +32,8 @@ function runProbe({ activeId = threadId, pathname = `/thread/${threadId}` } = {}
       if (selector === "aside.app-shell-left-panel") return {};
       if (selector.includes("main[data-app-shell-main-surface]")) return mainSurface;
       if (selector.startsWith("textarea")) return {};
+      if (selector === "[data-response-annotation-conversation]") return contentElement;
+      if (selector === "[data-above-composer-conversation-id]") return contentElement;
       return null;
     },
   };
@@ -53,6 +66,27 @@ test("session probe normalizes Codex local thread identifiers", () => {
   assert.equal(result.eligible, true);
   assert.equal(result.threadId, threadId);
   assert.equal(result.bindingSource, "active-sidebar-row");
+});
+
+test("session probe resolves the real conversation id for a new optimistic thread", () => {
+  const realId = "22222222-3333-4444-8555-666666666666";
+  const result = runProbe({
+    activeId: `local:client-new-thread:${threadId}`,
+    pathname: "/index.html",
+    contentConversationId: realId,
+  });
+  assert.equal(result.eligible, true);
+  assert.equal(result.threadId, realId);
+  assert.equal(result.bindingSource, "active-composer-conversation");
+});
+
+test("session probe refuses an optimistic thread without a real conversation id", () => {
+  const result = runProbe({
+    activeId: `local:client-new-thread:${threadId}`,
+    pathname: "/index.html",
+  });
+  assert.equal(result.threadId, null);
+  assert.equal(result.eligible, true);
 });
 
 test("session probe falls back to the exact route and rejects ambiguous labels", () => {

@@ -35,11 +35,26 @@ export function buildSessionProbeExpression() {
     const routeId = normalizeThreadId(
       routeMatch == null ? null : decodeURIComponent(routeMatch[1])
     );
+    const optimisticMatch = String(
+      activeRow?.getAttribute('data-app-action-sidebar-thread-id') ?? ''
+    )
+      .replace(/^local:/, '')
+      .match(/^client-new-thread:([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i);
+    const contentConversationId = normalizeThreadId(
+      document.querySelector('[data-response-annotation-conversation]')
+        ?.getAttribute('data-response-annotation-conversation') ??
+      document.querySelector('[data-above-composer-conversation-id]')
+        ?.getAttribute('data-above-composer-conversation-id') ??
+      null
+    );
     let threadId = null;
     let bindingSource = null;
     if (activeId != null) {
       threadId = activeId;
       bindingSource = 'active-sidebar-row';
+    } else if (optimisticMatch != null && contentConversationId != null) {
+      threadId = contentConversationId;
+      bindingSource = 'active-composer-conversation';
     } else if (routeId != null) {
       threadId = routeId;
       bindingSource = 'thread-route';
@@ -54,6 +69,7 @@ export function buildSessionProbeExpression() {
         'textarea, [contenteditable="true"], [data-app-action-composer]'
       )),
       activeThread: Boolean(activeRow),
+      conversationId: Boolean(contentConversationId),
     };
     const markerCount = Object.values(markers).filter(Boolean).length;
     const eligible =

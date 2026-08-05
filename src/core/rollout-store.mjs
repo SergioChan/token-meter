@@ -79,13 +79,28 @@ export function parseRolloutLine(line) {
 }
 
 async function defaultReadRange(filePath, { length, position }) {
-  const handle = await open(filePath, "r");
+  let handle;
+  try {
+    handle = await open(filePath, "r");
+  } catch (error) {
+    if (error?.code === "ENOENT") return Buffer.alloc(0);
+    throw error;
+  }
   try {
     const buffer = Buffer.allocUnsafe(length);
     const { bytesRead } = await handle.read(buffer, 0, length, position);
     return buffer.subarray(0, bytesRead);
   } finally {
     await handle.close();
+  }
+}
+
+async function statIfExists(targetPath) {
+  try {
+    return await stat(targetPath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
   }
 }
 
@@ -125,7 +140,8 @@ async function walk(directory, result) {
       }
       const match = entry.name.match(ROLLOUT_FILE);
       if (!entry.isFile() || match == null) return;
-      const fileStat = await stat(fullPath);
+      const fileStat = await statIfExists(fullPath);
+      if (fileStat == null) return;
       result.push({
         path: fullPath,
         discoveredId: match[1],
@@ -268,7 +284,8 @@ export class RolloutStore {
 
   async #readMetadata(file) {
     if (file.meta != null) return;
-    const fileStat = await stat(file.path);
+    const fileStat = await statIfExists(file.path);
+    if (fileStat == null) return;
     const decoder = new StringDecoder("utf8");
     let position = 0;
     let source = "";
@@ -288,7 +305,8 @@ export class RolloutStore {
   }
 
   async #readAppended(file) {
-    const fileStat = await stat(file.path);
+    const fileStat = await statIfExists(file.path);
+    if (fileStat == null) return;
     if (fileStat.size < file.offset) {
       file.offset = 0;
       file.remainder = "";
