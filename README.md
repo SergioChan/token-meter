@@ -17,8 +17,6 @@ Token Meter is an open-source, local-first telemetry overlay for Codex Desktop. 
 
 It is designed for the failure mode that percentages hide: a polluted context, retry loop, or background-agent spiral that makes one interaction cost several times more than normal.
 
-▶ [Watch Token Meter in a real Codex Desktop Session](docs/assets/token-meter-demo.mp4) · The recording uses real token events; unrelated sidebar history and the Session identifier are masked for privacy.
-
 > [!IMPORTANT]
 > Token Meter currently supports **Codex Desktop on macOS**. The planned Claude target is the **Code tab inside Claude Desktop**, with the same injected lower-right overlay—not the Claude Code CLI status line. Claude Desktop support is not implemented yet. See [Claude Desktop status](#claude-desktop-status).
 
@@ -146,14 +144,6 @@ Read [docs/architecture.md](docs/architecture.md) for invariants and [the origin
 npm test
 npm run check
 ```
-
-Preview the real renderer payload:
-
-```bash
-python3 -m http.server 4173 --bind 127.0.0.1
-```
-
-Open <http://127.0.0.1:4173/demo/preview.html>.
 
 With an injected Codex instance running on port 9334, regenerate the README screenshots:
 

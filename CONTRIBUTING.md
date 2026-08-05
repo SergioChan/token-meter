@@ -20,14 +20,6 @@ npm test
 npm run check
 ```
 
-Use the component preview for renderer work:
-
-```bash
-python3 -m http.server 4173 --bind 127.0.0.1
-```
-
-Then open <http://127.0.0.1:4173/demo/preview.html>.
-
 ## Engineering invariants
 
 Changes must preserve these properties:
