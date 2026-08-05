@@ -6,6 +6,9 @@ PORT=9334
 ALLOW_RESTART=false
 APP_PATH="${CODEX_APP_PATH:-/Applications/ChatGPT.app}"
 
+# shellcheck source=./macos-codex-processes.sh
+source "$ROOT/scripts/macos-codex-processes.sh"
+
 usage() {
   cat <<'EOF'
 Usage: scripts/start-codex-meter-macos.sh [--restart] [--port PORT]
@@ -49,7 +52,7 @@ NODE="$("$ROOT/scripts/verify-codex-app-macos.sh" "$APP_PATH")"
 
 ENDPOINT="http://127.0.0.1:$PORT/json/version"
 if ! /usr/bin/curl --silent --fail --max-time 1 "$ENDPOINT" >/dev/null 2>&1; then
-  if /usr/bin/pgrep -x ChatGPT >/dev/null 2>&1; then
+  if [ -n "$(codex_main_pid "$APP_PATH" 2>/dev/null || true)" ]; then
     if [ "$ALLOW_RESTART" != true ]; then
       cat >&2 <<EOF
 Codex is running without Token Meter's loopback CDP endpoint.
@@ -58,11 +61,7 @@ EOF
       exit 3
     fi
     /usr/bin/osascript -e 'tell application id "com.openai.codex" to quit'
-    for _ in $(/usr/bin/seq 1 60); do
-      /usr/bin/pgrep -x ChatGPT >/dev/null 2>&1 || break
-      /bin/sleep 0.25
-    done
-    if /usr/bin/pgrep -x ChatGPT >/dev/null 2>&1; then
+    if ! wait_for_codex_exit "$APP_PATH" 160 0.25; then
       printf 'Codex did not quit cleanly; no force-quit was attempted.\n' >&2
       exit 1
     fi

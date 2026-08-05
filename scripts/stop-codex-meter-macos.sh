@@ -6,6 +6,9 @@ PORT=9334
 RESTART_CODEX=false
 APP_PATH="${CODEX_APP_PATH:-/Applications/ChatGPT.app}"
 
+# shellcheck source=./macos-codex-processes.sh
+source "$ROOT/scripts/macos-codex-processes.sh"
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --restart)
@@ -66,11 +69,7 @@ fi
 
 if [ "$RESTART_CODEX" = true ]; then
   /usr/bin/osascript -e 'tell application id "com.openai.codex" to quit'
-  for _ in $(/usr/bin/seq 1 60); do
-    /usr/bin/pgrep -x ChatGPT >/dev/null 2>&1 || break
-    /bin/sleep 0.25
-  done
-  if /usr/bin/pgrep -x ChatGPT >/dev/null 2>&1; then
+  if ! wait_for_codex_exit "$APP_PATH" 160 0.25; then
     printf 'Codex did not quit cleanly; no force-quit was attempted.\n' >&2
     exit 1
   fi
