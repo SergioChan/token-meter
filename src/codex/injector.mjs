@@ -13,6 +13,8 @@ const projectRoot = path.resolve(moduleDirectory, "../..");
 const runtimePath = path.join(projectRoot, "runtime", "token-meter-ui.js");
 const stylesheetPath = path.join(projectRoot, "runtime", "token-meter-ui.css");
 const execFileAsync = promisify(execFile);
+const CODEX_MAIN_PROCESS_PATTERN =
+  /\/(?:ChatGPT|Codex)\.app\/Contents\/MacOS\/(?:ChatGPT|Codex)(?:\s|$)/;
 
 async function loadPayload() {
   const [runtime, stylesheet] = await Promise.all([
@@ -48,32 +50,92 @@ async function listTargets(cdpPort) {
   );
 }
 
+export function parseLsofListenerRecords(stdout) {
+  const records = [];
+  let current = null;
+  const finish = () => {
+    if (current != null) records.push(current);
+  };
+
+  for (const line of String(stdout).split("\n")) {
+    if (line.startsWith("p")) {
+      finish();
+      current = { pid: line.slice(1), ppid: null, devices: [] };
+    } else if (current != null && line.startsWith("R")) {
+      current.ppid = line.slice(1);
+    } else if (current != null && line.startsWith("d")) {
+      current.devices.push(line.slice(1));
+    }
+  }
+  finish();
+  return records.filter((record) => /^\d+$/.test(record.pid));
+}
+
+export function verifyCodexListenerRecords(records, commandsByPid) {
+  if (records.length === 0) {
+    throw new Error("No process owns the expected CDP listener");
+  }
+
+  const devices = new Set(records.flatMap((record) => record.devices));
+  if (
+    devices.size !== 1 ||
+    records.some((record) => record.devices.length !== 1)
+  ) {
+    throw new Error("Expected one Codex CDP listening socket");
+  }
+
+  const owners = records.filter((record) =>
+    CODEX_MAIN_PROCESS_PATTERN.test(commandsByPid.get(record.pid) ?? ""),
+  );
+  if (owners.length !== 1) {
+    throw new Error("Refusing a CDP listener that is not owned by the Codex application");
+  }
+
+  const ownerPid = owners[0].pid;
+  const recordsByPid = new Map(records.map((record) => [record.pid, record]));
+  for (const record of records) {
+    const visited = new Set();
+    let current = record;
+    while (current.pid !== ownerPid) {
+      if (visited.has(current.pid) || current.ppid == null) {
+        throw new Error("Refusing a CDP socket holder not in the Codex process tree");
+      }
+      visited.add(current.pid);
+      current = recordsByPid.get(current.ppid);
+      if (current == null) {
+        throw new Error("Refusing a CDP socket holder not in the Codex process tree");
+      }
+    }
+  }
+  return ownerPid;
+}
+
 async function verifyMacListenerOwner(cdpPort) {
   if (process.platform !== "darwin") return;
   let stdout;
   try {
     ({ stdout } = await execFileAsync("/usr/sbin/lsof", [
       "-nP",
-      "-Fp",
+      "-FpdR",
       `-iTCP:${cdpPort}`,
       "-sTCP:LISTEN",
     ]));
   } catch {
     throw new Error(`No process owns the expected CDP listener on port ${cdpPort}`);
   }
-  const pids = [...String(stdout).matchAll(/^p(\d+)$/gm)].map((match) => match[1]);
-  if (pids.length !== 1) {
-    throw new Error(`Expected one Codex CDP listener on port ${cdpPort}`);
-  }
-  const { stdout: command } = await execFileAsync("/bin/ps", [
-    "-p",
-    pids[0],
-    "-o",
-    "command=",
-  ]);
-  if (!/\/(?:ChatGPT|Codex)\.app\/Contents\/MacOS\/(?:ChatGPT|Codex)(?:\s|$)/.test(command)) {
-    throw new Error("Refusing a CDP listener that is not owned by the Codex application");
-  }
+  const records = parseLsofListenerRecords(stdout);
+  const commands = await Promise.all(
+    records.map(async ({ pid }) => {
+      const { stdout: command } = await execFileAsync("/bin/ps", [
+        "-p",
+        pid,
+        "-o",
+        "command=",
+      ]);
+      return [pid, command];
+    }),
+  );
+  verifyCodexListenerRecords(records, new Map(commands));
 }
 
 async function attachTarget(target, payload) {
