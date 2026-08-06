@@ -33,6 +33,7 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Claude Accessibility binding now requires one exact Code `AXWebArea`, narrows Context reads to strict button titles, bounds scan work, and rejects ambiguous or lookalike surfaces.
 - Claude context-window caching now follows the exact Session model and invalidates when the installed model catalog changes.
 - Claude readiness checks now require an exact executable command boundary, and CI syntax-checks integration shell scripts recursively.
+- Codex ignores deprecated shared-root environment overrides so stale local configuration cannot target the Claude runtime or saved layout state.
 
 ## [0.1.0] - 2026-08-05
 

@@ -87,7 +87,7 @@ test(
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
     });
-    await delay(1_200);
+    await delay(4_200);
     assert.equal(child.exitCode, null, `companion exited early: ${stderr}`);
     assert.equal((stderr.match(/Waiting quietly for permission/g) ?? []).length, 1);
     assert.doesNotMatch(stderr, /prompt-accessibility/);

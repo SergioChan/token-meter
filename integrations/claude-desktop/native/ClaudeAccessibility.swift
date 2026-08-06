@@ -20,6 +20,26 @@ struct ClaudeCodeSurface {
     let webArea: AXUIElement
 }
 
+struct ClaudeContextScanCadence {
+    let interval: TimeInterval
+    private var nextScanAt: Date?
+
+    init(interval: TimeInterval) {
+        precondition(interval >= 0)
+        self.interval = interval
+    }
+
+    mutating func shouldScan(at now: Date) -> Bool {
+        if let nextScanAt, now < nextScanAt { return false }
+        nextScanAt = now.addingTimeInterval(interval)
+        return true
+    }
+
+    mutating func reset() {
+        nextScanAt = nil
+    }
+}
+
 func axAttribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
     var value: CFTypeRef?
     guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else {

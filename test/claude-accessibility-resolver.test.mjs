@@ -58,6 +58,13 @@ precondition(exactContextWindowTokens(
     role: "AXButton",
     value: "message says 596.0k / 1.0M today"
 ) == nil)
+var cadence = ClaudeContextScanCadence(interval: 5)
+let start = Date(timeIntervalSince1970: 100)
+precondition(cadence.shouldScan(at: start))
+precondition(!cadence.shouldScan(at: start.addingTimeInterval(4.999)))
+precondition(cadence.shouldScan(at: start.addingTimeInterval(5)))
+cadence.reset()
+precondition(cadence.shouldScan(at: start.addingTimeInterval(5.1)))
 `,
     );
 

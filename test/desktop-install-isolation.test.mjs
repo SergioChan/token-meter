@@ -26,6 +26,12 @@ test(
     context.after(() => rm(directory, { recursive: true, force: true }));
 
     const home = path.join(directory, "Home");
+    const baseRoot = path.join(
+      home,
+      "Library",
+      "Application Support",
+      "Token Meter",
+    );
     const launchAgents = path.join(home, "Library", "LaunchAgents");
     const logs = path.join(home, "Library", "Logs", "Token Meter");
     const claudeApp = path.join(directory, "Claude.app");
@@ -60,6 +66,7 @@ test(
       TOKEN_METER_LAUNCHCTL: launchctl,
       TOKEN_METER_CODEX_VERIFIER: verifier,
       TOKEN_METER_CLAUDE_VERIFIER: verifier,
+      TOKEN_METER_INSTALL_ROOT: baseRoot,
       TOKEN_METER_LOG_DIR: path.join(logs, "Codex Desktop"),
       TOKEN_METER_CLAUDE_LOG_DIR: path.join(logs, "Claude Desktop"),
       CODEX_APP_PATH: path.join(directory, "ChatGPT.app"),
@@ -79,12 +86,6 @@ test(
       { env: environment },
     );
 
-    const baseRoot = path.join(
-      home,
-      "Library",
-      "Application Support",
-      "Token Meter",
-    );
     const claudeRoot = path.join(baseRoot, "Claude Desktop");
     const claudeSentinel = path.join(claudeRoot, "installation-sentinel");
     await writeFile(claudeSentinel, "preserve");
@@ -102,5 +103,12 @@ test(
       access(path.join(codexRoot, "runtime", "token-meter-ui.js")),
     ]);
     assert.notEqual(codexRoot, claudeRoot);
+
+    await execFileAsync(
+      "/bin/bash",
+      ["scripts/uninstall-token-meter-macos.sh"],
+      { env: environment },
+    );
+    await access(claudeSentinel);
   },
 );

@@ -340,7 +340,7 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
     private var snapshotInFlight = false
     private var pageReady = false
     private var lastSnapshotAt = Date.distantPast
-    private var lastContextWindowScanAt = Date.distantPast
+    private var contextScanCadence = ClaudeContextScanCadence(interval: 5)
     private var visibleContextWindowTokens: Int?
     private var defaultPanelOrigin = CGPoint.zero
     private var userOffset = CGPoint.zero
@@ -471,16 +471,15 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         if identifier != currentSessionID {
             currentSessionID = identifier
             lastSnapshotAt = .distantPast
-            lastContextWindowScanAt = .distantPast
+            contextScanCadence.reset()
             visibleContextWindowTokens = nil
             publishUnbound()
         }
         let now = Date()
-        if now.timeIntervalSince(lastContextWindowScanAt) >= 5 {
+        if contextScanCadence.shouldScan(at: now) {
             visibleContextWindowTokens = scanExactContextWindowTokens(
                 in: surface.webArea
             )
-            lastContextWindowScanAt = now
         }
         if now.timeIntervalSince(lastSnapshotAt) >= 0.8 {
             fetchSnapshot(
