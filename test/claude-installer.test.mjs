@@ -43,7 +43,7 @@ test(
       ? "/opt/homebrew/bin/node"
       : process.execPath;
 
-    await execFileAsync(
+    const installResult = await execFileAsync(
       "/bin/bash",
       [
         "integrations/claude-desktop/scripts/install.sh",
@@ -66,6 +66,7 @@ test(
         },
       },
     );
+    assert.doesNotMatch(installResult.stderr, /grep:/i);
 
     const app = path.join(installRoot, "Token Meter for Claude.app");
     await Promise.all([

@@ -45,10 +45,16 @@ if [ -e "$OUTPUT" ] || [ -L "$OUTPUT" ]; then
   printf 'Refusing to replace an existing build output: %s\n' "$OUTPUT" >&2
   exit 1
 fi
-if [ -z "$SIGN_IDENTITY" ] || printf '%s' "$SIGN_IDENTITY" | /usr/bin/grep -q $'[\r\n]'; then
+if [ -z "$SIGN_IDENTITY" ]; then
   printf 'The signing identity is invalid.\n' >&2
   exit 2
 fi
+case "$SIGN_IDENTITY" in
+  *$'\r'*|*$'\n'*)
+    printf 'The signing identity is invalid.\n' >&2
+    exit 2
+    ;;
+esac
 
 STAGING="$OUTPUT.building.$$"
 cleanup() {

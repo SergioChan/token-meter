@@ -70,10 +70,12 @@ require_absolute_path() {
     printf '%s must be an absolute path: %s\n' "$name" "${value:-<empty>}" >&2
     exit 2
   fi
-  if printf '%s' "$value" | /usr/bin/grep -q $'[\r\n]'; then
-    printf '%s contains invalid characters.\n' "$name" >&2
-    exit 2
-  fi
+  case "$value" in
+    *$'\r'*|*$'\n'*)
+      printf '%s contains invalid characters.\n' "$name" >&2
+      exit 2
+      ;;
+  esac
 }
 
 for pair in \
@@ -176,8 +178,10 @@ if [ -f "$PLIST" ]; then
 fi
 /bin/mv "$PLIST_TEMP" "$PLIST"
 
+APP_BUNDLE="$INSTALL_ROOT/Token Meter for Claude.app"
 if [ "$PROMPT" = true ]; then
-  "$EXECUTABLE" --prompt-accessibility >/dev/null 2>&1 || true
+  /usr/bin/open -n -a "$APP_BUNDLE" --args --prompt-accessibility >/dev/null 2>&1 || true
+  /bin/sleep 1
 fi
 
 if [ "$LOAD" = true ] && ! "$LAUNCHCTL" bootstrap "$DOMAIN" "$PLIST"; then
@@ -206,7 +210,32 @@ if [ "$LOAD" = true ]; then
 else
   printf 'LaunchAgent written but not loaded (--no-load).\n'
 fi
-if "$EXECUTABLE" --check-accessibility >/dev/null 2>&1; then
+ACCESSIBILITY_GRANTED=false
+if [ "$LOAD" = true ]; then
+  for _ in $(/usr/bin/seq 1 20); do
+    READY_FILE="$STATE_DIR/ready.pid"
+    if [ -s "$READY_FILE" ]; then
+      READY_PID="$(/usr/bin/tr -d '[:space:]' < "$READY_FILE")"
+      case "$READY_PID" in
+        ''|*[!0-9]*)
+          ;;
+        *)
+          if /bin/kill -0 "$READY_PID" 2>/dev/null; then
+            READY_COMMAND="$(/bin/ps -p "$READY_PID" -o command= 2>/dev/null || true)"
+            case "$READY_COMMAND" in
+              "$EXECUTABLE"*)
+                ACCESSIBILITY_GRANTED=true
+                break
+                ;;
+            esac
+          fi
+          ;;
+      esac
+    fi
+    /bin/sleep 0.25
+  done
+fi
+if [ "$ACCESSIBILITY_GRANTED" = true ]; then
   printf 'Accessibility permission: granted.\n'
 else
   printf 'Accessibility permission: required. Enable Token Meter for Claude in System Settings > Privacy & Security > Accessibility.\n'

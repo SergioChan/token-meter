@@ -340,6 +340,22 @@ private struct SnapshotBridgeError: Error, CustomStringConvertible {
     let description: String
 }
 
+private final class ReadyMarker {
+    private let url: URL
+    private let value: String
+
+    init(stateDirectoryURL: URL) throws {
+        url = stateDirectoryURL.appendingPathComponent("ready.pid")
+        value = "\(ProcessInfo.processInfo.processIdentifier)\n"
+        try value.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    deinit {
+        guard (try? String(contentsOf: url, encoding: .utf8)) == value else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+}
+
 private final class SnapshotBridge {
     typealias Completion = (Result<[String: Any], Error>) -> Void
 
@@ -908,9 +924,14 @@ do {
         }
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
+        let readyMarker = try ReadyMarker(
+            stateDirectoryURL: configuration.stateDirectoryURL
+        )
         let controller = MeterController(configuration: configuration)
         controller.start()
-        application.run()
+        withExtendedLifetime(readyMarker) {
+            application.run()
+        }
     }
 } catch {
     fputs("\(error)\n\n\(usage())\n", stderr)

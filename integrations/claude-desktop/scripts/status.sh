@@ -10,6 +10,7 @@ PLIST="$LAUNCH_AGENTS_DIR/$LABEL.plist"
 DOMAIN="gui/$(/usr/bin/id -u)"
 LAUNCHCTL="${TOKEN_METER_LAUNCHCTL:-/bin/launchctl}"
 EXECUTABLE="$INSTALL_ROOT/Token Meter for Claude.app/Contents/MacOS/TokenMeterClaudeOverlay"
+READY_FILE="$STATE_DIR/ready.pid"
 JSON=false
 
 case "${1:-}" in
@@ -39,11 +40,23 @@ STATE_PRESENT=false
 [ -d "$STATE_DIR" ] && STATE_PRESENT=true
 if LAUNCH_STATUS="$("$LAUNCHCTL" print "$DOMAIN/$LABEL" 2>/dev/null)"; then
   LOADED=true
-  if printf '%s\n' "$LAUNCH_STATUS" | /usr/bin/grep -q 'state = running'; then
-    RUNNING=true
-  fi
 fi
-if [ "$INSTALLED" = true ] && "$EXECUTABLE" --check-accessibility >/dev/null 2>&1; then
+if [ "$LOADED" = true ] && [ -s "$READY_FILE" ]; then
+  READY_PID="$(/usr/bin/tr -d '[:space:]' < "$READY_FILE")"
+  case "$READY_PID" in
+    ''|*[!0-9]*)
+      ;;
+    *)
+      if /bin/kill -0 "$READY_PID" 2>/dev/null; then
+        READY_COMMAND="$(/bin/ps -p "$READY_PID" -o command= 2>/dev/null || true)"
+        case "$READY_COMMAND" in
+          "$EXECUTABLE"*) RUNNING=true ;;
+        esac
+      fi
+      ;;
+  esac
+fi
+if [ "$RUNNING" = true ]; then
   ACCESSIBILITY=true
 fi
 
