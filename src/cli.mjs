@@ -43,11 +43,9 @@ if (options.command === "snapshot") {
   if (!options.desktopSessionId) {
     throw new Error("--desktop-session-id is required for claude-snapshot");
   }
-  const [{ ClaudeDesktopSessionStore }, { ClaudeTranscriptStore }] =
-    await Promise.all([
-      import("../integrations/claude-desktop/src/desktop-session-store.mjs"),
-      import("../integrations/claude-desktop/src/transcript-store.mjs"),
-    ]);
+  const { ClaudeSnapshotRuntime } = await import(
+    "../integrations/claude-desktop/src/snapshot-runtime.mjs"
+  );
   const claudeSessionsDirectory =
     options.claudeSessionsDirectory ??
     path.join(
@@ -60,30 +58,12 @@ if (options.command === "snapshot") {
   const claudeProjectsDirectory =
     options.claudeProjectsDirectory ??
     path.join(os.homedir(), ".claude", "projects");
-  const sessionStore = new ClaudeDesktopSessionStore({
+  const runtime = new ClaudeSnapshotRuntime({
     sessionsDirectory: claudeSessionsDirectory,
+    projectsDirectory: claudeProjectsDirectory,
   });
-  const session = await sessionStore.resolve(options.desktopSessionId);
-  if (session.status !== "resolved") {
-    process.stdout.write(`${JSON.stringify(session, null, 2)}\n`);
-  } else {
-    const transcriptStore = new ClaudeTranscriptStore({
-      projectsDirectory: claudeProjectsDirectory,
-    });
-    const files = await transcriptStore.refresh({ session });
-    const snapshot = new MetricsEngine().snapshot(files, {
-      threadId: session.desktopSessionId,
-      hostName: "Claude Desktop",
-    });
-    snapshot.binding = {
-      source: "claude-desktop-session-metadata",
-      exact: snapshot.status === "bound",
-      desktopSessionId: session.desktopSessionId,
-      cliSessionId: session.cliSessionId,
-    };
-    snapshot.usageMethod = "claude-transcript-raw";
-    process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
-  }
+  const snapshot = await runtime.snapshot(options.desktopSessionId);
+  process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
 } else if (options.command === "inject") {
   const modulePath = new URL(
     "../integrations/codex-desktop/src/injector.mjs",

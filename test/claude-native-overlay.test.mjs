@@ -1,0 +1,38 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import test from "node:test";
+
+const execFileAsync = promisify(execFile);
+
+test(
+  "Claude native overlay exposes a stable command interface",
+  { skip: process.platform !== "darwin" },
+  async (context) => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), "token-meter-claude-native-"),
+    );
+    context.after(() => rm(directory, { recursive: true, force: true }));
+    const executable = path.join(directory, "TokenMeterClaudeOverlay");
+    await execFileAsync("/usr/bin/swiftc", [
+      "integrations/claude-desktop/native/TokenMeterClaudeOverlay.swift",
+      "-o",
+      executable,
+      "-framework",
+      "AppKit",
+      "-framework",
+      "ApplicationServices",
+      "-framework",
+      "WebKit",
+    ]);
+
+    const { stdout } = await execFileAsync(executable, ["--help"]);
+    assert.match(stdout, /--root PATH/);
+    assert.match(stdout, /--node PATH/);
+    assert.match(stdout, /--check-accessibility/);
+    await assert.rejects(execFileAsync(executable), /--root is required/);
+  },
+);

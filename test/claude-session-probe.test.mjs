@@ -67,6 +67,17 @@ test("Claude probe uses the exact Code route when no active link is exposed", ()
   assert.equal(result.bindingSource, "code-session-route");
 });
 
+test("Claude probe accepts the current Epitaxy Desktop Session route", () => {
+  const result = runProbe({
+    pathname: `/epitaxy/${sessionId}`,
+    activeHref: `/epitaxy/${sessionId}`,
+    protocol: "https:",
+    hostname: "claude.ai",
+  });
+  assert.equal(result.eligible, true);
+  assert.equal(result.desktopSessionId, sessionId);
+});
+
 test("Claude probe fails closed when route and active Session disagree", () => {
   const result = runProbe({
     activeHref: "/code/local_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",

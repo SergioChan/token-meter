@@ -17,7 +17,9 @@ export function buildClaudeSessionProbeExpression() {
       if (typeof value !== 'string') return null;
       let decoded = value;
       try { decoded = decodeURIComponent(value); } catch {}
-      const match = decoded.match(/(?:^|\\/)code\\/(local_[0-9a-f-]{36})(?:[\\/?#]|$)/i);
+      const match = decoded.match(
+        /(?:^|\\/)(?:code|epitaxy)\\/(local_[0-9a-f-]{36})(?:[\\/?#]|$)/i
+      );
       return normalizeSessionId(match?.[1] ?? null);
     };
     const routeIds = [
