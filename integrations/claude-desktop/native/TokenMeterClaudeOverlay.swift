@@ -890,6 +890,54 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
     }
 }
 
+private final class CompanionRuntime {
+    private let configuration: AppConfiguration
+    private var permissionTimer: Timer?
+    private var readyMarker: ReadyMarker?
+    private var meterController: MeterController?
+
+    init(configuration: AppConfiguration) {
+        self.configuration = configuration
+    }
+
+    func start() {
+        if startMeterIfTrusted() { return }
+        fputs(
+            "Accessibility permission is required. Waiting quietly for permission.\n",
+            stderr
+        )
+        permissionTimer = Timer.scheduledTimer(
+            withTimeInterval: 2,
+            repeats: true
+        ) { [weak self] _ in
+            _ = self?.startMeterIfTrusted()
+        }
+    }
+
+    @discardableResult
+    private func startMeterIfTrusted() -> Bool {
+        guard meterController == nil, AXIsProcessTrusted() else {
+            return meterController != nil
+        }
+        do {
+            let marker = try ReadyMarker(
+                stateDirectoryURL: configuration.stateDirectoryURL
+            )
+            let controller = MeterController(configuration: configuration)
+            readyMarker = marker
+            meterController = controller
+            permissionTimer?.invalidate()
+            permissionTimer = nil
+            controller.start()
+            return true
+        } catch {
+            fputs("Failed to start Token Meter: \(error)\n", stderr)
+            NSApplication.shared.terminate(nil)
+            return false
+        }
+    }
+}
+
 do {
     let command = try parseCommand(Array(CommandLine.arguments.dropFirst()))
     switch command {
@@ -915,21 +963,11 @@ do {
             exit(2)
         }
     case .run(let configuration):
-        guard AXIsProcessTrusted() else {
-            fputs(
-                "Accessibility permission is required. Run with --prompt-accessibility first.\n",
-                stderr
-            )
-            exit(2)
-        }
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
-        let readyMarker = try ReadyMarker(
-            stateDirectoryURL: configuration.stateDirectoryURL
-        )
-        let controller = MeterController(configuration: configuration)
-        controller.start()
-        withExtendedLifetime(readyMarker) {
+        let runtime = CompanionRuntime(configuration: configuration)
+        runtime.start()
+        withExtendedLifetime(runtime) {
             application.run()
         }
     }
