@@ -14,6 +14,7 @@
   --accent-strong: #2d7754;
   --rate-color: #5f9d7c;
   width: 286px;
+  position: relative;
   box-sizing: border-box;
   overflow: hidden;
   color: #20211f;
@@ -25,7 +26,7 @@
   pointer-events: auto;
   user-select: none;
   cursor: default;
-  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  transition: width 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 
 .meter-header {
@@ -56,6 +57,36 @@
   color: rgb(32 33 31 / 0.55);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-variant-numeric: tabular-nums;
+}
+
+.collapse-toggle {
+  display: grid;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  margin: 0 -3px 0 1px;
+  padding: 0;
+  place-items: center;
+  color: rgb(32 33 31 / 0.58);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font: 700 14px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  cursor: pointer;
+}
+
+.collapse-toggle[hidden] {
+  display: none;
+}
+
+.collapse-toggle:hover {
+  color: #20211f;
+  background: rgb(32 33 31 / 0.07);
+}
+
+.collapse-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--rate-color) 70%, transparent);
+  outline-offset: 1px;
 }
 
 .meter-body {
@@ -245,6 +276,48 @@
   display: grid;
 }
 
+.meter-card.collapsed {
+  width: 152px;
+}
+
+.collapsed .meter-header {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  height: 20px;
+  padding: 0;
+  border: 0;
+}
+
+.collapsed .meter-header .live-dot,
+.collapsed .meter-header .meter-title,
+.collapsed .meter-header .session-id,
+.collapsed .session-total-wrap,
+.collapsed .metric-row,
+.collapsed .context-row,
+.collapsed .details-row,
+.collapsed .warning,
+.collapsed .unbound {
+  display: none;
+}
+
+.collapsed .collapse-toggle {
+  margin: 0;
+  background: rgb(32 33 31 / 0.06);
+}
+
+.collapsed .meter-body {
+  display: block;
+  min-height: 72px;
+  padding: 4px 15px 2px;
+}
+
+.collapsed .gauge {
+  width: 122px;
+  height: 68px;
+}
+
 .warning,
 .unbound {
   margin: 0 8px 8px;
@@ -349,6 +422,7 @@
   }
 
   .session-id,
+  .collapse-toggle,
   .rate,
   .label,
   .metric-row small,
@@ -371,6 +445,15 @@
 
   .context-row b i {
     color: rgb(236 238 233 / 0.48);
+  }
+
+  .collapse-toggle:hover {
+    color: #eceee9;
+    background: rgb(255 255 255 / 0.09);
+  }
+
+  .collapsed .collapse-toggle {
+    background: rgb(255 255 255 / 0.08);
   }
 
   .warning {

@@ -1,5 +1,5 @@
 ((cssText) => {
-  const VERSION = 4;
+  const VERSION = 5;
   const existing = window.__tokenMeter;
   if (existing?.version === VERSION) {
     existing.ensureMounted();
@@ -24,6 +24,9 @@
       <span class="live-dot" aria-hidden="true"></span>
       <span class="meter-title">TOKEN METER</span>
       <span class="session-id">UNBOUND</span>
+      <button class="collapse-toggle" type="button" aria-label="Collapse Token Meter" title="Collapse Token Meter" hidden>
+        <span aria-hidden="true">−</span>
+      </button>
     </header>
     <div class="meter-body">
       <div class="gauge" aria-hidden="true">
@@ -97,6 +100,7 @@
     baseline: card.querySelector(".baseline"),
     agentCount: card.querySelector(".agent-count"),
     usageDelta: card.querySelector(".usage-delta"),
+    collapseToggle: card.querySelector(".collapse-toggle"),
     needle: card.querySelector(".needle"),
     progress: card.querySelector(".gauge-progress"),
     warning: card.querySelector(".warning"),
@@ -108,6 +112,8 @@
   let lastSessionTotal = 0;
   let lastRate = null;
   let deltaTimer = null;
+  let collapsible = false;
+  let collapsed = false;
 
   const format = (value) => {
     const number = Math.max(0, Number(value) || 0);
@@ -163,6 +169,27 @@
     if (!host.isConnected && document.documentElement) {
       document.documentElement.append(host);
     }
+  };
+
+  const publishLayout = () => {
+    window.webkit?.messageHandlers?.tokenMeterLayout?.postMessage({ collapsed });
+  };
+
+  const setCollapsed = (value) => {
+    collapsed = collapsible && value === true;
+    card.classList.toggle("collapsed", collapsed);
+    elements.collapseToggle.querySelector("span").textContent = collapsed ? "+" : "−";
+    const action = collapsed ? "Expand" : "Collapse";
+    elements.collapseToggle.setAttribute("aria-label", `${action} Token Meter`);
+    elements.collapseToggle.title = `${action} Token Meter`;
+    publishLayout();
+    return collapsed;
+  };
+
+  const configure = ({ collapsible: nextCollapsible = false, collapsed: nextCollapsed = false } = {}) => {
+    collapsible = nextCollapsible === true;
+    elements.collapseToggle.hidden = !collapsible;
+    return setCollapsed(nextCollapsed);
   };
 
   const update = (snapshot) => {
@@ -269,7 +296,14 @@
     if (window.__tokenMeter?.version === VERSION) delete window.__tokenMeter;
   };
 
-  card.addEventListener("click", () => card.classList.toggle("expanded"));
+  elements.collapseToggle.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setCollapsed(!collapsed);
+  });
+  card.addEventListener("click", () => {
+    if (!collapsed) card.classList.toggle("expanded");
+  });
   const observer = new MutationObserver(ensureMounted);
   observer.observe(document, { childList: true, subtree: true });
   const originalDestroy = destroy;
@@ -280,6 +314,8 @@
   window.__tokenMeter = {
     version: VERSION,
     update,
+    configure,
+    setCollapsed,
     ensureMounted,
     destroy: destroyWithObserver,
   };
