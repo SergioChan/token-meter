@@ -29,6 +29,7 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Codex and Claude meters can collapse to a compact gauge, move by drag, and persist their layout state.
 - Claude support now uses an independent native companion because Claude Desktop's Anthropic-signed CDP authorization gate has no public third-party issuance path.
 - A permission-blocked Claude companion now waits quietly in one process instead of exiting into a LaunchAgent retry cycle.
+- Codex and Claude source installations now use isolated sibling roots so updating or uninstalling one integration cannot replace the other.
 
 ## [0.1.0] - 2026-08-05
 

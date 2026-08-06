@@ -5,9 +5,10 @@ PORT=9334
 RESTART_CODEX=false
 APP_PATH="${CODEX_APP_PATH:-/Applications/ChatGPT.app}"
 LABEL="com.sergiochan.token-meter"
-INSTALL_ROOT="${TOKEN_METER_INSTALL_ROOT:-$HOME/Library/Application Support/Token Meter}"
+BASE_ROOT="${TOKEN_METER_BASE_ROOT:-$HOME/Library/Application Support/Token Meter}"
+INSTALL_ROOT="${TOKEN_METER_CODEX_INSTALL_ROOT:-${TOKEN_METER_INSTALL_ROOT:-$BASE_ROOT/Codex Desktop}}"
 LAUNCH_AGENTS_DIR="${TOKEN_METER_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
-LOG_DIR="${TOKEN_METER_LOG_DIR:-$HOME/Library/Logs/Token Meter}"
+LOG_DIR="${TOKEN_METER_CODEX_LOG_DIR:-${TOKEN_METER_LOG_DIR:-$HOME/Library/Logs/Token Meter/Codex Desktop}}"
 PLIST="$LAUNCH_AGENTS_DIR/$LABEL.plist"
 DOMAIN="gui/$(/usr/bin/id -u)"
 LAUNCHCTL="${TOKEN_METER_LAUNCHCTL:-/bin/launchctl}"
@@ -66,16 +67,30 @@ if "$LAUNCHCTL" print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
   fi
 fi
 
-if [ -x "$INSTALL_ROOT/scripts/verify-codex-app-macos.sh" ] && \
-  [ -f "$INSTALL_ROOT/src/cli.mjs" ]; then
-  NODE="$($INSTALL_ROOT/scripts/verify-codex-app-macos.sh "$APP_PATH" 2>/dev/null || true)"
+RUNTIME_ROOT="$INSTALL_ROOT"
+if [ ! -f "$RUNTIME_ROOT/src/cli.mjs" ] && \
+  [ -f "$BASE_ROOT/scripts/token-meter-service-macos.sh" ]; then
+  RUNTIME_ROOT="$BASE_ROOT"
+fi
+if [ -x "$RUNTIME_ROOT/scripts/verify-codex-app-macos.sh" ] && \
+  [ -f "$RUNTIME_ROOT/src/cli.mjs" ]; then
+  NODE="$("$RUNTIME_ROOT/scripts/verify-codex-app-macos.sh" "$APP_PATH" 2>/dev/null || true)"
   if [ -n "$NODE" ]; then
-    "$NODE" "$INSTALL_ROOT/src/cli.mjs" remove --cdp-port "$PORT" >/dev/null || true
+    "$NODE" "$RUNTIME_ROOT/src/cli.mjs" remove --cdp-port "$PORT" >/dev/null || true
   fi
 fi
 
 /bin/rm -f "$PLIST"
 /bin/rm -rf "$INSTALL_ROOT" "$LOG_DIR"
+if [ "$INSTALL_ROOT" != "$BASE_ROOT" ] && \
+  [ -f "$BASE_ROOT/scripts/token-meter-service-macos.sh" ]; then
+  /bin/rm -rf \
+    "$BASE_ROOT/src" \
+    "$BASE_ROOT/integrations" \
+    "$BASE_ROOT/runtime" \
+    "$BASE_ROOT/scripts"
+  /bin/rm -f "$BASE_ROOT/package.json" "$BASE_ROOT/LICENSE"
+fi
 
 if [ "$RESTART_CODEX" = true ] && [ -d "$APP_PATH" ]; then
   SCRIPT_ROOT="$(cd "$(dirname "$0")" && pwd -P)"

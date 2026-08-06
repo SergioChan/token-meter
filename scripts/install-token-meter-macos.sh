@@ -6,12 +6,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 PORT=9334
 APP_PATH="${CODEX_APP_PATH:-/Applications/ChatGPT.app}"
 LABEL="com.sergiochan.token-meter"
-INSTALL_ROOT="${TOKEN_METER_INSTALL_ROOT:-$HOME/Library/Application Support/Token Meter}"
+BASE_ROOT="${TOKEN_METER_BASE_ROOT:-$HOME/Library/Application Support/Token Meter}"
+INSTALL_ROOT="${TOKEN_METER_CODEX_INSTALL_ROOT:-${TOKEN_METER_INSTALL_ROOT:-$BASE_ROOT/Codex Desktop}}"
 LAUNCH_AGENTS_DIR="${TOKEN_METER_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
-LOG_DIR="${TOKEN_METER_LOG_DIR:-$HOME/Library/Logs/Token Meter}"
+LOG_DIR="${TOKEN_METER_CODEX_LOG_DIR:-${TOKEN_METER_LOG_DIR:-$HOME/Library/Logs/Token Meter/Codex Desktop}}"
 PLIST="$LAUNCH_AGENTS_DIR/$LABEL.plist"
 DOMAIN="gui/$(/usr/bin/id -u)"
 LAUNCHCTL="${TOKEN_METER_LAUNCHCTL:-/bin/launchctl}"
+VERIFIER="${TOKEN_METER_CODEX_VERIFIER:-$ROOT/scripts/verify-codex-app-macos.sh}"
 
 usage() {
   cat <<'EOF'
@@ -60,7 +62,11 @@ if [ -e "$INSTALL_ROOT" ] && [ ! -d "$INSTALL_ROOT" ]; then
   exit 1
 fi
 
-NODE="$($ROOT/scripts/verify-codex-app-macos.sh "$APP_PATH")"
+if [ ! -x "$VERIFIER" ]; then
+  printf 'Codex verifier is not executable: %s\n' "$VERIFIER" >&2
+  exit 1
+fi
+NODE="$("$VERIFIER" "$APP_PATH")"
 /bin/mkdir -p "$LAUNCH_AGENTS_DIR" "$LOG_DIR" "$(/usr/bin/dirname "$INSTALL_ROOT")"
 
 if "$LAUNCHCTL" print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
@@ -136,6 +142,16 @@ if ! "$LAUNCHCTL" bootstrap "$DOMAIN" "$PLIST"; then
 fi
 /bin/rm -rf "$BACKUP"
 /bin/rm -f "$PLIST_BACKUP"
+
+LEGACY_SERVICE="$BASE_ROOT/scripts/token-meter-service-macos.sh"
+if [ "$INSTALL_ROOT" != "$BASE_ROOT" ] && [ -f "$LEGACY_SERVICE" ]; then
+  /bin/rm -rf \
+    "$BASE_ROOT/src" \
+    "$BASE_ROOT/integrations" \
+    "$BASE_ROOT/runtime" \
+    "$BASE_ROOT/scripts"
+  /bin/rm -f "$BASE_ROOT/package.json" "$BASE_ROOT/LICENSE"
+fi
 trap - EXIT
 
 printf 'Token Meter installed and loaded as %s.\n' "$LABEL"

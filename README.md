@@ -124,6 +124,8 @@ npm run ci
 
 The installer loads `~/Library/LaunchAgents/com.sergiochan.token-meter.plist`. If a running Codex process lacks the required loopback endpoint, the service performs at most one normal quit/relaunch attempt. It never force-quits or loops relaunches.
 
+The Codex runtime is isolated at `~/Library/Application Support/Token Meter/Codex Desktop/`; installing or uninstalling it does not replace the Claude companion or its saved state.
+
 After installation, Codex can be opened normally from the Dock or Applications folder.
 
 ### Claude Code in Claude Desktop

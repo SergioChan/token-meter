@@ -15,6 +15,8 @@ The integration is reached through the repository-level commands:
 
 The persistent installer is the normal user path. The start and stop scripts are development controls.
 
+The default installed runtime is `~/Library/Application Support/Token Meter/Codex Desktop/`. It is a sibling of, never a parent of, the Claude Desktop runtime. Set `TOKEN_METER_CODEX_INSTALL_ROOT` only when an explicit custom absolute path is required.
+
 ## Implementation
 
 - `src/injector.mjs` verifies the signed OpenAI application, loopback CDP listener ownership, renderer semantics, and injected payload.

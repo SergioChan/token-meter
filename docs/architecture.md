@@ -109,7 +109,7 @@ Token Meter therefore does not infer an exact per-Session backend number. Accoun
 
 ## Codex macOS lifecycle controller
 
-The source installer copies the minimal runtime into the user's Application Support directory and loads a per-user LaunchAgent. The controller waits for Codex instead of opening it at login. A normal Dock launch without loopback CDP receives at most one normal quit/relaunch attempt for that process. Failed verification, an occupied port, a failed normal quit, or a failed relaunch all fail closed without a force-quit or relaunch loop.
+The source installer copies the minimal runtime into the isolated `Token Meter/Codex Desktop` Application Support directory and loads a per-user LaunchAgent. The controller waits for Codex instead of opening it at login. A normal Dock launch without loopback CDP receives at most one normal quit/relaunch attempt for that process. Failed verification, an occupied port, a failed normal quit, or a failed relaunch all fail closed without a force-quit or relaunch loop.
 
 The controller remains alive across later Codex launches and sleep/wake. `RunAtLoad` restores it after login; launchd does not use `KeepAlive`, so an unexpected controller crash cannot become a launchd crash loop. Re-running the installer refreshes the copied runtime and restarts the controller without modifying the official application bundle.
 
