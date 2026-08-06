@@ -1,6 +1,6 @@
 # Security Policy
 
-Token Meter opens a loopback Chromium DevTools Protocol endpoint and injects a local renderer payload. Treat changes to launch, process verification, target selection, event parsing, and cleanup as security-sensitive.
+Token Meter uses two local Desktop integration mechanisms: Codex opens a loopback Chromium DevTools Protocol endpoint and receives a renderer payload; Claude uses an independent native companion with macOS Accessibility permission. Treat changes to launch, process verification, target selection, Accessibility parsing, event parsing, and cleanup as security-sensitive.
 
 ## Supported versions
 
@@ -12,16 +12,18 @@ Do not open a public issue for a vulnerability or include private Codex data in 
 
 Use [GitHub private vulnerability reporting](https://github.com/SergioChan/token-meter/security/advisories/new). Include:
 
-- The affected commit and Codex version.
+- The affected commit and host application version.
 - Reproduction steps using synthetic or redacted data.
 - The expected and observed security boundary.
-- Whether the issue can expose renderer contents, attach to a non-Codex process, escape loopback, persist after shutdown, or modify the official application bundle.
+- Whether the issue can expose renderer or Accessibility contents, attach to the wrong process or Session, escape loopback, persist after shutdown, or modify an official application bundle.
 
 You should receive an initial response within seven days. Please allow a reasonable remediation window before public disclosure.
 
 ## Threat model
 
-Token Meter is designed to defend against accidental target confusion and untrusted local listeners. It:
+### Codex Desktop
+
+The Codex integration is designed to defend against accidental renderer confusion and untrusted local listeners. It:
 
 - Binds CDP to `127.0.0.1` only.
 - Verifies the exact official application path, bundle ID, signature, and OpenAI Team ID.
@@ -35,3 +37,19 @@ Token Meter is designed to defend against accidental target confusion and untrus
 - Makes at most one normal quit/relaunch attempt for a Codex process that lacks the required endpoint; it never force-quits or enters a relaunch loop.
 
 Token Meter cannot protect the CDP endpoint or its user-writable installed copy from a malicious process already running as the same macOS user. Do not run untrusted local software while CDP is enabled. Uninstall with `./scripts/uninstall-token-meter-macos.sh --restart`, or restart Codex normally after stopping a one-shot run, to close the endpoint.
+
+### Claude Code in Claude Desktop
+
+The Claude integration is designed to defend against accidental Session confusion and excessive Accessibility collection. It:
+
+- Verifies the canonical Claude.app path, bundle ID, signature, Anthropic Team ID, executable, and packaged model catalog before installation.
+- Builds a separate background application with its own bundle ID; it does not patch, inject into, replace, or re-sign Claude.app.
+- Requires Accessibility permission for `Token Meter for Claude.app` itself.
+- Reads only the frontmost Claude process and focused window needed to extract an eligible local Code Session ID, window geometry, and a strict numerical context ratio.
+- Hides when Claude is not frontmost or when exact Session identity is missing or ambiguous.
+- Resolves one exact Desktop Session to one local Claude Code transcript identity and never falls back to file recency or display name.
+- Discards prompt, reasoning, tool, and assistant content while retaining identifiers, event types, timestamps, and numerical usage required for aggregation.
+- Validates a readiness PID against the exact installed executable before reporting Accessibility success.
+- Never quits or relaunches Claude.
+
+Accessibility permission allows the companion to inspect UI elements exposed by applications in the user's session. Token Meter intentionally narrows its reads, but a maliciously modified installed companion could abuse that permission. Install only from a reviewed source revision, keep the installed directory writable only by the current user, and revoke **Token Meter for Claude** in System Settings when it is not needed. Uninstall with `./scripts/uninstall-claude-meter-macos.sh --purge-state`.

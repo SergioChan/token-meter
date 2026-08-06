@@ -12,8 +12,10 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Explicit Codex and Claude Code support matrix.
 - A visible active-Context reading that follows Codex compaction independently from cumulative Session usage.
 - A per-user macOS LaunchAgent installer and uninstaller for normal Dock launches and login persistence.
-- An offline Claude Desktop Session resolver, de-duplicating transcript collector, read-only snapshot command, and application identity verifier.
-- A dormant fail-closed Claude Desktop Code renderer probe and injector adapter for a future supported authorization path.
+- A native Claude Desktop companion overlay with exact focused-Session binding, active-context enrichment, window following, and persistent drag/collapse state.
+- An offline Claude Desktop Session resolver, de-duplicating transcript collector, read-only snapshot command, application identity verifier, persistent snapshot bridge, and content-discarding metrics path.
+- Claude Desktop build, install, status, update, and uninstall workflows that do not restart Claude.
+- Host-specific integration documentation and an Agent-ready automated installation prompt.
 
 ### Changed
 
@@ -24,7 +26,9 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Confirmed token increments display a visible delta pulse at high cumulative totals.
 - Codex shutdown waits for the complete application process tree before a relaunch.
 - Documentation now distinguishes raw Session workload from backend account-level `/usage` activity.
-- Documented Claude Desktop's Anthropic-signed CDP authorization gate and marked production UI injection as host-blocked instead of presenting restart as sufficient.
+- Codex and Claude meters can collapse to a compact gauge, move by drag, and persist their layout state.
+- Claude support now uses an independent native companion because Claude Desktop's Anthropic-signed CDP authorization gate has no public third-party issuance path.
+- A permission-blocked Claude companion now waits quietly in one process instead of exiting into a LaunchAgent retry cycle.
 
 ## [0.1.0] - 2026-08-05
 

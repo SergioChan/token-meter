@@ -1,7 +1,7 @@
 # Token Meter
 
 <p align="center">
-  <img src="docs/assets/token-meter-live.png" width="628" alt="Token Meter showing live Codex session tokens, active context, rolling-hour usage, current-turn usage, rate, and child agents">
+  <img src="docs/assets/token-meter-live.png" width="628" alt="Token Meter showing live Session tokens, active context, rolling-hour usage, current-turn usage, rate, and child agents">
 </p>
 
 <p align="center">
@@ -11,236 +11,73 @@
   <img alt="Node.js 22.12+" src="https://img.shields.io/badge/node-%3E%3D22.12-43853d">
 </p>
 
-**See how hard the agent is working. Catch runaway context before it consumes another turn.**
+**See how hard the Agent is working. Catch runaway context before it consumes another turn.**
 
-Token Meter is an open-source, local-first telemetry overlay for Codex Desktop. It follows the Session currently selected in the Codex UI and turns confirmed token events into a mechanical meter that moves while the agent works.
+Token Meter is an open-source, local-first telemetry overlay for Codex Desktop and Claude Code inside Claude Desktop. It follows the Session currently selected in the host UI and turns confirmed local token events into a mechanical meter that moves while the Agent works.
 
-It is designed for the failure mode that percentages hide: a polluted context, retry loop, or background-agent spiral that makes one interaction cost several times more than normal.
+It is designed for the failure mode that percentages hide: a polluted context, retry loop, or background-Agent spiral that makes one interaction cost several times more than normal.
 
-> [!IMPORTANT]
-> Token Meter currently supports **Codex Desktop on macOS**. The planned Claude target is the **Code tab inside Claude Desktop**, not the CLI status line. Claude's production app currently blocks public CDP injection behind an Anthropic-signed authorization token, so only the read-only Session and usage adapter is usable today. See [Claude Desktop status](#claude-desktop-status).
+## Host integrations
 
-## What it measures
+| Host | Status | UI integration | Exact Session source | Usage source |
+| --- | --- | --- | --- | --- |
+| Codex Desktop, macOS | Supported | Verified loopback CDP + injected Shadow DOM | Active semantic sidebar task UUID | Local rollout token events |
+| Claude Code in Claude Desktop, macOS | Beta | Independent native companion overlay | Focused Code window Accessibility URL | Exact Desktop metadata + local Claude Code transcripts |
+| Windows and Linux | Not implemented | — | — | — |
+
+Claude's production app blocks public CDP debugging without an Anthropic-signed authorization value. Token Meter does not bypass that control. The Claude integration is therefore a native overlay: it does not inject into, patch, re-sign, modify, quit, or relaunch Claude.app.
+
+Read the integration modules for their exact invariants:
+
+- [Codex Desktop integration](integrations/codex-desktop/README.md)
+- [Claude Code in Claude Desktop integration](integrations/claude-desktop/README.md)
+
+## What the Meter shows
 
 | Metric | Meaning |
 | --- | --- |
-| **Session** | Locally reported raw cumulative tokens for the selected root Session and every known child Agent sharing its `session_id`. |
-| **1H Session** | Locally reported raw token deltas for that Session tree during the trailing hour. |
-| **Current Turn** | Locally reported raw cumulative deltas since the latest root user message. |
-| **Active Context** | Codex-reported tokens currently occupying the selected root thread's context, shown against the active model context window. This value falls after compaction. |
+| **Session** | Locally reported raw cumulative tokens for the selected root Session and its known child Agents. |
+| **1H Session** | Raw token deltas for that Session tree during the trailing hour. |
+| **Current Turn** | Raw cumulative deltas since the latest root user message. |
+| **Active Context** | Tokens currently occupying the selected root context, shown against its model context window when available. |
 | **Rate** | Confirmed deltas in a trailing 60-second window, normalized to tokens per minute. |
-| **Baseline** | The median rate of completed historical turns, with p95 and median absolute deviation retained for anomaly detection. |
+| **Baseline** | Historical completed-turn median, p95, and median absolute deviation used for anomaly detection. |
 
-The counter never invents per-token streaming between host updates. It moves when Codex writes a new cumulative `TokenCount` snapshot and shows a visible `+delta` pulse, even when a compact `M` or `B` total would otherwise round to the same text. `TokenCount` is useful local telemetry, but it is not a billing-grade event and can include restored or estimated state.
+The needle moves from green through yellow and orange to red as live rate rises relative to the learned scale. The alert threshold is separate and deliberately conservative: a red needle communicates intensity, not a claim that the host is broken.
 
-### How Token Meter calculates usage
+## Collapse and drag
 
-Token Meter derives its readings from Codex's local rollout telemetry:
+Both Desktop integrations provide the same layout controls:
 
-1. It incrementally reads `~/.codex/sessions/**/rollout-*.jsonl` using bounded chunks. The parser retains numerical usage events, timestamps, Session identity, and turn boundaries only; it does not retain prompt, reasoning, tool, or assistant content.
-2. It reads the exact task UUID selected in the Codex sidebar, resolves that task's root rollout, and groups every root and child-Agent rollout with the same `session_id`. Switching tasks switches the entire group atomically.
-3. `SESSION` is the sum of the latest cumulative `total_token_usage.total_tokens` value reported by every rollout in that Session tree. It does not sum every historical snapshot.
-4. `1H SESSION`, `CURRENT TURN`, and the rate gauge use positive changes between consecutive cumulative snapshots inside their respective time windows. A normal increment is `current - previous`; if a counter resets, the new value becomes the increment:
+- Click `−` to collapse the Meter to its gauge and live `tokens/min` value.
+- Click `+` to expand it.
+- Drag the header while expanded.
+- Drag the gauge while collapsed.
+- Position and collapsed state persist across Session changes and service restarts.
+
+Codex stores layout state in its local renderer storage. Claude stores it under `~/Library/Application Support/Token Meter/State/Claude Desktop/`.
+
+## How usage is calculated
+
+Token Meter measures local raw model workload, not subscription billing.
+
+### Codex
+
+The collector incrementally reads `~/.codex/sessions/**/rollout-*.jsonl`, retains numerical events and timing metadata only, and groups the exact selected root task with descendants sharing its `session_id`.
+
+`SESSION` is the sum of the latest cumulative `total_token_usage.total_tokens` values for that Session tree. Windowed metrics use positive changes between consecutive cumulative snapshots:
 
 ```text
 delta = current >= previous ? current - previous : current
 ```
 
-5. Cached input is already a subset of input and is not added a second time. It remains included at its full raw token count whenever Codex reports it. A turn can contain many upstream model requests around tool calls, and each reported request contributes to the raw workload.
-6. The alert model compares the trailing 60-second raw-token rate with the median, p95, and median absolute deviation of completed historical turns.
+Cached input remains included once whenever Codex reports it. `ACTIVE CONTEXT` is separate: it uses the selected root thread's latest `last_token_usage.total_tokens` and `model_context_window`, so it can fall after compaction while cumulative Session workload never decreases.
 
-This method is deliberately optimized for observability rather than billing reconciliation. Repeated large cached prompts, tool loops, retries, and child-Agent activity all increase the Meter, because they are meaningful signals of how hard the Agent is working and whether a Session may be unhealthy.
+This local workload does not strictly match Codex `/usage`. The backend account surface has no per-Session attribution and OpenAI does not publish the aggregation, normalization, or compression formula that maps local rollout telemetry to its account chart. See [the reconciliation note](docs/research/codex-account-usage-reconciliation.md).
 
-### Raw workload versus active context
+### Claude
 
-Token Meter keeps two independent readings:
-
-- `SESSION`, `1H SESSION`, `CURRENT TURN`, and the rate gauge use positive deltas from Codex's cumulative `total_token_usage`. This is a raw workload counter: cached input remains part of total input and is counted once each time Codex reports it.
-- `ACTIVE CONTEXT` uses the selected root thread's latest `last_token_usage.total_tokens` and `model_context_window`. When Codex emits `context_compacted`, this reading resets to the smaller compacted context and then grows again.
-
-This distinction follows Codex's own usage and compaction surfaces: the official App Server exposes active-thread usage updates and a `contextCompaction` lifecycle, while Codex configuration defines both the automatic compaction threshold and model context window. See the [Codex App Server reference](https://developers.openai.com/codex/app-server/) and [configuration reference](https://developers.openai.com/codex/config-reference/).
-
-### Why this does not match Codex `/usage`
-
-Codex `/usage` is a separate backend account statistic. Its App Server method, `account/usage/read`, accepts no Session or thread parameter and returns only an account summary plus optional daily buckets. The public protocol exposes no per-Session backend attribution, and OpenAI does not publish the backend aggregation, normalization, or compression formula that maps rollout `total_token_usage` to the account activity number.
-
-The [official Codex rate card](https://help.openai.com/en/articles/20001106-codex-rate-card) confirms that uncached input, cached input, and output have different credit rates. That does not establish that the `/usage` chart applies the same weighting, and Token Meter will not present a reverse-engineered estimate as an exact backend Session total.
-
-The two values therefore are not expected to match exactly. The practical boundary is:
-
-- Token Meter can measure Session-bound local raw workload and rate under one consistent collector method.
-- Codex can return exact backend account-level daily activity through `/usage`.
-- No currently exposed API can return exact backend-accounted usage for one Session.
-
-Despite that difference, the local reading remains useful as a consistent relative instrument: its absolute value is not a `/usage` bill, but its movement, rate, historical deviation, and Session-to-Session comparison reveal Agent intensity and potential Session pollution.
-
-See [the account-usage reconciliation note](docs/research/codex-account-usage-reconciliation.md) for the protocol evidence and known limitations.
-
-## Live intensity and alerts
-
-The needle moves from left to right as the current rate rises relative to the learned historical scale:
-
-- Green: below 50% intensity.
-- Yellow: 50–70%.
-- Orange: 70–85%.
-- Red: 85% and above.
-
-Color is an immediate intensity cue. Alerts use a separate, conservative statistical threshold so a red needle does not automatically assert that Codex is broken.
-
-| Normal monitoring | Unusually high rate |
-| --- | --- |
-| <img src="docs/assets/token-meter-live.png" width="480" alt="Token Meter normal monitoring state"> | <img src="docs/assets/token-meter-alert.png" width="480" alt="Token Meter warning state with a high token rate"> |
-
-_Screenshots are captured from the real injected Shadow DOM runtime with controlled sample telemetry and a privacy backdrop._
-
-## Support status
-
-| Host | Status | UI | Usage source |
-| --- | --- | --- | --- |
-| Codex Desktop, macOS | Supported | Injected lower-right overlay | Local rollout token events |
-| Claude Code in Claude Desktop, macOS | Host-blocked for UI injection | Production CDP requires Anthropic-signed authorization | Read-only Desktop Session resolver and transcript collector implemented |
-| Codex Desktop, Windows/Linux | Not implemented | — | — |
-
-Validated locally against Codex Desktop `26.730.61639 (6234)`. Codex DOM and rollout formats are compatibility surfaces, so newer builds must pass the release checks in [the architecture document](docs/architecture.md).
-
-## Install from source
-
-Requirements:
-
-- macOS.
-- Codex Desktop installed at `/Applications/ChatGPT.app`, or `CODEX_APP_PATH` set to the official application bundle.
-- Node.js 22.12 or newer for development. The launcher uses the Node runtime bundled with Codex.
-
-```bash
-git clone https://github.com/SergioChan/token-meter.git
-cd token-meter
-npm test
-npm run check
-```
-
-Install the persistent per-user service:
-
-```bash
-./scripts/install-token-meter-macos.sh
-```
-
-Installation copies the runtime to `~/Library/Application Support/Token Meter/` and loads `~/Library/LaunchAgents/com.sergiochan.token-meter.plist`. After that, open Codex normally from the Dock or Applications folder—no special command is required on each launch, and the service returns automatically after login or reboot.
-
-If a new Codex process starts without the required loopback debugging endpoint, the service performs one normal quit and relaunch with the endpoint enabled. It never force-quits, and it will not retry the same process after a failed recovery attempt. Logs contain lifecycle messages only and live in `~/Library/Logs/Token Meter/`.
-
-To update an existing installation after pulling a new version, run the installer again:
-
-```bash
-git pull --ff-only
-./scripts/install-token-meter-macos.sh
-```
-
-For one-shot development without installing the LaunchAgent, use:
-
-```bash
-./scripts/start-codex-meter-macos.sh --restart
-```
-
-Keep that terminal open. The one-shot launcher remains intentionally separate from the normal persistent installation.
-
-## Security boundary
-
-Token Meter is an unofficial local desktop companion, not a documented Codex host-UI extension. It does not modify, unpack, replace, or re-sign the official application bundle.
-
-Before injection, the launcher and injector:
-
-1. Verify the exact application path and bundle identifier `com.openai.codex`.
-2. Verify the official code signature and OpenAI Team ID.
-3. Bind CDP to `127.0.0.1` only and reject an occupied port.
-4. Verify the listening socket belongs to the expected Codex process tree.
-5. Probe renderer semantics before registering any persistent script.
-6. Reject Avatar, blank, and auxiliary renderer surfaces.
-7. Limit automatic launch recovery to one normal quit/relaunch per Codex process.
-
-CDP is a privileged local debugging interface. Do not run untrusted local software while it is enabled. See [SECURITY.md](SECURITY.md) for the threat model and vulnerability reporting process.
-
-## Session binding
-
-Token Meter reads the exact UUID from Codex's active semantic sidebar row. When you switch tasks, the entire Meter switches atomically to the new Session.
-
-If the selected UUID cannot be validated or matched to local telemetry, the Meter displays `SESSION UNKNOWN`. It never guesses from the newest rollout file and never carries numbers over from a previous Session.
-
-## Uninstall and restore Codex
-
-Remove the LaunchAgent, installed runtime, overlay, and local lifecycle logs, then normally restart Codex without the debugging port:
-
-```bash
-./scripts/uninstall-token-meter-macos.sh --restart
-```
-
-Without `--restart`, the service and overlay are removed immediately; the current Codex process keeps its loopback debugging port until you quit it normally. For a one-shot development run, press Control-C or use `./scripts/stop-codex-meter-macos.sh --restart`.
-
-## Read-only snapshots
-
-Inspect one Session without injecting UI:
-
-```bash
-/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node \
-  src/cli.mjs snapshot --thread-id <thread-uuid>
-```
-
-The parser retains numerical usage events and timing metadata only. It does not retain prompt, reasoning, tool, or assistant content.
-
-## Architecture
-
-```mermaid
-flowchart LR
-  A["Codex rollout JSONL"] --> B["Bounded read-only collector"]
-  B --> C["Session-tree metrics engine"]
-  C --> D["Cumulative usage + active context"]
-  D --> E["Rate and anomaly model"]
-  E --> F["Verified CDP adapter"]
-  F --> G["Shadow DOM Token Meter"]
-  H["Active Codex task UUID"] --> C
-```
-
-The measurement core is host-independent. Codex-specific rollout and UI code lives behind adapters so a future Claude Desktop adapter can reuse the same Session, window, turn, rate, and alert semantics.
-
-Read [docs/architecture.md](docs/architecture.md) for invariants and [the original feasibility study](docs/research/codex-token-meter-feasibility.md) for source-level research.
-
-## Development
-
-```bash
-npm test
-npm run check
-```
-
-With an injected Codex instance running on port 9334, regenerate the README screenshots:
-
-```bash
-npm run screenshots
-```
-
-## Claude Desktop status
-
-**No: this repository does not support the injected Token Meter inside production Claude Desktop today.** The read-only usage adapter works, and a fail-closed renderer/injector adapter exists for compatibility work, but the host application prevents a normal third-party launcher from enabling CDP.
-
-Read-only inspection of Claude Desktop `1.24012.9` found an explicit startup gate: the production main process exits when it sees `--remote-debugging-port` or `--remote-debugging-pipe`, unless both `CLAUDE_USER_DATA_DIR` and a valid `CLAUDE_CDP_AUTH` value are present. That authorization is short-lived, bound to the exact user-data path, and verified with an embedded Anthropic public key. The installed application contains verification code but no public local signer, and Anthropic does not document a third-party issuance flow.
-
-Token Meter will not bypass this control by patching, copying, re-signing, or dynamically modifying Claude.app. A public injected adapter therefore requires either an Anthropic-supported extension surface for persistent host UI or an officially issued CDP authorization flow.
-
-The offline adapter foundation is now implemented and tested:
-
-- The macOS verifier checks the canonical Claude application path, bundle identifier, code signature, Anthropic Team ID, and executable.
-- The Session resolver maps one exact Desktop `local_<uuid>` identity to its underlying Claude Code transcript identity and fails closed on missing or ambiguous metadata.
-- The bounded incremental collector reads the exact root transcript plus its child-Agent transcripts, discards message content, de-duplicates repeated response rows by `message.id`, and replaces partial usage snapshots with the latest confirmed snapshot.
-- The shared metrics engine produces Session, trailing-hour, current-turn, rate, baseline, alert, compaction, child-Agent, and latest root-context readings from those events.
-- Fixtures cover duplicate, partial, appended, truncated, oversized, switched, unknown, and ambiguous Session cases.
-- The dormant fail-closed injector verifies the Claude application and CDP listener owner, rejects untrusted targets, requires an exact `/code/<local_uuid>` binding with semantic Code-page markers, and registers the UI script only after that probe passes. It is not exposed as a public launcher while the host authorization prerequisite is unavailable.
-
-A development-only read-only snapshot can be generated without opening a debugging port or restarting Claude:
-
-```bash
-npm run claude:snapshot -- \
-  --desktop-session-id local_<desktop-session-uuid>
-```
-
-Claude transcript usage fields are counted as raw model workload:
+The collector resolves the exact Desktop `local_<uuid>` to its underlying Claude Code transcript, de-duplicates repeated response rows by `message.id`, and counts one latest confirmed contribution per response:
 
 ```text
 raw tokens = input_tokens
@@ -249,9 +86,7 @@ raw tokens = input_tokens
            + output_tokens
 ```
 
-Repeated transcript rows are not added again. This follows Anthropic's documented cache-token breakdown, where `input_tokens` excludes cache-read and cache-creation tokens. It remains a local observability metric, not a subscription-plan or billing total. See [Anthropic's prompt caching documentation](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
-
-Claude `ACTIVE CONTEXT` uses the selected root transcript's most recent input-side usage snapshot:
+Claude `ACTIVE CONTEXT` uses the latest root response's input side only:
 
 ```text
 active context = input_tokens
@@ -259,26 +94,147 @@ active context = input_tokens
                + cache_read_input_tokens
 ```
 
-This is current context occupancy, not cumulative Session workload, and matches Claude Code's documented status-line semantics. Output tokens are excluded from the context percentage. A compaction clears the reading until the next API response supplies a fresh usage snapshot. The transcript does not contain the model context-window size; a native Desktop companion can read the exact formatted denominator from the eligible Code window's Accessibility context label, while the standalone `claude-snapshot` command leaves that denominator unavailable instead of inferring it from a model name. See [Claude Code status-line data](https://code.claude.com/docs/en/statusline#available-data).
+Output is intentionally excluded from context occupancy. The denominator comes from the visible Claude context ratio when present, otherwise from the installed Claude model catalog matched to the exact Session model. These local formats are private, version-sensitive compatibility surfaces.
 
-The target is the graphical Code tab documented by Anthropic, not a terminal status line. The intended adapter is:
+Neither host collector retains prompt, reasoning, tool, or assistant content in the metrics index.
 
-1. Inject the same Shadow DOM meter into the verified Claude Desktop main renderer.
-2. Read the exact Session selected in the Desktop sidebar; never infer it from the newest process or transcript.
-3. Use the implemented Desktop Session resolver to bind the underlying Claude Code transcript identity.
-4. Use the implemented content-discarding collector to aggregate confirmed usage events into Session, trailing-hour, current-turn, rate, and baseline snapshots.
-5. Switch the complete meter atomically whenever the selected Desktop Session changes.
+## Install with an Agent
 
-The local files and renderer structure are undocumented, version-sensitive compatibility surfaces. Even with user approval to restart or launch a second instance, the production CDP authorization gate remains. Until Anthropic exposes a supported authorization or extension route, support remains **host-blocked for UI injection**; no Claude restart is useful for Token Meter validation.
+Attach [INSTALL_WITH_AGENT.md](INSTALL_WITH_AGENT.md) to Codex, Claude Code, or another capable local coding Agent. The file is an executable installation prompt that covers host detection, tests, restart approval boundaries, Accessibility, installation, and real runtime verification.
 
-See [the Claude Desktop adapter status](docs/claude-code.md). Anthropic's public product documentation confirms that [the Code tab is Claude Code's graphical Desktop interface](https://code.claude.com/docs/en/desktop).
+## Install from source
+
+Requirements:
+
+- macOS.
+- Node.js 22.12 or newer for development and the Claude companion.
+- Official Codex Desktop and/or Claude Desktop application bundles.
+
+```bash
+git clone https://github.com/SergioChan/token-meter.git
+cd token-meter
+npm run ci
+```
+
+### Codex Desktop
+
+```bash
+./scripts/install-token-meter-macos.sh
+```
+
+The installer loads `~/Library/LaunchAgents/com.sergiochan.token-meter.plist`. If a running Codex process lacks the required loopback endpoint, the service performs at most one normal quit/relaunch attempt. It never force-quits or loops relaunches.
+
+After installation, Codex can be opened normally from the Dock or Applications folder.
+
+### Claude Code in Claude Desktop
+
+```bash
+./scripts/install-claude-meter-macos.sh
+```
+
+If Node.js must be selected explicitly:
+
+```bash
+./scripts/install-claude-meter-macos.sh --node /opt/homebrew/bin/node
+```
+
+Enable **Token Meter for Claude** in System Settings > Privacy & Security > Accessibility when prompted. Claude remains running throughout installation.
+
+Verify:
+
+```bash
+./scripts/status-claude-meter-macos.sh --json
+```
+
+See [the complete Claude installation guide](docs/install-claude-desktop.md) for permission, troubleshooting, update, and uninstall instructions.
+
+## Security and privacy
+
+Token Meter is an unofficial local desktop enhancement. It is not affiliated with or endorsed by OpenAI or Anthropic.
+
+The Codex integration:
+
+1. Verifies the canonical app path, bundle identifier, OpenAI Team ID, and code signature.
+2. Binds CDP to `127.0.0.1` only.
+3. Verifies listener process ownership and renderer semantics before injection.
+4. Rejects auxiliary, blank, and lookalike surfaces.
+5. Never modifies or re-signs Codex.app.
+
+The Claude integration:
+
+1. Verifies the canonical Claude.app path, bundle identifier, Anthropic Team ID, and code signature during installation.
+2. Requires Accessibility permission for the independently signed Token Meter companion itself.
+3. Reads only the focused window URL and geometry needed for exact Session binding and placement.
+4. Hides when Claude is not frontmost or exact Session identity is unavailable.
+5. Never enables CDP, injects into Claude, or modifies/restarts Claude.app.
+
+See [SECURITY.md](SECURITY.md) for the threat model and vulnerability reporting process.
+
+## Session binding
+
+Token Meter never guesses the selected Session from process recency, transcript modification time, or the newest local file.
+
+- Codex reads the exact active semantic sidebar UUID.
+- Claude reads the exact `local_<uuid>` from the focused Code window's Accessibility URL and resolves one matching metadata record.
+
+If validation fails, the Meter becomes unbound or hides instead of carrying numbers from the previous Session.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  C1["Codex rollout JSONL"] --> CORE["Shared metrics core"]
+  C2["Active Codex task UUID"] --> CORE
+  CORE --> CDP["Verified Codex CDP adapter"]
+  CDP --> UI["Shared Token Meter runtime"]
+
+  A1["Claude Desktop metadata + transcript"] --> CORE
+  A2["Focused Claude local Session ID"] --> CORE
+  CORE --> NATIVE["Native Claude companion"]
+  NATIVE --> UI
+```
+
+The shared core owns Session, hour, turn, context, rate, baseline, and alert semantics. Each host integration owns only its identity, telemetry, lifecycle, and presentation adapter.
+
+Read [the architecture document](docs/architecture.md), [Codex feasibility study](docs/research/codex-token-meter-feasibility.md), and [Claude selected-Session signal research](docs/research/claude-selected-session-signals.md).
+
+## Development
+
+```bash
+npm run ci
+```
+
+Useful commands:
+
+```bash
+npm run snapshot -- --thread-id <codex-thread-uuid>
+npm run claude:snapshot -- --desktop-session-id local_<claude-session-uuid>
+npm run claude:status -- --json
+```
+
+With an injected Codex instance on port 9334, regenerate controlled README screenshots:
+
+```bash
+npm run screenshots
+```
+
+Screenshots use controlled telemetry and a privacy backdrop. Demo recordings and local artifacts are intentionally excluded from Git.
+
+## Compatibility
+
+Validated locally on 2026-08-05 against:
+
+- Codex Desktop `26.730.61639 (6234)`.
+- Claude Desktop `1.24012.9` with bundled Claude Code `2.1.219`.
+
+DOM, Accessibility, metadata, transcript, and packaged model-catalog formats are compatibility surfaces, not public extension contracts. Unknown or changed builds must fail closed until verified.
 
 ## Contributing
 
-Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), follow the privacy and fail-closed invariants, and include tests for behavior changes.
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), preserve the privacy and fail-closed invariants, and include behavior tests for changes.
 
 ## License and attribution
 
 Token Meter is released under the [MIT License](LICENSE).
 
-The Codex injection architecture was informed by [Fei-Away/Codex-Dream-Skin](https://github.com/Fei-Away/Codex-Dream-Skin). Token Meter is not affiliated with or endorsed by OpenAI or Anthropic. Codex, Claude, and Claude Code are trademarks of their respective owners.
+The Codex injection architecture was informed by [Fei-Away/Codex-Dream-Skin](https://github.com/Fei-Away/Codex-Dream-Skin). Codex, Claude, and Claude Code are trademarks of their respective owners.

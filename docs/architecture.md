@@ -7,12 +7,12 @@ Token Meter is a local desktop enhancement with a small core and host adapters. 
 1. Exact active-session identity.
 2. Confirmed token-usage events and turn boundaries.
 
-The first implementation uses Codex rollout JSONL as a read-only compatibility adapter and loopback CDP as an unofficial UI adapter.
+The Codex implementation uses rollout JSONL as a read-only compatibility adapter and loopback CDP as an unofficial UI adapter. The Claude implementation uses local Claude Code transcripts for measurement and a separate native macOS companion for presentation.
 
 Current host support:
 
-- Codex Desktop on macOS: implemented.
-- Claude Code in Claude Desktop on macOS: read-only Session resolver, transcript collector, metrics adapter, application verifier, renderer probe, and dormant injector adapter implemented; production UI injection is blocked by host CDP authorization.
+- Codex Desktop on macOS: supported through verified renderer injection.
+- Claude Code in Claude Desktop on macOS: Beta through a native companion overlay.
 - Codex Desktop on Windows and Linux: implementation absent.
 
 ## Modules
@@ -31,13 +31,14 @@ MetricsEngine
   historical baseline and anomaly level
         |
         v
-CodexInjector
+CodexDesktopAdapter
   exact active-thread probe
+  verified loopback CDP
   main-renderer validation
   shadow-DOM UI updates
 ```
 
-The seam between the core and a host adapter is the snapshot shape returned by `MetricsEngine`. The Claude Desktop collector now satisfies that shape from confirmed transcript usage events. The renderer adapter remains dormant because production Claude requires an Anthropic-signed CDP authorization token that has no documented third-party issuance path.
+The seam between the core and a host adapter is the snapshot shape returned by `MetricsEngine`. Both adapters produce the same Session, rolling-hour, current-turn, active-context, rate, baseline, and alert fields. Presentation receives numerical snapshots and never needs transcript content.
 
 ```text
 ClaudeDesktopSessionStore
@@ -54,10 +55,14 @@ MetricsEngine
   shared Session, window, turn, rate, and alert snapshot
         |
         v
-ClaudeInjector
-  verified listener ownership
-  semantic Code renderer probe
-  Shadow DOM updates
+PersistentSnapshotBridge
+  newline-delimited numerical snapshots
+        |
+        v
+ClaudeNativeCompanion
+  exact focused-window Accessibility URL
+  non-activating panel
+  window following, drag, and collapse
 ```
 
 ## Invariants
@@ -72,13 +77,17 @@ ClaudeInjector
 - All rolling-window calculations sum positive cumulative deltas and tolerate counter resets.
 - Prompt, reasoning, tool, and assistant content are never retained by the parser.
 - Numerical UI values move only toward locally reported snapshots; no per-token stream is fabricated between host updates.
-- CDP connections are loopback-only and main-renderer-only.
-- The official Codex bundle path, bundle ID, code signature, and signing Team ID are verified before attachment.
-- A renderer must pass the semantic probe before any persistent injection script is registered.
+- Codex CDP connections are loopback-only and main-renderer-only.
+- The official host bundle path, bundle ID, code signature, and signing Team ID are verified before the relevant adapter starts.
+- A Codex renderer must pass the semantic probe before any persistent injection script is registered.
+- The Claude companion reads only the focused Claude window and hides when an exact local Code Session cannot be proven.
+- Neither adapter modifies, patches, replaces, or re-signs its official host application.
 
 ## Session switching
 
 The Codex adapter polls the verified semantic active-thread attribute once per second. When the UUID changes, it requests a snapshot for the new root thread and atomically updates the entire meter. A missing or invalid UUID produces an unbound card. Child rollouts are indexed by root Session identity even when they were created in a later date directory. A recursive filesystem watcher invalidates the rollout index when a new child appears; the ten-second discovery interval remains a fallback rather than the normal update path.
+
+The Claude companion reads the exact `local_<uuid>` from the focused Code window's Accessibility URL. It resolves that value to one Desktop metadata record and one Claude Code transcript identity. A change replaces the full snapshot atomically. Missing, remote-only, invalid, or ambiguous identity hides the overlay rather than retaining the previous Session's values.
 
 ## Session versus thread
 
@@ -98,11 +107,19 @@ The App Server's `account/usage/read` method has no parameters and returns an ac
 
 Token Meter therefore does not infer an exact per-Session backend number. Account deltas cannot be assigned safely when Sessions, child Agents, other devices, or delayed backend aggregation overlap. The meter retains raw workload because repeated cached requests are still useful evidence of agent intensity and runaway loops, while documentation and UI must not call that reading an account bill or `/usage` equivalent.
 
-## macOS lifecycle controller
+## Codex macOS lifecycle controller
 
 The source installer copies the minimal runtime into the user's Application Support directory and loads a per-user LaunchAgent. The controller waits for Codex instead of opening it at login. A normal Dock launch without loopback CDP receives at most one normal quit/relaunch attempt for that process. Failed verification, an occupied port, a failed normal quit, or a failed relaunch all fail closed without a force-quit or relaunch loop.
 
 The controller remains alive across later Codex launches and sleep/wake. `RunAtLoad` restores it after login; launchd does not use `KeepAlive`, so an unexpected controller crash cannot become a launchd crash loop. Re-running the installer refreshes the copied runtime and restarts the controller without modifying the official application bundle.
+
+## Claude macOS companion lifecycle
+
+The Claude installer builds and signs an independent `Token Meter for Claude.app`, copies the minimum runtime into the user's Application Support directory, and loads a per-user LaunchAgent. Source builds use ad-hoc signing unless a stable identity is supplied. The executable owns a non-activating `NSPanel`; it never executes code inside Claude's renderer.
+
+macOS Accessibility permission is granted to the companion, not to the repository shell and not to Claude.app. The process writes a PID readiness marker only after Accessibility trust succeeds. The status command validates both that marker and the exact executable command, so a loaded but permission-blocked LaunchAgent is not reported as ready. A blocked companion remains alive and polls the trust state quietly; it neither repeats the system prompt nor quits or relaunches Claude.
+
+One persistent Node bridge holds the transcript stores and metrics engine in memory. The Swift host sends the exact selected Desktop Session ID and receives a newline-delimited numerical snapshot. Timeout, malformed output, or bridge termination causes a restart or hidden meter; no stale snapshot is assigned to a new Session.
 
 ## Alert model
 
@@ -112,7 +129,7 @@ Alerts are advisory. Token Meter never interrupts Codex, kills an agent, or crea
 
 ## Compatibility policy
 
-Desktop injection is version-sensitive. Supporting a Codex release requires:
+Every Desktop integration relies on version-sensitive compatibility surfaces. Supporting a Codex release requires:
 
 - An exact active-thread UUID probe.
 - Main-renderer marker verification.
@@ -121,22 +138,30 @@ Desktop injection is version-sensitive. Supporting a Codex release requires:
 - A live navigation and cleanup smoke test.
 - A persistent-controller login load, normal-launch recovery, and one-attempt failure check.
 
-Unknown builds fail closed until verified.
+Supporting a Claude release requires:
 
-The latest live validation recorded in this repository used Codex Desktop `26.730.61639 (6234)` on macOS.
+- Exact local Code Session identity from the focused Accessibility window.
+- One unambiguous Desktop Session-to-transcript mapping.
+- Transcript response de-duplication and content-discarding parser checks.
+- Verified official application identity and installed model catalog.
+- Native overlay focus, display-coordinate, Session-switch, drag, and collapse checks.
+- LaunchAgent readiness and Accessibility denial checks that do not restart Claude.
+
+Unknown builds and formats fail closed until verified.
+
+The latest live validation recorded in this repository used Codex Desktop `26.730.61639 (6234)` and Claude Desktop `1.24012.9` with bundled Claude Code `2.1.219` on macOS.
 
 ## Claude Desktop adapter boundary
 
-The Claude target is the Code tab inside Claude Desktop, not the Claude Code CLI status line. It can reuse the measurement and Shadow DOM presentation layers, but not the Codex Session probe, rollout reader, application verifier, or renderer allowlist.
+The Claude target is the Code surface inside Claude Desktop, not the Claude Code CLI status line. It reuses the metrics and visual-language layers, but not the Codex Session probe, rollout reader, CDP verifier, renderer allowlist, or injected DOM.
 
-Claude Desktop `1.24012.9` performs a startup check before normal initialization. `--remote-debugging-port` and `--remote-debugging-pipe` cause the production process to exit unless `CLAUDE_CDP_AUTH` validates against the embedded Anthropic public key and is bound to the exact `CLAUDE_USER_DATA_DIR`. The accepted token is time-limited to five minutes. The application contains the verifier but no public local signer.
+Claude Desktop `1.24012.9` rejects public CDP debugging unless a short-lived `CLAUDE_CDP_AUTH` value validates against Anthropic's embedded public key and exact user-data directory. Token Meter does not forge or bypass that control. Its supported path is therefore the independent native companion described above.
 
-This is a host security boundary, not an unresolved command-line detail. Token Meter does not patch or re-sign the official bundle and does not attempt to forge or bypass signed authorization. The dormant CDP adapter can only become a supported path if Anthropic provides an official authorization flow; otherwise Claude support requires a different supported UI surface or a separately approved companion-overlay architecture.
+The Claude adapter has four host-specific responsibilities:
 
-The macOS adapter has three host-specific responsibilities:
+1. Verify the official Claude application identity and packaged model catalog before installation.
+2. Read an exact local Session ID from the focused Code window and map it to the underlying Claude Code transcript identity.
+3. Convert confirmed, de-duplicated transcript usage events into the shared snapshot model without retaining message content.
+4. Present that snapshot in a non-activating panel positioned relative to the focused Claude window, with persistent drag and collapse state.
 
-1. Verify the official Claude application, loopback debugging listener, process ownership, and semantic main renderer before injection. The fail-closed verification code is implemented but cannot reach a production renderer without host-issued CDP authorization.
-2. Read the exact Session selected in the Desktop UI and map its Desktop identity to the underlying Claude Code transcript identity. The route/current-link conflict detector and fail-closed identity mapper are implemented; live Session-switch validation remains pending.
-3. Convert confirmed, de-duplicated transcript usage events into the shared snapshot model without retaining message content. The bounded incremental collector and shared metrics path are implemented.
-
-Observed Desktop metadata and transcript formats are undocumented compatibility surfaces. Missing or ambiguous identity, remote-only telemetry, an unknown renderer, or an unsupported build must produce an unbound meter rather than a guessed Session. See [claude-code.md](claude-code.md).
+Observed Accessibility URLs, Desktop metadata, transcript formats, and packaged model catalogs are undocumented compatibility surfaces. Missing or ambiguous identity, remote-only telemetry, an unknown format, or an unsupported build must hide or unbind the meter rather than guess a Session. See [claude-code.md](claude-code.md).

@@ -32,9 +32,11 @@ Changes must preserve these properties:
 - Raw rollout totals must never be labeled as Codex `/usage`, backend billing, credits, or exact per-Session account consumption.
 - Child-Agent usage remains visible and explicitly labeled.
 - Renderer scripts are registered only after the target passes semantic verification.
-- CDP remains loopback-only and is accepted only from the verified official Codex process tree.
+- Codex CDP remains loopback-only and is accepted only from the verified official Codex process tree.
+- Claude binds only the exact local Session exposed by the focused Accessibility window and never falls back to recency or display name.
+- The Claude companion remains independent from Claude.app, waits quietly when permission is absent, and never quits or relaunches Claude.
 - The collector never retains prompt, reasoning, tool, or assistant content.
-- Shutdown removes injected DOM and never force-quits Codex.
+- Shutdown removes injected DOM or the native companion panel and never force-quits a host.
 
 ## Tests
 
@@ -54,6 +56,16 @@ For Codex compatibility changes, also verify:
 5. A compaction fixture reduces Active Context without reducing cumulative Session usage.
 6. The LaunchAgent loads at login and makes no more than one normal recovery attempt per Codex process.
 7. Control-C removes a one-shot overlay, and uninstall removes the persistent service.
+
+For Claude compatibility changes, also verify:
+
+1. The focused Code Session binds by exact `local_<uuid>`.
+2. Switching Sessions replaces the complete snapshot without retaining previous values.
+3. Chat, Cowork, Settings, auxiliary windows, and non-frontmost Claude hide the panel.
+4. Expanded and collapsed layouts both drag and persist correctly.
+5. Active Context uses root input-side usage and an exact model-window source.
+6. Missing Accessibility permission produces no repeated prompt, process churn, or Claude restart.
+7. Install, status, update, and uninstall leave the official Claude.app untouched.
 
 ## Pull requests
 
