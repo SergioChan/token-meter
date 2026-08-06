@@ -13,7 +13,7 @@ usage() {
 Usage: doctor.sh [--json] [--node PATH]
 
 Check prerequisites for building the Claude Desktop companion from source.
-Prebuilt release installation does not require Node.js, Swift, or Xcode.
+Token Meter does not publish a prebuilt Claude companion.
 EOF
 }
 

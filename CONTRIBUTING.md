@@ -67,7 +67,7 @@ For Claude compatibility changes, also verify:
 5. Active Context uses root input-side usage and an exact model-window source.
 6. Missing Accessibility permission produces no repeated prompt, process churn, or Claude restart.
 7. Install, status, update, and uninstall leave the official Claude.app untouched.
-8. Release builds pass Developer ID, notarization, checksum, architecture, transactional rollback, and live-health checks.
+8. Installation rejects unsafe managed paths and restores the previous companion if replacement readiness fails.
 
 ## Pull requests
 

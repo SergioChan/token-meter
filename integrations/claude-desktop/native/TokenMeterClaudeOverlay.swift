@@ -41,12 +41,9 @@ private func usage() -> String {
     """
     Usage: TokenMeterClaudeOverlay --root PATH --node PATH [options]
 
-    Source-build overrides:
+    Required for normal operation:
       --root PATH           Installed Token Meter runtime root
       --node PATH           Absolute path to a Node.js executable
-
-    A release build uses its embedded runtime and Node.js when these overrides
-    are omitted.
 
     Options:
       --claude-app PATH     Claude.app path (default: /Applications/Claude.app)
@@ -67,15 +64,8 @@ private func absoluteURL(_ value: String, option: String) throws -> URL {
 }
 
 private func parseCommand(_ arguments: [String]) throws -> AppCommand {
-    let embeddedResources = Bundle.main.resourceURL
-    let embeddedRoot = embeddedResources?.appendingPathComponent("TokenMeterRuntime")
-    let embeddedNode = embeddedResources?.appendingPathComponent("Node/bin/node")
-    var rootPath: String? = embeddedRoot.flatMap {
-        fileManager.fileExists(atPath: $0.path) ? $0.path : nil
-    }
-    var nodePath: String? = embeddedNode.flatMap {
-        fileManager.isExecutableFile(atPath: $0.path) ? $0.path : nil
-    }
+    var rootPath: String?
+    var nodePath: String?
     var claudeAppPath = defaultClaudeAppPath
     var statePath = fileManager.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Token Meter/State/Claude Desktop")

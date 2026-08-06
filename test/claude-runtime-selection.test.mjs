@@ -80,3 +80,12 @@ test(
     assert.equal(result.readyForSourceInstall, true);
   },
 );
+
+test("Claude doctor describes the source-only distribution model", async () => {
+  const { stdout } = await execFileAsync("/bin/bash", [
+    "integrations/claude-desktop/scripts/doctor.sh",
+    "--help",
+  ]);
+  assert.match(stdout, /does not publish a prebuilt Claude companion/i);
+  assert.doesNotMatch(stdout, /prebuilt release installation/i);
+});

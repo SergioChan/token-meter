@@ -157,19 +157,11 @@ The per-user LaunchAgent is:
 com.sergiochan.token-meter.claude-desktop
 ```
 
-Source installations start the native companion with absolute runtime, Node.js, Claude.app, and state paths. Self-contained releases omit external runtime and Node.js arguments because both are sealed inside the application. Unexpected non-zero exits are throttled. An Accessibility-blocked companion stays alive and checks the trust state quietly without repeating the system prompt or touching Claude.
+It starts the native companion directly with absolute runtime, Node.js, Claude.app, and state paths. Unexpected non-zero exits are throttled. An Accessibility-blocked companion stays alive and checks the trust state quietly without repeating the system prompt or touching Claude.
 
 Structured health state is accepted only while its PID is alive and its command is the exact installed executable followed by an argument boundary. Prefix lookalikes are rejected. Live Accessibility trust, UI readiness, bridge health, and exact Session binding remain distinct status fields.
 
 Use:
-
-```bash
-./token-meter-claude install
-./token-meter-claude status --json
-./token-meter-claude uninstall
-```
-
-For source development:
 
 ```bash
 ./scripts/doctor-claude-meter-macos.sh
@@ -200,6 +192,5 @@ Future release validation should cover:
 - Display arrangements above, below, and beside the primary display.
 - Sleep/wake and login restoration.
 - Claude Desktop upgrades that change Accessibility URLs, metadata, transcript, or model-catalog formats.
-- A distributable stable signing and release-notarization path so users without a local signing identity can preserve Accessibility approval across binary updates consistently.
 
 Unknown formats or surfaces must remain hidden or unbound until verified.

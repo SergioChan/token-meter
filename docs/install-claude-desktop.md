@@ -4,58 +4,26 @@ Token Meter supports the Code surface inside Claude Desktop on macOS through an 
 
 The installer does not quit, relaunch, modify, patch, or re-sign Claude.app.
 
-## Recommended: signed release
+The Claude integration is source-distributed. Each developer compiles and ad-hoc signs the companion locally; this repository does not publish a prebuilt or notarized application package.
 
-Requirements:
+## Requirements
 
 - macOS 13 or newer.
 - The official signed Claude Desktop application at `/Applications/Claude.app`.
-- Permission to enable **Token Meter for Claude** in System Settings > Privacy & Security > Accessibility.
-
-Download the standalone release manager and install the latest release:
-
-```bash
-curl -fLO https://github.com/SergioChan/token-meter/releases/latest/download/token-meter-claude
-chmod +x token-meter-claude
-./token-meter-claude install
-```
-
-The manager downloads the asset matching the Mac's architecture and verifies all of the following before installation:
-
-1. The ZIP's SHA-256 value against the release checksum manifest.
-2. The app bundle identifier.
-3. The complete code-signature seal.
-4. The T54 Labs signing Team ID and `Developer ID Application` authority.
-5. Apple's Gatekeeper assessment and notarization result.
-6. The embedded Node.js runtime and exact architecture.
-
-The previous application and LaunchAgent are retained until the new process has written live health state. A failed launch or initialized-but-broken UI causes an automatic rollback.
-
-The release is self-contained. It does not require Node.js, Git, Swift, Xcode, administrator privileges, or changes to Claude.app.
-
-Release paths:
-
-```text
-Application: ~/Applications/Token Meter/Token Meter for Claude.app
-Manager:     ~/Library/Application Support/Token Meter/bin/token-meter-claude
-State:       ~/Library/Application Support/Token Meter/State/Claude Desktop/
-LaunchAgent: ~/Library/LaunchAgents/com.sergiochan.token-meter.claude-desktop.plist
-Logs:        ~/Library/Logs/Token Meter/Claude Desktop/
-```
-
-## Source installation for contributors
-
-Source installation additionally requires:
-
 - Git.
 - Node.js 22.12 or newer.
 - Xcode Command Line Tools with Swift.
+- Permission to enable **Token Meter for Claude** in System Settings > Privacy & Security > Accessibility.
 
-Check the complete source-build environment:
+Check all local build prerequisites:
 
 ```bash
 ./scripts/doctor-claude-meter-macos.sh
 ```
+
+The installer searches compatible Homebrew, PATH, and nvm candidates and skips old Node.js versions. Pass `--node` only when a specific compatible absolute path is required.
+
+## Install
 
 From the repository root:
 
@@ -63,13 +31,13 @@ From the repository root:
 ./scripts/install-claude-meter-macos.sh
 ```
 
-The installer checks common Homebrew, PATH, and nvm locations and skips incompatible Node.js versions. To force one absolute path:
+Or select Node.js explicitly:
 
 ```bash
 ./scripts/install-claude-meter-macos.sh --node /opt/homebrew/bin/node
 ```
 
-The source installer performs these operations:
+The installer performs these operations:
 
 1. Verifies the canonical Claude.app path, bundle identifier, Anthropic Team ID, code signature, executable, and packaged model catalog.
 2. Builds and signs `Token Meter for Claude.app` as a separate background application. Source builds use ad-hoc signing unless a stable identity is supplied.
@@ -77,7 +45,16 @@ The source installer performs these operations:
 4. Writes and loads `com.sergiochan.token-meter.claude-desktop` as a per-user LaunchAgent.
 5. Requests Accessibility permission for the companion application itself.
 
-Source-install paths:
+To build only the local app bundle for inspection:
+
+```bash
+./integrations/claude-desktop/scripts/build-app.sh \
+  --output "$PWD/local-artifacts/Token Meter for Claude.app"
+```
+
+That bundle still expects the repository runtime and a compatible local Node.js path. Run the installer for the complete runtime copy and LaunchAgent configuration.
+
+Default paths:
 
 ```text
 Application: ~/Library/Application Support/Token Meter/Claude Desktop/
@@ -95,14 +72,7 @@ If installation reports `Accessibility permission: required`:
 3. Enable **Token Meter for Claude**.
 4. Wait up to two seconds for the already-running companion to observe the new permission.
 
-If the release application is not listed, request the system prompt again:
-
-```bash
-open -n -a "$HOME/Applications/Token Meter/Token Meter for Claude.app" \
-  --args --prompt-accessibility
-```
-
-For a source build, use its application path instead:
+If the application is not listed, request the system prompt again:
 
 ```bash
 open -n -a "$HOME/Library/Application Support/Token Meter/Claude Desktop/Token Meter for Claude.app" \
@@ -111,7 +81,7 @@ open -n -a "$HOME/Library/Application Support/Token Meter/Claude Desktop/Token M
 
 Then return to the Accessibility panel and enable it. Run the prompt command once; the normal LaunchAgent never repeats it.
 
-The public release has one stable Developer ID identity, so normal updates preserve its TCC identity. An ad-hoc signed source build may require renewed permission after a rebuild. Contributors can use a stable local identity consistently:
+An ad-hoc signed development build may require renewed permission after an update. If a local code-signing identity is available, use it consistently:
 
 ```bash
 TOKEN_METER_CODESIGN_IDENTITY="Apple Development: Name (TEAMID)" \
@@ -121,14 +91,6 @@ TOKEN_METER_CODESIGN_IDENTITY="Apple Development: Name (TEAMID)" \
 List available identities with `security find-identity -v -p codesigning`. If Accessibility contains an entry from an older signature, remove that entry, add the current app from the installation path above, and enable it once.
 
 ## Verify
-
-Signed release:
-
-```bash
-"$HOME/Library/Application Support/Token Meter/bin/token-meter-claude" status --json
-```
-
-Source build:
 
 ```bash
 ./scripts/status-claude-meter-macos.sh --json
@@ -151,7 +113,7 @@ A ready installation returns:
 }
 ```
 
-`running`, `accessibilityGranted`, and `overlayReady` describe installation health independently. `bridgeHealthy` and `sessionBound` become `true` only while Claude is frontmost on a resolvable local Code Session; they are expected to be `false` while Claude is in the background or on Chat, Cowork, or Settings.
+`running`, `accessibilityGranted`, and `overlayReady` describe installation health independently. `bridgeHealthy` and `sessionBound` are expected to be `false` while Claude is in the background or is not showing a resolvable local Code Session.
 
 No Claude restart is required. Bring Claude Desktop to the foreground and select a local Code Session. The overlay appears only when it can prove the exact selected Session.
 
@@ -196,7 +158,7 @@ The reading is useful for Agent workload intensity and Session health. It is not
 Run:
 
 ```bash
-"$HOME/Library/Application Support/Token Meter/bin/token-meter-claude" status --json
+./scripts/status-claude-meter-macos.sh --json
 tail -n 100 "$HOME/Library/Logs/Token Meter/Claude Desktop/overlay-error.log"
 ```
 
@@ -215,37 +177,16 @@ The integration deliberately shows nothing rather than guessing another Session.
 
 ### Update
 
-Signed release:
-
-```bash
-"$HOME/Library/Application Support/Token Meter/bin/token-meter-claude" install
-```
-
-Source build:
-
 ```bash
 git pull --ff-only
 ./scripts/install-claude-meter-macos.sh
 ```
 
-Claude remains running. Reuse the same `TOKEN_METER_CODESIGN_IDENTITY` value for every update when stable local signing is desired. If an ad-hoc rebuild invalidates the prior Accessibility entry, enable the new build again.
+Claude remains running. The installer retains the previous app and LaunchAgent until the replacement process has produced matching live health state; bootstrap, process, and trusted-UI failures restore the previous installation. Reuse the same `TOKEN_METER_CODESIGN_IDENTITY` value for every update when stable local signing is desired. If an ad-hoc rebuild invalidates the prior Accessibility entry, enable the new build again.
 
 ## Uninstall
 
-Remove a signed release, LaunchAgent, and logs while retaining its saved layout:
-
-```bash
-"$HOME/Library/Application Support/Token Meter/bin/token-meter-claude" uninstall
-```
-
-Remove its state and explicitly revoke the Accessibility grant too:
-
-```bash
-"$HOME/Library/Application Support/Token Meter/bin/token-meter-claude" uninstall \
-  --purge-state --reset-accessibility
-```
-
-For a source build:
+Remove the companion, LaunchAgent, and logs while retaining its saved layout:
 
 ```bash
 ./scripts/uninstall-claude-meter-macos.sh
@@ -257,6 +198,12 @@ Remove saved position and collapsed state too:
 ./scripts/uninstall-claude-meter-macos.sh --purge-state
 ```
 
-Add `--reset-accessibility` when the source build's TCC entry should also be removed. Without that option, macOS retains the user's Accessibility decision even after application files are deleted.
+Remove the saved state and reset the app's macOS Accessibility decision too:
+
+```bash
+./scripts/uninstall-claude-meter-macos.sh --purge-state --reset-accessibility
+```
+
+Without `--reset-accessibility`, macOS retains the user's TCC decision after the application files are removed.
 
 Uninstallation does not quit, relaunch, or modify Claude Desktop.

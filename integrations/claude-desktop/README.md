@@ -4,17 +4,9 @@ This integration displays the shared Token Meter as an independent native macOS 
 
 It does **not** inject JavaScript into Claude, patch `app.asar`, re-sign Claude.app, or restart Claude. Production Claude Desktop rejects public CDP debugging without an Anthropic-signed authorization value, so the supported integration uses a native companion instead.
 
+Distribution is source-only: every developer builds and ad-hoc signs the companion locally. No prebuilt or notarized Claude package is published.
+
 ## Interface
-
-Signed release:
-
-```bash
-./token-meter-claude install
-./token-meter-claude status --json
-./token-meter-claude uninstall
-```
-
-Source development:
 
 ```bash
 ./scripts/doctor-claude-meter-macos.sh
@@ -35,7 +27,6 @@ See [the complete installation guide](../../docs/install-claude-desktop.md).
 - `src/snapshot-runtime.mjs` is the deep measurement module used by both CLI inspection and the overlay.
 - `src/overlay-bridge.mjs` keeps one Node process alive and serves newline-delimited numerical snapshots to the native host.
 - `scripts/` builds the background `.app` and manages its isolated LaunchAgent.
-- Signed release builds embed the numerical runtime and an official Node.js distribution inside the app; source builds may use an external Node.js path.
 
 ## Invariants
 

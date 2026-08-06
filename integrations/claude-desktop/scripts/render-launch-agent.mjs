@@ -24,24 +24,19 @@ function xml(value) {
 }
 
 const options = parseArguments(process.argv.slice(2));
-const requiredPathKeys = [
+const pathKeys = [
   "output",
   "executable",
+  "root",
+  "node",
   "claude-app",
   "state-dir",
   "stdout",
   "stderr",
 ];
-for (const key of ["label", ...requiredPathKeys]) {
+for (const key of ["label", ...pathKeys]) {
   if (!options[key]) throw new Error(`--${key} is required`);
 }
-if (Boolean(options.root) !== Boolean(options.node)) {
-  throw new Error("--root and --node must be provided together");
-}
-const pathKeys = [
-  ...requiredPathKeys,
-  ...(options.root ? ["root", "node"] : []),
-];
 for (const key of pathKeys) {
   if (!path.isAbsolute(options[key])) throw new Error(`--${key} must be absolute`);
   if (/[\0\r\n]/.test(options[key])) {
@@ -52,14 +47,15 @@ if (!/^[a-z0-9.-]+$/i.test(options.label)) throw new Error("--label is invalid")
 
 const argumentsList = [
   options.executable,
+  "--root",
+  options.root,
+  "--node",
+  options.node,
   "--claude-app",
   options["claude-app"],
   "--state-dir",
   options["state-dir"],
 ];
-if (options.root) {
-  argumentsList.splice(1, 0, "--root", options.root, "--node", options.node);
-}
 const argumentsXml = argumentsList
   .map((value) => `    <string>${xml(value)}</string>`)
   .join("\n");
