@@ -88,6 +88,7 @@ trap cleanup EXIT
 /bin/rm -rf "$STAGING" "$BACKUP"
 /bin/mkdir -p "$STAGING/scripts"
 /bin/cp -R "$ROOT/src" "$STAGING/src"
+/bin/cp -R "$ROOT/integrations" "$STAGING/integrations"
 /bin/cp -R "$ROOT/runtime" "$STAGING/runtime"
 /usr/bin/install -m 700 "$ROOT/scripts/token-meter-service-macos.sh" \
   "$STAGING/scripts/token-meter-service-macos.sh"

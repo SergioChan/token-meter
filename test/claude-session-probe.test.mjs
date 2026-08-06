@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   buildClaudeSessionProbeExpression,
   isClaudeDesktopSessionId,
-} from "../src/claude/session-probe.mjs";
+} from "../integrations/claude-desktop/src/session-probe.mjs";
 
 const sessionId = "local_11111111-2222-4333-8444-555555555555";
 

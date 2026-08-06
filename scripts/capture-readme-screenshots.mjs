@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { connectVerifiedCodexRenderer } from "../src/codex/injector.mjs";
+import { connectVerifiedCodexRenderer } from "../integrations/codex-desktop/src/injector.mjs";
 
 const cdpPort = Number(process.env.CODEX_CDP_PORT || 9334);
 const outputDirectory = path.resolve("docs/assets");

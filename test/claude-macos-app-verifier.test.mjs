@@ -5,7 +5,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import test from "node:test";
-import { verifyClaudeBundleIdentity } from "../src/claude/app-verifier.mjs";
+import { verifyClaudeBundleIdentity } from "../integrations/claude-desktop/src/app-verifier.mjs";
 
 const execFileAsync = promisify(execFile);
 

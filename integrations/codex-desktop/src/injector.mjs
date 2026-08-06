@@ -4,13 +4,13 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { MetricsEngine } from "../core/metrics-engine.mjs";
-import { RolloutStore } from "../core/rollout-store.mjs";
+import { MetricsEngine } from "../../../src/core/metrics-engine.mjs";
+import { RolloutStore } from "../../../src/core/rollout-store.mjs";
 import { CdpClient, isLoopbackWebSocketUrl } from "./cdp-client.mjs";
 import { buildSessionProbeExpression } from "./session-probe.mjs";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(moduleDirectory, "../..");
+const projectRoot = path.resolve(moduleDirectory, "../../..");
 const runtimePath = path.join(projectRoot, "runtime", "token-meter-ui.js");
 const stylesheetPath = path.join(projectRoot, "runtime", "token-meter-ui.css");
 const execFileAsync = promisify(execFile);

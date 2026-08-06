@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   buildSessionProbeExpression,
   isThreadId,
-} from "../src/codex/session-probe.mjs";
+} from "../integrations/codex-desktop/src/session-probe.mjs";
 
 const threadId = "11111111-2222-4333-8444-555555555555";
 

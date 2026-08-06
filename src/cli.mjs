@@ -45,8 +45,8 @@ if (options.command === "snapshot") {
   }
   const [{ ClaudeDesktopSessionStore }, { ClaudeTranscriptStore }] =
     await Promise.all([
-      import("./claude/desktop-session-store.mjs"),
-      import("./claude/transcript-store.mjs"),
+      import("../integrations/claude-desktop/src/desktop-session-store.mjs"),
+      import("../integrations/claude-desktop/src/transcript-store.mjs"),
     ]);
   const claudeSessionsDirectory =
     options.claudeSessionsDirectory ??
@@ -85,7 +85,10 @@ if (options.command === "snapshot") {
     process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
   }
 } else if (options.command === "inject") {
-  const modulePath = new URL("./codex/injector.mjs", import.meta.url);
+  const modulePath = new URL(
+    "../integrations/codex-desktop/src/injector.mjs",
+    import.meta.url,
+  );
   const { runCodexInjector } = await import(modulePath);
   const controller = new AbortController();
   process.once("SIGINT", () => controller.abort());
@@ -96,7 +99,10 @@ if (options.command === "snapshot") {
     signal: controller.signal,
   });
 } else if (options.command === "remove") {
-  const modulePath = new URL("./codex/injector.mjs", import.meta.url);
+  const modulePath = new URL(
+    "../integrations/codex-desktop/src/injector.mjs",
+    import.meta.url,
+  );
   const { removeCodexMeter } = await import(modulePath);
   const result = await removeCodexMeter({ cdpPort: options.cdpPort || 9334 });
   process.stdout.write(`${JSON.stringify(result)}\n`);

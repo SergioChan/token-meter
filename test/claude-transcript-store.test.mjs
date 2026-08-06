@@ -15,7 +15,7 @@ import {
   encodeClaudeProjectDirectory,
   normalizeClaudeUsage,
   parseClaudeTranscriptLine,
-} from "../src/claude/transcript-store.mjs";
+} from "../integrations/claude-desktop/src/transcript-store.mjs";
 import { MetricsEngine } from "../src/core/metrics-engine.mjs";
 
 const desktopSessionId = "local_00000000-0000-4000-8000-000000000011";

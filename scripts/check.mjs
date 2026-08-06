@@ -14,6 +14,7 @@ async function collect(directory, result = []) {
 
 const files = [
   ...(await collect("src")),
+  ...(await collect("integrations")),
   ...(await collect("runtime")),
   ...(await collect("scripts")),
   ...(await collect("test")),

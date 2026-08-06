@@ -5,7 +5,7 @@ import {
   isPotentialClaudePageTarget,
   parseClaudeLsofListenerRecords,
   verifyClaudeListenerRecords,
-} from "../src/claude/injector.mjs";
+} from "../integrations/claude-desktop/src/injector.mjs";
 
 const claudeExecutable = "/Applications/Claude.app/Contents/MacOS/Claude";
 

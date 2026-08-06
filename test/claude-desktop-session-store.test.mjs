@@ -6,7 +6,7 @@ import test from "node:test";
 import {
   ClaudeDesktopSessionStore,
   parseClaudeDesktopSession,
-} from "../src/claude/desktop-session-store.mjs";
+} from "../integrations/claude-desktop/src/desktop-session-store.mjs";
 
 const desktopSessionId = "local_00000000-0000-4000-8000-000000000001";
 const cliSessionId = "00000000-0000-4000-8000-000000000002";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isLoopbackWebSocketUrl } from "../src/codex/cdp-client.mjs";
+import { isLoopbackWebSocketUrl } from "../integrations/codex-desktop/src/cdp-client.mjs";
 
 test("CDP client accepts loopback targets only", () => {
   assert.equal(isLoopbackWebSocketUrl("ws://127.0.0.1:9334/devtools/page/1"), true);

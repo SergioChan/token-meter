@@ -5,7 +5,7 @@ import {
   parseLsofListenerRecords,
   verifyCodexBundleIdentity,
   verifyCodexListenerRecords,
-} from "../src/codex/injector.mjs";
+} from "../integrations/codex-desktop/src/injector.mjs";
 
 const codexCommand =
   "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT --remote-debugging-port=9334";
