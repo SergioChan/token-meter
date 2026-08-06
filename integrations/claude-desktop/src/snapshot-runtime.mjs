@@ -37,6 +37,7 @@ export class ClaudeSnapshotRuntime {
       exact: snapshot.status === "bound",
       desktopSessionId: session.desktopSessionId,
       cliSessionId: session.cliSessionId,
+      model: session.model,
     };
     snapshot.usageMethod = "claude-transcript-raw";
     return snapshot;

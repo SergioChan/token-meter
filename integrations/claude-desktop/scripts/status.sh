@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+SCRIPT_ROOT="$(cd "$(dirname "$0")/../../.." && pwd -P)"
+# shellcheck source=./process-identity.sh
+source "$SCRIPT_ROOT/integrations/claude-desktop/scripts/process-identity.sh"
+
 BASE_ROOT="${TOKEN_METER_BASE_ROOT:-$HOME/Library/Application Support/Token Meter}"
 INSTALL_ROOT="${TOKEN_METER_CLAUDE_INSTALL_ROOT:-$BASE_ROOT/Claude Desktop}"
 STATE_DIR="${TOKEN_METER_CLAUDE_STATE_DIR:-$BASE_ROOT/State/Claude Desktop}"
@@ -47,11 +51,8 @@ if [ "$LOADED" = true ] && [ -s "$READY_FILE" ]; then
     ''|*[!0-9]*)
       ;;
     *)
-      if /bin/kill -0 "$READY_PID" 2>/dev/null; then
-        READY_COMMAND="$(/bin/ps -p "$READY_PID" -o command= 2>/dev/null || true)"
-        case "$READY_COMMAND" in
-          "$EXECUTABLE"*) RUNNING=true ;;
-        esac
+      if token_meter_process_matches_executable "$READY_PID" "$EXECUTABLE"; then
+        RUNNING=true
       fi
       ;;
   esac

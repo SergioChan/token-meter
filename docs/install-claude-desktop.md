@@ -129,7 +129,7 @@ input_tokens
 + cache_read_input_tokens
 ```
 
-Output is excluded from active-context occupancy. The context-window denominator comes from the visible Claude ratio when available, otherwise from the current installed Claude model catalog matched to the exact Session model. These are private local compatibility surfaces and may change between Claude Desktop releases.
+Output is excluded from active-context occupancy. The context-window denominator comes from a strict Context-window button ratio inside the same exact Code web area when available, otherwise from the current installed Claude model catalog matched to the exact Session model. Token Meter does not scan static text or conversation content for this value. These are private local compatibility surfaces and may change between Claude Desktop releases.
 
 The reading is useful for Agent workload intensity and Session health. It is not Claude subscription billing and does not claim to reproduce undisclosed backend plan accounting.
 

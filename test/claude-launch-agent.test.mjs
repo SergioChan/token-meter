@@ -49,3 +49,24 @@ test("Claude LaunchAgent starts only the native companion", async (context) => {
     await execFileAsync("/usr/bin/plutil", ["-lint", output]);
   }
 });
+
+test("Claude readiness requires an exact executable command boundary", async () => {
+  const helper = "integrations/claude-desktop/scripts/process-identity.sh";
+  const executable = "/Applications/Token Meter for Claude.app/Contents/MacOS/Overlay";
+  await execFileAsync("/bin/bash", [
+    "-c",
+    'source "$1"; token_meter_command_matches_executable "$2 --root /tmp" "$2"',
+    "bash",
+    helper,
+    executable,
+  ]);
+  await assert.rejects(
+    execFileAsync("/bin/bash", [
+      "-c",
+      'source "$1"; token_meter_command_matches_executable "$2.evil --root /tmp" "$2"',
+      "bash",
+      helper,
+      executable,
+    ]),
+  );
+});

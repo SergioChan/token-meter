@@ -80,14 +80,14 @@ ClaudeNativeCompanion
 - Codex CDP connections are loopback-only and main-renderer-only.
 - The official host bundle path, bundle ID, code signature, and signing Team ID are verified before the relevant adapter starts.
 - A Codex renderer must pass the semantic probe before any persistent injection script is registered.
-- The Claude companion reads only the focused Claude window and hides when an exact local Code Session cannot be proven.
+- The Claude companion accepts exactly one eligible `AXWebArea` in the focused Claude window and hides when an exact local Code Session cannot be proven.
 - Neither adapter modifies, patches, replaces, or re-signs its official host application.
 
 ## Session switching
 
 The Codex adapter polls the verified semantic active-thread attribute once per second. When the UUID changes, it requests a snapshot for the new root thread and atomically updates the entire meter. A missing or invalid UUID produces an unbound card. Child rollouts are indexed by root Session identity even when they were created in a later date directory. A recursive filesystem watcher invalidates the rollout index when a new child appears; the ten-second discovery interval remains a fallback rather than the normal update path.
 
-The Claude companion reads the exact `local_<uuid>` from the focused Code window's Accessibility URL. It resolves that value to one Desktop metadata record and one Claude Code transcript identity. A change replaces the full snapshot atomically. Missing, remote-only, invalid, or ambiguous identity hides the overlay rather than retaining the previous Session's values.
+The Claude companion reads the exact `local_<uuid>` from one eligible `AXWebArea` in the focused Code window. Exact means an HTTPS `claude.ai` URL whose complete path is `/epitaxy/local_<uuid>` or `/code/local_<uuid>`; links, extra path components, and multiple candidates are rejected. It resolves that value to one Desktop metadata record and one Claude Code transcript identity. A change replaces the full snapshot atomically. Missing, remote-only, invalid, or ambiguous identity hides the overlay rather than retaining the previous Session's values.
 
 ## Session versus thread
 
@@ -120,6 +120,8 @@ The Claude installer builds and signs an independent `Token Meter for Claude.app
 macOS Accessibility permission is granted to the companion, not to the repository shell and not to Claude.app. The process writes a PID readiness marker only after Accessibility trust succeeds. The status command validates both that marker and the exact executable command, so a loaded but permission-blocked LaunchAgent is not reported as ready. A blocked companion remains alive and polls the trust state quietly; it neither repeats the system prompt nor quits or relaunches Claude.
 
 One persistent Node bridge holds the transcript stores and metrics engine in memory. The Swift host sends the exact selected Desktop Session ID and receives a newline-delimited numerical snapshot. Timeout, malformed output, or bridge termination causes a restart or hidden meter; no stale snapshot is assigned to a new Session.
+
+The identity probe inspects at most 512 Accessibility roles in a shallow focused-window search and never descends into the selected web area's conversation tree. Context enrichment is separate and runs at most once every five seconds: it reads titles from buttons inside that same web area until an exact Context-window ratio is found. It does not read static text, values, descriptions, or message bodies. The model-catalog fallback is keyed by the exact model returned with the Session snapshot and invalidates cached windows when the installed catalog fingerprint changes.
 
 ## Alert model
 

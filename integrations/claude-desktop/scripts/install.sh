@@ -3,6 +3,8 @@ set -euo pipefail
 umask 077
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd -P)"
+# shellcheck source=./process-identity.sh
+source "$ROOT/integrations/claude-desktop/scripts/process-identity.sh"
 CLAUDE_APP_PATH="${CLAUDE_APP_PATH:-/Applications/Claude.app}"
 BASE_ROOT="${TOKEN_METER_BASE_ROOT:-$HOME/Library/Application Support/Token Meter}"
 INSTALL_ROOT="${TOKEN_METER_CLAUDE_INSTALL_ROOT:-$BASE_ROOT/Claude Desktop}"
@@ -220,14 +222,9 @@ if [ "$LOAD" = true ]; then
         ''|*[!0-9]*)
           ;;
         *)
-          if /bin/kill -0 "$READY_PID" 2>/dev/null; then
-            READY_COMMAND="$(/bin/ps -p "$READY_PID" -o command= 2>/dev/null || true)"
-            case "$READY_COMMAND" in
-              "$EXECUTABLE"*)
-                ACCESSIBILITY_GRANTED=true
-                break
-                ;;
-            esac
+          if token_meter_process_matches_executable "$READY_PID" "$EXECUTABLE"; then
+            ACCESSIBILITY_GRANTED=true
+            break
           fi
           ;;
       esac

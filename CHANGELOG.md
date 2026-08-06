@@ -30,6 +30,9 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Claude support now uses an independent native companion because Claude Desktop's Anthropic-signed CDP authorization gate has no public third-party issuance path.
 - A permission-blocked Claude companion now waits quietly in one process instead of exiting into a LaunchAgent retry cycle.
 - Codex and Claude source installations now use isolated sibling roots so updating or uninstalling one integration cannot replace the other.
+- Claude Accessibility binding now requires one exact Code `AXWebArea`, narrows Context reads to strict button titles, bounds scan work, and rejects ambiguous or lookalike surfaces.
+- Claude context-window caching now follows the exact Session model and invalidates when the installed model catalog changes.
+- Claude readiness checks now require an exact executable command boundary, and CI syntax-checks integration shell scripts recursively.
 
 ## [0.1.0] - 2026-08-05
 

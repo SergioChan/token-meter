@@ -45,11 +45,12 @@ The Claude integration is designed to defend against accidental Session confusio
 - Verifies the canonical Claude.app path, bundle ID, signature, Anthropic Team ID, executable, and packaged model catalog before installation.
 - Builds a separate background application with its own bundle ID; it does not patch, inject into, replace, or re-sign Claude.app.
 - Requires Accessibility permission for `Token Meter for Claude.app` itself.
-- Reads only the frontmost Claude process and focused window needed to extract an eligible local Code Session ID, window geometry, and a strict numerical context ratio.
+- Requires exactly one eligible `AXWebArea` in the frontmost Claude focused window; links, extra route components, and multiple candidates fail closed.
+- Reads Accessibility roles and the exact WebArea URL for identity, then only button titles inside that same web area for an optional strict Context-window ratio. It does not read static text, values, descriptions, or message bodies.
 - Hides when Claude is not frontmost or when exact Session identity is missing or ambiguous.
 - Resolves one exact Desktop Session to one local Claude Code transcript identity and never falls back to file recency or display name.
 - Discards prompt, reasoning, tool, and assistant content while retaining identifiers, event types, timestamps, and numerical usage required for aggregation.
-- Validates a readiness PID against the exact installed executable before reporting Accessibility success.
+- Validates a readiness PID against the exact installed executable and an argument boundary before reporting Accessibility success; prefix lookalikes are rejected.
 - Never quits or relaunches Claude.
 
 Accessibility permission allows the companion to inspect UI elements exposed by applications in the user's session. Token Meter intentionally narrows its reads, but a maliciously modified installed companion could abuse that permission. Install only from a reviewed source revision, keep the installed directory writable only by the current user, and revoke **Token Meter for Claude** in System Settings when it is not needed. Uninstall with `./scripts/uninstall-claude-meter-macos.sh --purge-state`.

@@ -7,6 +7,13 @@ private let claudeBundleID = "com.anthropic.claudefordesktop"
 private let defaultClaudeAppPath = "/Applications/Claude.app"
 private let fileManager = FileManager.default
 
+private func accessibilityTrusted() -> Bool {
+    if ProcessInfo.processInfo.environment["TOKEN_METER_FORCE_ACCESSIBILITY_DENIED"] == "1" {
+        return false
+    }
+    return AXIsProcessTrusted()
+}
+
 private struct CommandError: Error, CustomStringConvertible {
     let description: String
 }
@@ -143,194 +150,6 @@ private func parseCommand(_ arguments: [String]) throws -> AppCommand {
     )
     return .run(configuration)
 }
-private let sessionPattern = try! NSRegularExpression(
-    pattern: #"local_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"#
-)
-private let contextRatioPattern = try! NSRegularExpression(
-    pattern: #"([0-9]+(?:\.[0-9]+)?\s*[kKmMbB]?)\s*/\s*([0-9]+(?:\.[0-9]+)?\s*[kKmMbB])"#
-)
-
-private func axAttribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
-    var value: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else {
-        return nil
-    }
-    return value
-}
-
-private func axElement(_ element: AXUIElement, _ name: String) -> AXUIElement? {
-    guard let value = axAttribute(element, name), CFGetTypeID(value) == AXUIElementGetTypeID() else {
-        return nil
-    }
-    return unsafeBitCast(value, to: AXUIElement.self)
-}
-
-private func axElements(_ element: AXUIElement, _ name: String) -> [AXUIElement] {
-    axAttribute(element, name) as? [AXUIElement] ?? []
-}
-
-private func axString(_ element: AXUIElement, _ name: String) -> String? {
-    guard let value = axAttribute(element, name) else { return nil }
-    if let string = value as? String { return string }
-    if let url = value as? URL { return url.absoluteString }
-    return nil
-}
-
-private func axPoint(_ element: AXUIElement, _ name: String) -> CGPoint? {
-    guard let value = axAttribute(element, name), CFGetTypeID(value) == AXValueGetTypeID() else {
-        return nil
-    }
-    var point = CGPoint.zero
-    return AXValueGetValue(unsafeBitCast(value, to: AXValue.self), .cgPoint, &point) ? point : nil
-}
-
-private func axSize(_ element: AXUIElement, _ name: String) -> CGSize? {
-    guard let value = axAttribute(element, name), CFGetTypeID(value) == AXValueGetTypeID() else {
-        return nil
-    }
-    var size = CGSize.zero
-    return AXValueGetValue(unsafeBitCast(value, to: AXValue.self), .cgSize, &size) ? size : nil
-}
-
-private func sessionID(in value: String) -> String? {
-    guard let url = URL(string: value), url.host == "claude.ai" else { return nil }
-    guard url.path.contains("/epitaxy/") || url.path.contains("/code/") else { return nil }
-    let range = NSRange(value.startIndex..<value.endIndex, in: value)
-    guard let match = sessionPattern.firstMatch(in: value, range: range),
-          let swiftRange = Range(match.range, in: value) else { return nil }
-    return String(value[swiftRange]).lowercased()
-}
-
-private func tokenCount(_ value: String) -> Int? {
-    let normalized = value.lowercased().replacingOccurrences(of: " ", with: "")
-    let multiplier: Double
-    let number: String
-    if normalized.hasSuffix("k") {
-        multiplier = 1_000
-        number = String(normalized.dropLast())
-    } else if normalized.hasSuffix("m") {
-        multiplier = 1_000_000
-        number = String(normalized.dropLast())
-    } else if normalized.hasSuffix("b") {
-        multiplier = 1_000_000_000
-        number = String(normalized.dropLast())
-    } else {
-        multiplier = 1
-        number = normalized
-    }
-    guard let parsed = Double(number), parsed >= 0 else { return nil }
-    return Int((parsed * multiplier).rounded())
-}
-
-private final class ClaudeContextWindowResolver {
-    private let sessionsDirectoryURL: URL
-    private let modelCatalogURL: URL
-    private var windowsBySessionID: [String: Int] = [:]
-    private var failedAtBySessionID: [String: Date] = [:]
-    private var catalogSource: String?
-
-    init(sessionsDirectoryURL: URL, modelCatalogURL: URL) {
-        self.sessionsDirectoryURL = sessionsDirectoryURL
-        self.modelCatalogURL = modelCatalogURL
-    }
-
-    func resolve(sessionID: String) -> Int? {
-        if let cached = windowsBySessionID[sessionID] { return cached }
-        if let failedAt = failedAtBySessionID[sessionID],
-           Date().timeIntervalSince(failedAt) < 10 {
-            return nil
-        }
-        guard let model = modelForSession(sessionID),
-              let windowTokens = windowTokensForModel(model) else {
-            failedAtBySessionID[sessionID] = Date()
-            return nil
-        }
-        failedAtBySessionID.removeValue(forKey: sessionID)
-        windowsBySessionID[sessionID] = windowTokens
-        return windowTokens
-    }
-
-    private func modelForSession(_ sessionID: String) -> String? {
-        guard let enumerator = FileManager.default.enumerator(
-            at: sessionsDirectoryURL,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) else { return nil }
-        let expectedName = "\(sessionID).json"
-        for case let fileURL as URL in enumerator where fileURL.lastPathComponent == expectedName {
-            guard let data = try? Data(contentsOf: fileURL),
-                  let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let model = value["model"] as? String,
-                  !model.isEmpty else { return nil }
-            return model
-        }
-        return nil
-    }
-
-    private func windowTokensForModel(_ model: String) -> Int? {
-        if catalogSource == nil,
-           let data = try? Data(contentsOf: modelCatalogURL) {
-            catalogSource = String(decoding: data, as: UTF8.self)
-        }
-        guard let source = catalogSource else { return nil }
-        let escapedModel = NSRegularExpression.escapedPattern(for: model)
-        let pattern = #"id:\s*[\"']"# + escapedModel +
-            #"[\"'][\s\S]{0,4096}?context:\s*\{\s*window:\s*([0-9][0-9_]*(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)"#
-        guard let expression = try? NSRegularExpression(
-            pattern: pattern,
-            options: [.caseInsensitive]
-        ) else { return nil }
-        let range = NSRange(source.startIndex..<source.endIndex, in: source)
-        guard let match = expression.firstMatch(in: source, range: range),
-              let numberRange = Range(match.range(at: 1), in: source) else { return nil }
-        let number = source[numberRange].replacingOccurrences(of: "_", with: "")
-        guard let parsed = Double(number), parsed > 0, parsed <= Double(Int.max) else {
-            return nil
-        }
-        return Int(parsed.rounded())
-    }
-}
-
-private func contextWindowTokens(in value: String) -> Int? {
-    let range = NSRange(value.startIndex..<value.endIndex, in: value)
-    guard let match = contextRatioPattern.firstMatch(in: value, range: range),
-          match.numberOfRanges == 3,
-          let denominatorRange = Range(match.range(at: 2), in: value) else { return nil }
-    return tokenCount(String(value[denominatorRange]))
-}
-
-private struct ClaudeWindowState {
-    var sessionID: String?
-    var contextWindowTokens: Int?
-}
-
-private func scanClaudeState(
-    _ element: AXUIElement,
-    remaining: inout Int,
-    state: inout ClaudeWindowState
-) {
-    guard remaining > 0 else { return }
-    remaining -= 1
-
-    if state.sessionID == nil,
-       let url = axString(element, "AXURL"),
-       let identifier = sessionID(in: url) {
-        state.sessionID = identifier
-    }
-    if state.contextWindowTokens == nil {
-        for attribute in [kAXTitleAttribute, kAXValueAttribute, kAXDescriptionAttribute] {
-            if let value = axString(element, attribute),
-               let windowTokens = contextWindowTokens(in: value) {
-                state.contextWindowTokens = windowTokens
-                break
-            }
-        }
-    }
-    for child in axElements(element, kAXChildrenAttribute) {
-        scanClaudeState(child, remaining: &remaining, state: &state)
-    }
-}
-
 final class OverlayPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -521,6 +340,8 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
     private var snapshotInFlight = false
     private var pageReady = false
     private var lastSnapshotAt = Date.distantPast
+    private var lastContextWindowScanAt = Date.distantPast
+    private var visibleContextWindowTokens: Int?
     private var defaultPanelOrigin = CGPoint.zero
     private var userOffset = CGPoint.zero
     private var dragTimer: Timer?
@@ -535,7 +356,6 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         self.configuration = configuration
         snapshotBridge = SnapshotBridge(configuration: configuration)
         contextWindowResolver = ClaudeContextWindowResolver(
-            sessionsDirectoryURL: configuration.sessionsDirectoryURL,
             modelCatalogURL: configuration.modelCatalogURL
         )
         let webConfiguration = WKWebViewConfiguration()
@@ -636,15 +456,14 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
             return
         }
 
-        var budget = 12_000
-        var state = ClaudeWindowState()
-        scanClaudeState(window, remaining: &budget, state: &state)
-        guard let identifier = state.sessionID else {
+        guard let surface = resolveClaudeCodeSurface(in: window) else {
             panel.orderOut(nil)
             currentSessionID = nil
+            visibleContextWindowTokens = nil
             publishUnbound()
             return
         }
+        let identifier = surface.sessionID
 
         positionPanel(hostPosition: position, hostSize: size)
         panel.orderFrontRegardless()
@@ -652,10 +471,22 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         if identifier != currentSessionID {
             currentSessionID = identifier
             lastSnapshotAt = .distantPast
+            lastContextWindowScanAt = .distantPast
+            visibleContextWindowTokens = nil
             publishUnbound()
         }
-        if Date().timeIntervalSince(lastSnapshotAt) >= 0.8 {
-            fetchSnapshot(for: identifier, contextWindowTokens: state.contextWindowTokens)
+        let now = Date()
+        if now.timeIntervalSince(lastContextWindowScanAt) >= 5 {
+            visibleContextWindowTokens = scanExactContextWindowTokens(
+                in: surface.webArea
+            )
+            lastContextWindowScanAt = now
+        }
+        if now.timeIntervalSince(lastSnapshotAt) >= 0.8 {
+            fetchSnapshot(
+                for: identifier,
+                contextWindowTokens: visibleContextWindowTokens
+            )
         }
     }
 
@@ -712,8 +543,9 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
             }
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 guard let self else { return }
+                let model = (snapshot["binding"] as? [String: Any])?["model"] as? String
                 let resolvedWindowTokens = contextWindowTokens ??
-                    self.contextWindowResolver.resolve(sessionID: identifier)
+                    self.contextWindowResolver.resolve(model: model)
                 if let contextWindowTokens = resolvedWindowTokens,
                    var context = snapshot["context"] as? [String: Any] {
                     context["windowTokens"] = contextWindowTokens
@@ -916,7 +748,7 @@ private final class CompanionRuntime {
 
     @discardableResult
     private func startMeterIfTrusted() -> Bool {
-        guard meterController == nil, AXIsProcessTrusted() else {
+        guard meterController == nil, accessibilityTrusted() else {
             return meterController != nil
         }
         do {
@@ -938,6 +770,9 @@ private final class CompanionRuntime {
     }
 }
 
+@main
+struct TokenMeterClaudeOverlayApplication {
+static func main() {
 do {
     let command = try parseCommand(Array(CommandLine.arguments.dropFirst()))
     switch command {
@@ -974,4 +809,6 @@ do {
 } catch {
     fputs("\(error)\n\n\(usage())\n", stderr)
     exit(2)
+}
+}
 }

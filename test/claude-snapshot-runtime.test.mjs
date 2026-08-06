@@ -77,6 +77,7 @@ test("Claude snapshot runtime follows one exact Desktop Session", async (context
     exact: true,
     desktopSessionId,
     cliSessionId,
+    model: "claude-test",
   });
   assert.equal(snapshot.usageMethod, "claude-transcript-raw");
   assert.equal(JSON.stringify(snapshot).includes("discarded"), false);

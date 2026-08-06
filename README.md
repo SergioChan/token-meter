@@ -94,7 +94,7 @@ active context = input_tokens
                + cache_read_input_tokens
 ```
 
-Output is intentionally excluded from context occupancy. The denominator comes from the visible Claude context ratio when present, otherwise from the installed Claude model catalog matched to the exact Session model. These local formats are private, version-sensitive compatibility surfaces.
+Output is intentionally excluded from context occupancy. The denominator comes from a strict Context-window button ratio inside the same exact Code web area when present, otherwise from the installed Claude model catalog matched to the exact Session model. Model-catalog caches are invalidated when the installed catalog changes. These local formats are private, version-sensitive compatibility surfaces.
 
 Neither host collector retains prompt, reasoning, tool, or assistant content in the metrics index.
 
@@ -166,7 +166,7 @@ The Claude integration:
 
 1. Verifies the canonical Claude.app path, bundle identifier, Anthropic Team ID, and code signature during installation.
 2. Requires Accessibility permission for the independently signed Token Meter companion itself.
-3. Reads only the focused window URL and geometry needed for exact Session binding and placement.
+3. Accepts exactly one eligible `AXWebArea` URL in the focused window and reads only button titles that can carry the strict Context-window ratio.
 4. Hides when Claude is not frontmost or exact Session identity is unavailable.
 5. Never enables CDP, injects into Claude, or modifies/restarts Claude.app.
 

@@ -35,13 +35,13 @@ The native companion requires no Claude restart and does not execute inside Clau
 
 ## Exact Session binding
 
-The companion scans only the focused Claude Accessibility window and extracts a Session identity from eligible URLs such as:
+The companion performs a shallow role-only scan of the focused Claude Accessibility window and requires exactly one eligible `AXWebArea`. Its URL must have an exact route such as:
 
 ```text
 https://claude.ai/epitaxy/local_<uuid>
 ```
 
-Older `/code/local_<uuid>` routes remain accepted for compatibility.
+Older `/code/local_<uuid>` routes remain accepted for compatibility. `AXLink` sidebar targets, extra route components, non-Claude hosts, and multiple eligible web areas all produce a hidden/unbound state.
 
 The exact Desktop identity is then resolved through metadata under:
 
@@ -122,11 +122,11 @@ Output tokens are excluded because Claude Code documents context percentage as i
 
 The transcript does not contain `context_window_size`. The companion obtains the denominator in this order:
 
-1. A strict formatted ratio exposed by the current Accessibility tree, such as `596.0k / 1.0M`.
+1. A strict formatted ratio in an `AXButton` title inside the same exact Code web area, such as `Context window 596.0k / 1.0M (59.6%)`.
 2. The exact Session model from Desktop metadata matched against the current installed Claude model catalog.
 3. `null` if neither source can prove a value.
 
-It does not guess a window size solely from a remembered model name.
+It does not read static text or conversation content to find the ratio. The model fallback uses the exact model returned with the bound Session snapshot; its cache is keyed by model and invalidated when the installed catalog changes.
 
 ## Native presentation behavior
 
@@ -144,7 +144,7 @@ The installer and runtime enforce these constraints:
 1. Verify official Claude.app before installation.
 2. Build a separate `Token Meter for Claude.app` with its own bundle identifier.
 3. Require Accessibility permission for that companion application itself.
-4. Scan only the focused Claude window and retain no Accessibility strings beyond parsed identity and numerical context fields.
+4. Inspect only roles and URLs during the shallow focused-window identity scan; read only exact Context-window button titles inside the selected web area for optional numerical enrichment.
 5. Keep local transcript parsing content-discarding.
 6. Never quit, relaunch, patch, inject into, or re-sign Claude.app.
 7. Fail closed on missing permission, identity, telemetry, model-window data, or unsupported surfaces.
@@ -158,6 +158,8 @@ com.sergiochan.token-meter.claude-desktop
 ```
 
 It starts the native companion directly with absolute runtime, Node.js, Claude.app, and state paths. Unexpected non-zero exits are throttled. An Accessibility-blocked companion stays alive and checks the trust state quietly without repeating the system prompt or touching Claude.
+
+The readiness marker is accepted only while its PID is alive and its command is the exact installed executable followed by an argument boundary. Prefix lookalikes are rejected.
 
 Use:
 

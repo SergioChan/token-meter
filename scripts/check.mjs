@@ -2,12 +2,12 @@ import { access, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-async function collect(directory, result = []) {
+async function collect(directory, result = [], pattern = /\.(?:mjs|js)$/) {
   const entries = await readdir(directory, { withFileTypes: true });
   for (const entry of entries) {
     const target = path.join(directory, entry.name);
-    if (entry.isDirectory()) await collect(target, result);
-    else if (/\.(?:mjs|js)$/.test(entry.name)) result.push(target);
+    if (entry.isDirectory()) await collect(target, result, pattern);
+    else if (pattern.test(entry.name)) result.push(target);
   }
   return result;
 }
@@ -28,9 +28,10 @@ for (const file of files) {
     process.exit(result.status ?? 1);
   }
 }
-const shellFiles = (await readdir("scripts"))
-  .filter((file) => file.endsWith(".sh"))
-  .map((file) => path.join("scripts", file));
+const shellFiles = [
+  ...(await collect("scripts", [], /\.sh$/)),
+  ...(await collect("integrations", [], /\.sh$/)),
+];
 for (const file of shellFiles) {
   const result = spawnSync("/bin/bash", ["-n", file], { encoding: "utf8" });
   if (result.status !== 0) {

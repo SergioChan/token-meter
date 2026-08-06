@@ -64,6 +64,8 @@ trap cleanup EXIT
 
 /bin/mkdir -p "$STAGING/Contents/MacOS"
 /usr/bin/swiftc \
+  "$ROOT/integrations/claude-desktop/native/ClaudeAccessibility.swift" \
+  "$ROOT/integrations/claude-desktop/native/ClaudeModelCatalog.swift" \
   "$ROOT/integrations/claude-desktop/native/TokenMeterClaudeOverlay.swift" \
   -O \
   -whole-module-optimization \

@@ -1,19 +1,11 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
+import { runWithConcurrency, timestampToMs } from "./local-data-utils.mjs";
 
 const UUID_SOURCE =
   "[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}";
 const DESKTOP_SESSION_ID = new RegExp(`^local_${UUID_SOURCE}$`, "i");
 const CLI_SESSION_ID = new RegExp(`^${UUID_SOURCE}$`, "i");
-
-function timestampToMs(value) {
-  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
-    return value;
-  }
-  if (typeof value !== "string") return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
 
 function safeString(value) {
   return typeof value === "string" && value.length > 0 && !value.includes("\0")
@@ -89,17 +81,6 @@ async function walkMetadata(directory, result) {
       }
     }),
   );
-}
-
-async function runWithConcurrency(items, concurrency, operation) {
-  let index = 0;
-  const workers = Array.from(
-    { length: Math.min(Math.max(1, concurrency), items.length) },
-    async () => {
-      while (index < items.length) await operation(items[index++]);
-    },
-  );
-  await Promise.all(workers);
 }
 
 export class ClaudeDesktopSessionStore {
