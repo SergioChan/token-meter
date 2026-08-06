@@ -34,6 +34,7 @@
     "snapshot": "node src/cli.mjs snapshot",
     "claude:snapshot": "node src/cli.mjs claude-snapshot",
     "claude:install": "./scripts/install-claude-meter-macos.sh",
+    "claude:doctor": "./scripts/doctor-claude-meter-macos.sh",
     "claude:status": "./scripts/status-claude-meter-macos.sh",
     "claude:uninstall": "./scripts/uninstall-claude-meter-macos.sh",
     "codex:inject": "node src/cli.mjs inject",

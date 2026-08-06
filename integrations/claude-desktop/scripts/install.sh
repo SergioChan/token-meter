@@ -7,6 +7,8 @@ ROOT="$(cd "$(dirname "$0")/../../.." && pwd -P)"
 source "$ROOT/integrations/claude-desktop/scripts/process-identity.sh"
 # shellcheck source=./path-safety.sh
 source "$ROOT/integrations/claude-desktop/scripts/path-safety.sh"
+# shellcheck source=./runtime-selection.sh
+source "$ROOT/integrations/claude-desktop/scripts/runtime-selection.sh"
 CLAUDE_APP_PATH="${CLAUDE_APP_PATH:-/Applications/Claude.app}"
 BASE_ROOT="${TOKEN_METER_BASE_ROOT:-$HOME/Library/Application Support/Token Meter}"
 INSTALL_ROOT="${TOKEN_METER_CLAUDE_INSTALL_ROOT:-$BASE_ROOT/Claude Desktop}"
@@ -90,19 +92,14 @@ case "$READY_TIMEOUT_SECONDS" in
     ;;
 esac
 
-if [ -z "$NODE_PATH" ]; then
-  NODE_PATH="$(command -v node 2>/dev/null || true)"
-fi
+NODE_PATH="$(token_meter_resolve_node "$NODE_PATH")"
 token_meter_require_absolute_path "NODE_PATH" "$NODE_PATH"
-if [ ! -x "$NODE_PATH" ]; then
-  printf 'Node.js is not executable: %s\n' "$NODE_PATH" >&2
+if ! /usr/bin/xcode-select -p >/dev/null 2>&1 || [ ! -x /usr/bin/swiftc ]; then
+  printf 'Xcode Command Line Tools with Swift are required for source installation. Run ./scripts/doctor-claude-meter-macos.sh for details.\n' >&2
   exit 1
 fi
-if ! "$NODE_PATH" -e '
-  const [major, minor] = process.versions.node.split(".").map(Number);
-  process.exit(major > 22 || (major === 22 && minor >= 12) ? 0 : 1);
-'; then
-  printf 'Node.js 22.12 or newer is required: %s\n' "$NODE_PATH" >&2
+if [ ! -x /usr/bin/codesign ] || [ ! -x /usr/bin/plutil ]; then
+  printf 'macOS code-signing tools are required for source installation.\n' >&2
   exit 1
 fi
 if [ ! -x "$VERIFIER" ]; then
