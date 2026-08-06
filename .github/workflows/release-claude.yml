@@ -76,6 +76,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out release manager
+        uses: actions/checkout@v4
+
       - name: Download signed assets
         uses: actions/download-artifact@v4
         with:
@@ -84,8 +87,11 @@ jobs:
           merge-multiple: true
 
       - name: Create checksums
-        working-directory: dist
-        run: sha256sum token-meter-claude-macos-*.zip > checksums.txt
+        run: |
+          cp scripts/token-meter-claude-macos.sh dist/token-meter-claude
+          chmod 755 dist/token-meter-claude
+          cd dist
+          sha256sum token-meter-claude-macos-*.zip token-meter-claude > checksums.txt
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -95,4 +101,5 @@ jobs:
           files: |
             dist/token-meter-claude-macos-*.zip
             dist/token-meter-claude-macos-*.json
+            dist/token-meter-claude
             dist/checksums.txt

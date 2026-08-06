@@ -76,6 +76,16 @@ test(
           "overlay-bridge.mjs",
         ),
       ),
+      access(
+        path.join(
+          resources,
+          "TokenMeterRuntime",
+          "integrations",
+          "claude-desktop",
+          "scripts",
+          "render-launch-agent.mjs",
+        ),
+      ),
     ]);
     const { stdout: nodeVersion } = await execFileAsync(
       path.join(resources, "Node", "bin", "node"),

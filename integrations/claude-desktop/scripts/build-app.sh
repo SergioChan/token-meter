@@ -205,13 +205,16 @@ if [ -n "$EMBED_RUNTIME_ROOT" ]; then
   RUNTIME_DESTINATION="$STAGING/Contents/Resources/TokenMeterRuntime"
   NODE_DESTINATION="$STAGING/Contents/Resources/Node"
   /bin/mkdir -p \
-    "$RUNTIME_DESTINATION/integrations/claude-desktop" \
+    "$RUNTIME_DESTINATION/integrations/claude-desktop/scripts" \
     "$NODE_DESTINATION/bin"
   /bin/cp -R "$EMBED_RUNTIME_ROOT/src" "$RUNTIME_DESTINATION/src"
   /bin/cp -R "$EMBED_RUNTIME_ROOT/runtime" "$RUNTIME_DESTINATION/runtime"
   /bin/cp -R \
     "$EMBED_RUNTIME_ROOT/integrations/claude-desktop/src" \
     "$RUNTIME_DESTINATION/integrations/claude-desktop/src"
+  /usr/bin/install -m 600 \
+    "$EMBED_RUNTIME_ROOT/integrations/claude-desktop/scripts/render-launch-agent.mjs" \
+    "$RUNTIME_DESTINATION/integrations/claude-desktop/scripts/render-launch-agent.mjs"
   /usr/bin/install -m 600 \
     "$EMBED_RUNTIME_ROOT/package.json" \
     "$RUNTIME_DESTINATION/package.json"
@@ -221,7 +224,10 @@ if [ -n "$EMBED_RUNTIME_ROOT" ]; then
   /usr/bin/install -m 755 "$EMBED_NODE" "$NODE_DESTINATION/bin/node"
   /usr/bin/install -m 600 "$EMBED_NODE_LICENSE" "$NODE_DESTINATION/LICENSE"
   if [ -d "$EMBED_NODE_ROOT/lib" ]; then
-    /bin/cp -R "$EMBED_NODE_ROOT/lib" "$NODE_DESTINATION/lib"
+    /bin/mkdir -p "$NODE_DESTINATION/lib"
+    while IFS= read -r -d '' source_library; do
+      /usr/bin/install -m 755 "$source_library" "$NODE_DESTINATION/lib/$(/usr/bin/basename "$source_library")"
+    done < <(/usr/bin/find "$EMBED_NODE_ROOT/lib" -maxdepth 1 -type f -name '*.dylib' -print0)
   fi
   while IFS= read -r -d '' library; do
     if [ "$DISTRIBUTION" = true ]; then
