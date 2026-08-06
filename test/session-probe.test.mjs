@@ -7,13 +7,24 @@ import {
 
 const threadId = "11111111-2222-4333-8444-555555555555";
 
-function runProbe({ activeId = threadId, pathname = `/thread/${threadId}` } = {}) {
+function runProbe({
+  activeId = threadId,
+  conversationIds = [],
+  pathname = `/thread/${threadId}`,
+} = {}) {
   const mainSurface = {};
   const activeRow = {
     getAttribute(name) {
       return name === "data-app-action-sidebar-thread-id" ? activeId : null;
     },
   };
+  const conversationNodes = conversationIds.map((conversationId) => ({
+    getAttribute(name) {
+      return name === "data-above-composer-conversation-id"
+        ? conversationId
+        : null;
+    },
+  }));
   const document = {
     querySelector(selector) {
       if (selector.includes("avatar-overlay")) return null;
@@ -22,6 +33,11 @@ function runProbe({ activeId = threadId, pathname = `/thread/${threadId}` } = {}
       if (selector.includes("main[data-app-shell-main-surface]")) return mainSurface;
       if (selector.startsWith("textarea")) return {};
       return null;
+    },
+    querySelectorAll(selector) {
+      return selector === "[data-above-composer-conversation-id]"
+        ? conversationNodes
+        : [];
     },
   };
   const location = {
@@ -53,6 +69,31 @@ test("session probe normalizes Codex local thread identifiers", () => {
   assert.equal(result.eligible, true);
   assert.equal(result.threadId, threadId);
   assert.equal(result.bindingSource, "active-sidebar-row");
+});
+
+test("session probe resolves a client-new-thread row from the active conversation", () => {
+  const result = runProbe({
+    activeId: "local:client-new-thread:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    conversationIds: [threadId],
+    pathname: "/index.html",
+  });
+  assert.equal(result.eligible, true);
+  assert.equal(result.threadId, threadId);
+  assert.equal(result.bindingSource, "active-conversation-surface");
+});
+
+test("session probe rejects ambiguous active conversation identifiers", () => {
+  const result = runProbe({
+    activeId: "local:client-new-thread:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    conversationIds: [
+      threadId,
+      "66666666-7777-4888-8999-aaaaaaaaaaaa",
+    ],
+    pathname: "/index.html",
+  });
+  assert.equal(result.eligible, true);
+  assert.equal(result.threadId, null);
+  assert.equal(result.bindingSource, null);
 });
 
 test("session probe falls back to the exact route and rejects ambiguous labels", () => {

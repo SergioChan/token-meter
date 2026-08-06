@@ -31,6 +31,15 @@ export function buildSessionProbeExpression() {
     const activeId = normalizeThreadId(
       activeRow?.getAttribute('data-app-action-sidebar-thread-id') ?? null
     );
+    const conversationIds = new Set(
+      [...document.querySelectorAll('[data-above-composer-conversation-id]')]
+        .map((element) => normalizeThreadId(
+          element.getAttribute('data-above-composer-conversation-id')
+        ))
+        .filter(Boolean)
+    );
+    const conversationId =
+      conversationIds.size === 1 ? [...conversationIds][0] : null;
     const routeMatch = String(location.pathname).match(/\\/thread\\/([^/?#]+)/);
     const routeId = normalizeThreadId(
       routeMatch == null ? null : decodeURIComponent(routeMatch[1])
@@ -40,6 +49,9 @@ export function buildSessionProbeExpression() {
     if (activeId != null) {
       threadId = activeId;
       bindingSource = 'active-sidebar-row';
+    } else if (conversationId != null) {
+      threadId = conversationId;
+      bindingSource = 'active-conversation-surface';
     } else if (routeId != null) {
       threadId = routeId;
       bindingSource = 'thread-route';
