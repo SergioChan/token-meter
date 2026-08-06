@@ -70,3 +70,40 @@ test("Claude readiness requires an exact executable command boundary", async () 
     ]),
   );
 });
+
+test("Claude LaunchAgent supports a self-contained release application", async (context) => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "token-meter-claude-contained-agent-"),
+  );
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const output = path.join(directory, "claude-meter.plist");
+  const executable = path.join(
+    directory,
+    "Token Meter for Claude.app",
+    "Contents",
+    "MacOS",
+    "TokenMeterClaudeOverlay",
+  );
+  await execFileAsync(process.execPath, [
+    "integrations/claude-desktop/scripts/render-launch-agent.mjs",
+    "--output",
+    output,
+    "--label",
+    "com.sergiochan.token-meter.claude-desktop",
+    "--executable",
+    executable,
+    "--claude-app",
+    "/Applications/Claude.app",
+    "--state-dir",
+    path.join(directory, "state"),
+    "--stdout",
+    path.join(directory, "out.log"),
+    "--stderr",
+    path.join(directory, "error.log"),
+  ]);
+  const source = await readFile(output, "utf8");
+  assert.match(source, new RegExp(executable.replaceAll("/", "\\/")));
+  assert.match(source, /--claude-app/);
+  assert.match(source, /--state-dir/);
+  assert.doesNotMatch(source, /--root|--node/);
+});
