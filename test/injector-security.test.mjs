@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   attachCodexTarget,
+  buildCodexMeterPayload,
   parseLsofListenerRecords,
   verifyCodexBundleIdentity,
   verifyCodexListenerRecords,
@@ -9,6 +10,16 @@ import {
 
 const codexCommand =
   "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT --remote-debugging-port=9334";
+
+test("Codex payload enables persistent compact and draggable layout", () => {
+  const payload = buildCodexMeterPayload(
+    "window.__tokenMeter = {}; __TOKEN_METER_CSS_JSON__",
+    ":host {}",
+  );
+  assert.match(payload, /collapsible:\s*true/);
+  assert.match(payload, /draggable:\s*true/);
+  assert.match(payload, /token-meter:codex-layout/);
+});
 
 test("an ineligible renderer never receives a persistent injection script", async () => {
   const calls = [];

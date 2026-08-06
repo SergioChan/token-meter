@@ -40,6 +40,17 @@
   letter-spacing: 0.08em;
 }
 
+.meter-card.draggable .meter-header,
+.meter-card.draggable.collapsed .gauge {
+  cursor: grab;
+  touch-action: none;
+}
+
+.meter-card.draggable .meter-header:active,
+.meter-card.draggable.collapsed .gauge:active {
+  cursor: grabbing;
+}
+
 .live-dot {
   width: 6px;
   height: 6px;

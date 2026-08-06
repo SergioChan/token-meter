@@ -39,7 +39,15 @@ class FakeElement {
     this.isConnected = false;
     this.listeners = new Map();
     this.queries = new Map();
-    this.style = { setProperty() {} };
+    this.style = {
+      setProperty(name, value) {
+        this[name] = value;
+      },
+      removeProperty(name) {
+        delete this[name];
+      },
+    };
+    this.rect = { left: 0, top: 0, width: 286, height: 200 };
     this.textContent = "";
     this.title = "";
   }
@@ -77,6 +85,40 @@ class FakeElement {
 
   addEventListener(name, listener) {
     this.listeners.set(name, listener);
+  }
+
+  dispatch(name, overrides = {}) {
+    this.listeners.get(name)?.({
+      button: 0,
+      pointerId: 1,
+      clientX: 0,
+      clientY: 0,
+      preventDefault() {},
+      stopPropagation() {},
+      target: this,
+      ...overrides,
+    });
+  }
+
+  closest(selector) {
+    return this.tagName === selector ? this : null;
+  }
+
+  setPointerCapture() {}
+
+  releasePointerCapture() {}
+
+  getBoundingClientRect() {
+    const left = Number.parseFloat(this.style.left) || this.rect.left;
+    const top = Number.parseFloat(this.style.top) || this.rect.top;
+    return {
+      left,
+      top,
+      width: this.rect.width,
+      height: this.rect.height,
+      right: left + this.rect.width,
+      bottom: top + this.rect.height,
+    };
   }
 
   click() {
@@ -155,4 +197,72 @@ test("native hosts can collapse the meter and receive layout changes", async () 
   window.__tokenMeter.configure({ collapsible: false, collapsed: true });
   assert.equal(toggle.hidden, true);
   assert.equal(card.classList.contains("collapsed"), false);
+});
+
+test("injected hosts can drag and persist the compact meter layout", async () => {
+  const source = (
+    await readFile(new URL("../runtime/token-meter-ui.js", import.meta.url), "utf8")
+  ).replace("__TOKEN_METER_CSS_JSON__", JSON.stringify(""));
+  const created = [];
+  const documentElement = new FakeElement("html");
+  documentElement.isConnected = true;
+  const stored = new Map();
+  const window = {
+    innerWidth: 1_200,
+    innerHeight: 800,
+    addEventListener() {},
+    localStorage: {
+      getItem(key) {
+        return stored.get(key) ?? null;
+      },
+      setItem(key, value) {
+        stored.set(key, value);
+      },
+    },
+  };
+  const context = vm.createContext({
+    document: {
+      createElement(tagName) {
+        const element = new FakeElement(tagName);
+        created.push(element);
+        return element;
+      },
+      documentElement,
+    },
+    window,
+    MutationObserver: class {
+      observe() {}
+      disconnect() {}
+    },
+    performance: { now: () => 0 },
+    requestAnimationFrame(callback) {
+      callback?.(0);
+    },
+    clearTimeout() {},
+    setTimeout() {},
+  });
+
+  vm.runInContext(source, context);
+  const host = created.find((element) => element.tagName === "div");
+  host.rect = { left: 900, top: 600, width: 286, height: 180 };
+  const card = created.find((element) => element.tagName === "section");
+  const header = card.querySelector(".meter-header");
+  const toggle = card.querySelector(".collapse-toggle");
+
+  window.__tokenMeter.configure({
+    collapsible: true,
+    draggable: true,
+    storageKey: "token-meter:codex-layout",
+  });
+  header.dispatch("pointerdown", { clientX: 950, clientY: 620 });
+  header.dispatch("pointermove", { clientX: 700, clientY: 400 });
+  header.dispatch("pointerup", { clientX: 700, clientY: 400 });
+
+  assert.equal(host.style.left, "650px");
+  assert.equal(host.style.top, "380px");
+  toggle.click();
+  const saved = JSON.parse(stored.get("token-meter:codex-layout"));
+  assert.equal(saved.collapsed, true);
+  assert.equal(saved.left, 650);
+  assert.equal(saved.top, 380);
 });

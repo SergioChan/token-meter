@@ -1,5 +1,5 @@
 ((cssText) => {
-  const VERSION = 5;
+  const VERSION = 6;
   const existing = window.__tokenMeter;
   if (existing?.version === VERSION) {
     existing.ensureMounted();
@@ -87,6 +87,8 @@
   shadow.append(card);
 
   const elements = {
+    header: card.querySelector(".meter-header"),
+    gauge: card.querySelector(".gauge"),
     sessionId: card.querySelector(".session-id"),
     sessionTotal: card.querySelector(".session-total"),
     hourTotal: card.querySelector(".hour-total"),
@@ -114,6 +116,10 @@
   let deltaTimer = null;
   let collapsible = false;
   let collapsed = false;
+  let draggable = false;
+  let storageKey = null;
+  let position = null;
+  let dragState = null;
 
   const format = (value) => {
     const number = Math.max(0, Number(value) || 0);
@@ -175,6 +181,49 @@
     window.webkit?.messageHandlers?.tokenMeterLayout?.postMessage({ collapsed });
   };
 
+  const readStoredLayout = () => {
+    if (!storageKey) return null;
+    try {
+      const value = JSON.parse(window.localStorage?.getItem(storageKey) ?? "null");
+      return value && typeof value === "object" ? value : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const saveLayout = () => {
+    if (!storageKey) return;
+    try {
+      window.localStorage?.setItem(storageKey, JSON.stringify({
+        collapsed,
+        left: position?.left ?? null,
+        top: position?.top ?? null,
+      }));
+    } catch {}
+  };
+
+  const placeHost = (left, top) => {
+    const rect = host.getBoundingClientRect();
+    const margin = 8;
+    const maximumLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+    const maximumTop = Math.max(margin, window.innerHeight - rect.height - margin);
+    position = {
+      left: Math.min(maximumLeft, Math.max(margin, Number(left) || 0)),
+      top: Math.min(maximumTop, Math.max(margin, Number(top) || 0)),
+    };
+    Object.assign(host.style, {
+      right: "auto",
+      bottom: "auto",
+      left: `${position.left}px`,
+      top: `${position.top}px`,
+    });
+    return position;
+  };
+
+  const clampPosition = () => {
+    if (position) placeHost(position.left, position.top);
+  };
+
   const setCollapsed = (value) => {
     collapsed = collapsible && value === true;
     card.classList.toggle("collapsed", collapsed);
@@ -183,13 +232,83 @@
     elements.collapseToggle.setAttribute("aria-label", `${action} Token Meter`);
     elements.collapseToggle.title = `${action} Token Meter`;
     publishLayout();
+    requestAnimationFrame(() => {
+      clampPosition();
+      saveLayout();
+    });
     return collapsed;
   };
 
-  const configure = ({ collapsible: nextCollapsible = false, collapsed: nextCollapsed = false } = {}) => {
-    collapsible = nextCollapsible === true;
+  const configure = (options = {}) => {
+    collapsible = options.collapsible === true;
+    draggable = options.draggable === true;
+    storageKey =
+      typeof options.storageKey === "string" && options.storageKey.length > 0
+        ? options.storageKey
+        : null;
+    const storedLayout = readStoredLayout();
+    const nextCollapsed =
+      typeof options.collapsed === "boolean"
+        ? options.collapsed
+        : storedLayout?.collapsed === true;
     elements.collapseToggle.hidden = !collapsible;
-    return setCollapsed(nextCollapsed);
+    card.classList.toggle("draggable", draggable);
+    if (
+      draggable &&
+      Number.isFinite(storedLayout?.left) &&
+      Number.isFinite(storedLayout?.top)
+    ) {
+      placeHost(storedLayout.left, storedLayout.top);
+    }
+    setCollapsed(nextCollapsed);
+    return { collapsed, draggable, position };
+  };
+
+  const beginDrag = (event, source) => {
+    if (
+      !draggable ||
+      event.button !== 0 ||
+      event.target.closest?.(".collapse-toggle") ||
+      (source === "gauge" && !collapsed)
+    ) {
+      return;
+    }
+    const rect = host.getBoundingClientRect();
+    dragState = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startLeft: rect.left,
+      startTop: rect.top,
+      moved: false,
+    };
+    source === "header"
+      ? elements.header?.setPointerCapture?.(event.pointerId)
+      : elements.gauge?.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const moveDrag = (event) => {
+    if (!dragState || event.pointerId !== dragState.pointerId) return;
+    const deltaX = event.clientX - dragState.startX;
+    const deltaY = event.clientY - dragState.startY;
+    if (Math.abs(deltaX) + Math.abs(deltaY) >= 3) dragState.moved = true;
+    if (dragState.moved) {
+      placeHost(dragState.startLeft + deltaX, dragState.startTop + deltaY);
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const endDrag = (event) => {
+    if (!dragState || event.pointerId !== dragState.pointerId) return;
+    const moved = dragState.moved;
+    dragState = null;
+    event.currentTarget?.releasePointerCapture?.(event.pointerId);
+    if (moved) saveLayout();
+    event.preventDefault();
+    event.stopPropagation();
   };
 
   const update = (snapshot) => {
@@ -291,6 +410,7 @@
 
   const destroy = () => {
     clearTimeout(deltaTimer);
+    window.removeEventListener?.("resize", clampPosition);
     for (const animation of animations.values()) animation.cancel();
     host.remove();
     if (window.__tokenMeter?.version === VERSION) delete window.__tokenMeter;
@@ -304,6 +424,19 @@
   card.addEventListener("click", () => {
     if (!collapsed) card.classList.toggle("expanded");
   });
+  for (const [element, source] of [
+    [elements.header, "header"],
+    [elements.gauge, "gauge"],
+  ]) {
+    element.addEventListener("pointerdown", (event) => beginDrag(event, source));
+    element.addEventListener("pointermove", moveDrag);
+    element.addEventListener("pointerup", endDrag);
+    element.addEventListener("pointercancel", endDrag);
+    element.addEventListener("click", (event) => {
+      if (draggable && (source === "header" || collapsed)) event.stopPropagation();
+    });
+  }
+  window.addEventListener?.("resize", clampPosition);
   const observer = new MutationObserver(ensureMounted);
   observer.observe(document, { childList: true, subtree: true });
   const originalDestroy = destroy;

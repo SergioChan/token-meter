@@ -52,15 +52,27 @@ async function verifyMacApplicationBundle(appPath) {
   return canonicalPath;
 }
 
+export function buildCodexMeterPayload(runtime, stylesheet) {
+  if (!runtime.includes("__TOKEN_METER_CSS_JSON__")) {
+    throw new Error("Token Meter runtime CSS placeholder is missing");
+  }
+  const mounted = runtime.replace(
+    "__TOKEN_METER_CSS_JSON__",
+    JSON.stringify(stylesheet),
+  );
+  return `${mounted}\nwindow.__tokenMeter?.configure({
+    collapsible: true,
+    draggable: true,
+    storageKey: "token-meter:codex-layout:v1",
+  });`;
+}
+
 async function loadPayload() {
   const [runtime, stylesheet] = await Promise.all([
     readFile(runtimePath, "utf8"),
     readFile(stylesheetPath, "utf8"),
   ]);
-  if (!runtime.includes("__TOKEN_METER_CSS_JSON__")) {
-    throw new Error("Token Meter runtime CSS placeholder is missing");
-  }
-  return runtime.replace("__TOKEN_METER_CSS_JSON__", JSON.stringify(stylesheet));
+  return buildCodexMeterPayload(runtime, stylesheet);
 }
 
 async function listTargets(cdpPort) {
