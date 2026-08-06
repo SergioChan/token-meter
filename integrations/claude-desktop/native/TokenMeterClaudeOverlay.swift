@@ -159,18 +159,54 @@ private struct SnapshotBridgeError: Error, CustomStringConvertible {
     let description: String
 }
 
-private final class ReadyMarker {
+private final class RuntimeHealth {
     private let url: URL
-    private let value: String
+    private let pid = ProcessInfo.processInfo.processIdentifier
+    private var accessibilityGranted = false
+    private var overlayReady = false
+    private var bridgeHealthy = false
+    private var sessionBound = false
 
     init(stateDirectoryURL: URL) throws {
-        url = stateDirectoryURL.appendingPathComponent("ready.pid")
-        value = "\(ProcessInfo.processInfo.processIdentifier)\n"
-        try value.write(to: url, atomically: true, encoding: .utf8)
+        url = stateDirectoryURL.appendingPathComponent("health.json")
+        try write()
+    }
+
+    func update(
+        accessibilityGranted: Bool? = nil,
+        overlayReady: Bool? = nil,
+        bridgeHealthy: Bool? = nil,
+        sessionBound: Bool? = nil
+    ) {
+        if let accessibilityGranted { self.accessibilityGranted = accessibilityGranted }
+        if let overlayReady { self.overlayReady = overlayReady }
+        if let bridgeHealthy { self.bridgeHealthy = bridgeHealthy }
+        if let sessionBound { self.sessionBound = sessionBound }
+        try? write()
+    }
+
+    func heartbeat() {
+        try? write()
+    }
+
+    private func write() throws {
+        let value: [String: Any] = [
+            "schemaVersion": 1,
+            "pid": pid,
+            "updatedAt": ISO8601DateFormatter().string(from: Date()),
+            "accessibilityGranted": accessibilityGranted,
+            "overlayReady": overlayReady,
+            "bridgeHealthy": bridgeHealthy,
+            "sessionBound": sessionBound,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+        try data.write(to: url, options: .atomic)
     }
 
     deinit {
-        guard (try? String(contentsOf: url, encoding: .utf8)) == value else { return }
+        guard let data = try? Data(contentsOf: url),
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (value["pid"] as? NSNumber)?.int32Value == pid else { return }
         try? FileManager.default.removeItem(at: url)
     }
 }
@@ -328,6 +364,7 @@ private final class SnapshotBridge {
 
 private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
     private let configuration: AppConfiguration
+    private let health: RuntimeHealth
     private let snapshotBridge: SnapshotBridge
     private let contextWindowResolver: ClaudeContextWindowResolver
     private let expandedPanelSize = CGSize(width: 320, height: 250)
@@ -352,8 +389,9 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
     private var lastHostPosition: CGPoint?
     private var lastHostSize: CGSize?
 
-    init(configuration: AppConfiguration) {
+    init(configuration: AppConfiguration, health: RuntimeHealth) {
         self.configuration = configuration
+        self.health = health
         snapshotBridge = SnapshotBridge(configuration: configuration)
         contextWindowResolver = ClaudeContextWindowResolver(
             modelCatalogURL: configuration.modelCatalogURL
@@ -406,6 +444,17 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         tick()
     }
 
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        dragTimer?.invalidate()
+        dragTimer = nil
+        snapshotBridge.stop()
+        panel.orderOut(nil)
+        currentSessionID = nil
+        health.update(overlayReady: false, bridgeHealthy: false, sessionBound: false)
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         do {
             let css = try String(
@@ -429,6 +478,7 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
                     return
                 }
                 self?.pageReady = true
+                self?.health.update(overlayReady: true)
                 self?.installDragBridge()
                 self?.configureMeterLayout()
                 self?.publishUnbound()
@@ -444,6 +494,7 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         ).first else {
             panel.orderOut(nil)
             currentSessionID = nil
+            health.update(sessionBound: false)
             return
         }
 
@@ -453,6 +504,7 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
               let position = axPoint(window, kAXPositionAttribute),
               let size = axSize(window, kAXSizeAttribute) else {
             panel.orderOut(nil)
+            health.update(sessionBound: false)
             return
         }
 
@@ -460,6 +512,7 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
             panel.orderOut(nil)
             currentSessionID = nil
             visibleContextWindowTokens = nil
+            health.update(bridgeHealthy: false, sessionBound: false)
             publishUnbound()
             return
         }
@@ -534,6 +587,7 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
             guard let self else { return }
             guard case .success(var snapshot) = result else {
                 self.snapshotInFlight = false
+                self.health.update(bridgeHealthy: false, sessionBound: false)
                 self.publishUnbound()
                 if case .failure(let error) = result {
                     fputs("Snapshot bridge failed: \(error)\n", stderr)
@@ -563,6 +617,7 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
                         guard let self else { return }
                         self.snapshotInFlight = false
                         guard self.currentSessionID == identifier else { return }
+                        self.health.update(bridgeHealthy: true, sessionBound: true)
                         self.webView.evaluateJavaScript(
                             "window.__tokenMeter?.update(\(json))"
                         )
@@ -570,6 +625,7 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
                 } catch {
                     DispatchQueue.main.async { [weak self] in
                         self?.snapshotInFlight = false
+                        self?.health.update(bridgeHealthy: false, sessionBound: false)
                         self?.publishUnbound()
                     }
                 }
@@ -724,48 +780,45 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
 private final class CompanionRuntime {
     private let configuration: AppConfiguration
     private var permissionTimer: Timer?
-    private var readyMarker: ReadyMarker?
+    private let health: RuntimeHealth
     private var meterController: MeterController?
 
-    init(configuration: AppConfiguration) {
+    init(configuration: AppConfiguration) throws {
         self.configuration = configuration
+        health = try RuntimeHealth(stateDirectoryURL: configuration.stateDirectoryURL)
     }
 
     func start() {
-        if startMeterIfTrusted() { return }
-        fputs(
-            "Accessibility permission is required. Waiting quietly for permission.\n",
-            stderr
-        )
+        reconcileAccessibility(logWaiting: true)
         permissionTimer = Timer.scheduledTimer(
             withTimeInterval: 2,
             repeats: true
         ) { [weak self] _ in
-            _ = self?.startMeterIfTrusted()
+            self?.reconcileAccessibility()
         }
     }
 
-    @discardableResult
-    private func startMeterIfTrusted() -> Bool {
-        guard meterController == nil, accessibilityTrusted() else {
-            return meterController != nil
+    private func reconcileAccessibility(logWaiting: Bool = false) {
+        let trusted = accessibilityTrusted()
+        health.update(accessibilityGranted: trusted)
+        health.heartbeat()
+        if !trusted {
+            if let controller = meterController {
+                controller.stop()
+                meterController = nil
+            }
+            if logWaiting {
+                fputs(
+                    "Accessibility permission is required. Waiting quietly for permission.\n",
+                    stderr
+                )
+            }
+            return
         }
-        do {
-            let marker = try ReadyMarker(
-                stateDirectoryURL: configuration.stateDirectoryURL
-            )
-            let controller = MeterController(configuration: configuration)
-            readyMarker = marker
-            meterController = controller
-            permissionTimer?.invalidate()
-            permissionTimer = nil
-            controller.start()
-            return true
-        } catch {
-            fputs("Failed to start Token Meter: \(error)\n", stderr)
-            NSApplication.shared.terminate(nil)
-            return false
-        }
+        guard meterController == nil else { return }
+        let controller = MeterController(configuration: configuration, health: health)
+        meterController = controller
+        controller.start()
     }
 }
 
@@ -799,7 +852,7 @@ do {
     case .run(let configuration):
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
-        let runtime = CompanionRuntime(configuration: configuration)
+        let runtime = try CompanionRuntime(configuration: configuration)
         runtime.start()
         withExtendedLifetime(runtime) {
             application.run()

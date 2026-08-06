@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd -P)"
+# shellcheck source=./path-safety.sh
+source "$ROOT/integrations/claude-desktop/scripts/path-safety.sh"
+
 BASE_ROOT="${TOKEN_METER_BASE_ROOT:-$HOME/Library/Application Support/Token Meter}"
 INSTALL_ROOT="${TOKEN_METER_CLAUDE_INSTALL_ROOT:-$BASE_ROOT/Claude Desktop}"
 STATE_DIR="${TOKEN_METER_CLAUDE_STATE_DIR:-$BASE_ROOT/State/Claude Desktop}"
@@ -12,14 +16,19 @@ DOMAIN="gui/$(/usr/bin/id -u)"
 LAUNCHCTL="${TOKEN_METER_LAUNCHCTL:-/bin/launchctl}"
 PURGE_STATE=false
 KEEP_LOGS=false
+RESET_ACCESSIBILITY=false
+TCCUTIL="${TOKEN_METER_TCCUTIL:-/usr/bin/tccutil}"
+BUNDLE_ID="com.sergiochan.token-meter.claude-overlay"
 
 usage() {
   cat <<'EOF'
-Usage: uninstall.sh [--purge-state] [--keep-logs]
+Usage: uninstall.sh [--purge-state] [--keep-logs] [--reset-accessibility]
 
 Remove the Claude Desktop Token Meter companion and LaunchAgent without
 quitting, relaunching, or modifying Claude.app. Position and collapsed state
 are retained unless --purge-state is provided.
+
+Use --reset-accessibility to remove the companion's macOS Accessibility grant.
 EOF
 }
 
@@ -33,6 +42,10 @@ while [ "$#" -gt 0 ]; do
       KEEP_LOGS=true
       shift
       ;;
+    --reset-accessibility)
+      RESET_ACCESSIBILITY=true
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -44,27 +57,32 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-for target in "$INSTALL_ROOT" "$STATE_DIR" "$LAUNCH_AGENTS_DIR" "$LOG_DIR"; do
-  if [ -z "$target" ] || [ "${target#/}" = "$target" ]; then
-    printf 'Refusing a non-absolute removal path: %s\n' "${target:-<empty>}" >&2
-    exit 2
-  fi
-  if [ -L "$target" ]; then
-    printf 'Refusing a symlinked removal path: %s\n' "$target" >&2
-    exit 1
-  fi
-done
+token_meter_assert_safe_recursive_root "INSTALL_ROOT" "$INSTALL_ROOT"
+token_meter_assert_safe_recursive_root "STATE_DIR" "$STATE_DIR"
+token_meter_assert_safe_recursive_root "LOG_DIR" "$LOG_DIR"
+token_meter_require_absolute_path "LAUNCH_AGENTS_DIR" "$LAUNCH_AGENTS_DIR"
+token_meter_assert_no_symlinked_ancestor "LAUNCH_AGENTS_DIR" "$LAUNCH_AGENTS_DIR"
+token_meter_assert_disjoint_roots "INSTALL_ROOT" "$INSTALL_ROOT" "STATE_DIR" "$STATE_DIR"
+token_meter_assert_disjoint_roots "INSTALL_ROOT" "$INSTALL_ROOT" "LOG_DIR" "$LOG_DIR"
+token_meter_assert_disjoint_roots "STATE_DIR" "$STATE_DIR" "LOG_DIR" "$LOG_DIR"
 
 if "$LAUNCHCTL" print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
   "$LAUNCHCTL" bootout "$DOMAIN/$LABEL"
 fi
 /bin/rm -f "$PLIST"
-/bin/rm -rf "$INSTALL_ROOT"
+token_meter_remove_managed_directory "installation" "$INSTALL_ROOT" "$LABEL"
 if [ "$PURGE_STATE" = true ]; then
-  /bin/rm -rf "$STATE_DIR"
+  token_meter_remove_managed_directory "state" "$STATE_DIR" "$LABEL"
 fi
 if [ "$KEEP_LOGS" = false ]; then
-  /bin/rm -rf "$LOG_DIR"
+  token_meter_remove_managed_directory "log" "$LOG_DIR" "$LABEL"
+fi
+if [ "$RESET_ACCESSIBILITY" = true ]; then
+  if [ ! -x "$TCCUTIL" ]; then
+    printf 'tccutil is not executable: %s\n' "$TCCUTIL" >&2
+    exit 1
+  fi
+  "$TCCUTIL" reset Accessibility "$BUNDLE_ID"
 fi
 
 printf 'Claude Desktop Token Meter removed. Claude Desktop was not changed or restarted.\n'

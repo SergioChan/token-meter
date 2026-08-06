@@ -14,7 +14,7 @@ PLIST="$LAUNCH_AGENTS_DIR/$LABEL.plist"
 DOMAIN="gui/$(/usr/bin/id -u)"
 LAUNCHCTL="${TOKEN_METER_LAUNCHCTL:-/bin/launchctl}"
 EXECUTABLE="$INSTALL_ROOT/Token Meter for Claude.app/Contents/MacOS/TokenMeterClaudeOverlay"
-READY_FILE="$STATE_DIR/ready.pid"
+HEALTH_FILE="$STATE_DIR/health.json"
 JSON=false
 
 case "${1:-}" in
@@ -38,6 +38,9 @@ PLIST_INSTALLED=false
 LOADED=false
 RUNNING=false
 ACCESSIBILITY=false
+OVERLAY_READY=false
+BRIDGE_HEALTHY=false
+SESSION_BOUND=false
 STATE_PRESENT=false
 [ -x "$EXECUTABLE" ] && INSTALLED=true
 [ -f "$PLIST" ] && PLIST_INSTALLED=true
@@ -45,8 +48,8 @@ STATE_PRESENT=false
 if LAUNCH_STATUS="$("$LAUNCHCTL" print "$DOMAIN/$LABEL" 2>/dev/null)"; then
   LOADED=true
 fi
-if [ "$LOADED" = true ] && [ -s "$READY_FILE" ]; then
-  READY_PID="$(/usr/bin/tr -d '[:space:]' < "$READY_FILE")"
+if [ "$LOADED" = true ] && [ -s "$HEALTH_FILE" ]; then
+  READY_PID="$(/usr/bin/plutil -extract pid raw -o - "$HEALTH_FILE" 2>/dev/null || true)"
   case "$READY_PID" in
     ''|*[!0-9]*)
       ;;
@@ -57,17 +60,25 @@ if [ "$LOADED" = true ] && [ -s "$READY_FILE" ]; then
       ;;
   esac
 fi
-if [ "$RUNNING" = true ]; then
+if [ "$RUNNING" = true ] && "$EXECUTABLE" --check-accessibility >/dev/null 2>&1; then
   ACCESSIBILITY=true
+fi
+if [ "$RUNNING" = true ]; then
+  [ "$(/usr/bin/plutil -extract overlayReady raw -o - "$HEALTH_FILE" 2>/dev/null || true)" = true ] && OVERLAY_READY=true
+  [ "$(/usr/bin/plutil -extract bridgeHealthy raw -o - "$HEALTH_FILE" 2>/dev/null || true)" = true ] && BRIDGE_HEALTHY=true
+  [ "$(/usr/bin/plutil -extract sessionBound raw -o - "$HEALTH_FILE" 2>/dev/null || true)" = true ] && SESSION_BOUND=true
 fi
 
 if [ "$JSON" = true ]; then
-  printf '{"installed":%s,"launchAgentInstalled":%s,"launchAgentLoaded":%s,"running":%s,"accessibilityGranted":%s,"statePresent":%s,"claudeRestartRequired":false}\n' \
+  printf '{"installed":%s,"launchAgentInstalled":%s,"launchAgentLoaded":%s,"running":%s,"accessibilityGranted":%s,"overlayReady":%s,"bridgeHealthy":%s,"sessionBound":%s,"statePresent":%s,"claudeRestartRequired":false}\n' \
     "$INSTALLED" \
     "$PLIST_INSTALLED" \
     "$LOADED" \
     "$RUNNING" \
     "$ACCESSIBILITY" \
+    "$OVERLAY_READY" \
+    "$BRIDGE_HEALTHY" \
+    "$SESSION_BOUND" \
     "$STATE_PRESENT"
   exit 0
 fi
@@ -77,4 +88,7 @@ printf 'LaunchAgent installed: %s\n' "$PLIST_INSTALLED"
 printf 'LaunchAgent loaded: %s\n' "$LOADED"
 printf 'Overlay running: %s\n' "$RUNNING"
 printf 'Accessibility permission: %s\n' "$ACCESSIBILITY"
+printf 'Overlay UI ready: %s\n' "$OVERLAY_READY"
+printf 'Snapshot bridge healthy: %s\n' "$BRIDGE_HEALTHY"
+printf 'Exact Session bound: %s\n' "$SESSION_BOUND"
 printf 'Claude restart required: false\n'

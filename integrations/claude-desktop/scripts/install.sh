@@ -5,6 +5,8 @@ umask 077
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd -P)"
 # shellcheck source=./process-identity.sh
 source "$ROOT/integrations/claude-desktop/scripts/process-identity.sh"
+# shellcheck source=./path-safety.sh
+source "$ROOT/integrations/claude-desktop/scripts/path-safety.sh"
 CLAUDE_APP_PATH="${CLAUDE_APP_PATH:-/Applications/Claude.app}"
 BASE_ROOT="${TOKEN_METER_BASE_ROOT:-$HOME/Library/Application Support/Token Meter}"
 INSTALL_ROOT="${TOKEN_METER_CLAUDE_INSTALL_ROOT:-$BASE_ROOT/Claude Desktop}"
@@ -19,6 +21,7 @@ VERIFIER="${TOKEN_METER_CLAUDE_VERIFIER:-$ROOT/scripts/verify-claude-app-macos.s
 NODE_PATH="${TOKEN_METER_NODE:-}"
 LOAD=true
 PROMPT=true
+READY_TIMEOUT_SECONDS="${TOKEN_METER_READY_TIMEOUT_SECONDS:-10}"
 
 usage() {
   cat <<'EOF'
@@ -65,40 +68,32 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-require_absolute_path() {
-  local name="$1"
-  local value="$2"
-  if [ -z "$value" ] || [ "${value#/}" = "$value" ]; then
-    printf '%s must be an absolute path: %s\n' "$name" "${value:-<empty>}" >&2
-    exit 2
-  fi
-  case "$value" in
-    *$'\r'*|*$'\n'*)
-      printf '%s contains invalid characters.\n' "$name" >&2
-      exit 2
-      ;;
-  esac
-}
-
 for pair in \
   "CLAUDE_APP_PATH=$CLAUDE_APP_PATH" \
   "INSTALL_ROOT=$INSTALL_ROOT" \
   "STATE_DIR=$STATE_DIR" \
   "LAUNCH_AGENTS_DIR=$LAUNCH_AGENTS_DIR" \
   "LOG_DIR=$LOG_DIR"; do
-  require_absolute_path "${pair%%=*}" "${pair#*=}"
+  token_meter_require_absolute_path "${pair%%=*}" "${pair#*=}"
 done
-for target in "$INSTALL_ROOT" "$STATE_DIR" "$LAUNCH_AGENTS_DIR" "$LOG_DIR"; do
-  if [ -L "$target" ]; then
-    printf 'Refusing a symlinked installation path: %s\n' "$target" >&2
-    exit 1
-  fi
-done
+token_meter_assert_safe_recursive_root "INSTALL_ROOT" "$INSTALL_ROOT"
+token_meter_assert_safe_recursive_root "STATE_DIR" "$STATE_DIR"
+token_meter_assert_safe_recursive_root "LOG_DIR" "$LOG_DIR"
+token_meter_assert_no_symlinked_ancestor "LAUNCH_AGENTS_DIR" "$LAUNCH_AGENTS_DIR"
+token_meter_assert_disjoint_roots "INSTALL_ROOT" "$INSTALL_ROOT" "STATE_DIR" "$STATE_DIR"
+token_meter_assert_disjoint_roots "INSTALL_ROOT" "$INSTALL_ROOT" "LOG_DIR" "$LOG_DIR"
+token_meter_assert_disjoint_roots "STATE_DIR" "$STATE_DIR" "LOG_DIR" "$LOG_DIR"
+case "$READY_TIMEOUT_SECONDS" in
+  ''|*[!0-9]*|0)
+    printf 'TOKEN_METER_READY_TIMEOUT_SECONDS must be a positive integer.\n' >&2
+    exit 2
+    ;;
+esac
 
 if [ -z "$NODE_PATH" ]; then
   NODE_PATH="$(command -v node 2>/dev/null || true)"
 fi
-require_absolute_path "NODE_PATH" "$NODE_PATH"
+token_meter_require_absolute_path "NODE_PATH" "$NODE_PATH"
 if [ ! -x "$NODE_PATH" ]; then
   printf 'Node.js is not executable: %s\n' "$NODE_PATH" >&2
   exit 1
@@ -125,14 +120,45 @@ fi
   "$LOG_DIR" \
   "$STATE_DIR" \
   "$(/usr/bin/dirname "$INSTALL_ROOT")"
+token_meter_mark_installation_directory "$STATE_DIR" "$LABEL"
+token_meter_mark_installation_directory "$LOG_DIR" "$LABEL"
 
 STAGING="$INSTALL_ROOT.installing.$$"
 BACKUP="$INSTALL_ROOT.previous.$$"
 PLIST_TEMP="$PLIST.installing.$$"
 PLIST_BACKUP="$PLIST.previous.$$"
+WAS_LOADED=false
+ACTIVATED=false
+COMMITTED=false
+
+rollback_installation() {
+  set +e
+  if [ "$LOAD" = true ] && "$LAUNCHCTL" print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
+    "$LAUNCHCTL" bootout "$DOMAIN/$LABEL" >/dev/null 2>&1
+  fi
+  /bin/rm -f "$PLIST"
+  if [ -f "$PLIST_BACKUP" ]; then
+    /bin/mv "$PLIST_BACKUP" "$PLIST"
+  fi
+  /bin/rm -rf "$INSTALL_ROOT"
+  if [ -d "$BACKUP" ]; then
+    /bin/mv "$BACKUP" "$INSTALL_ROOT"
+  fi
+  if [ "$LOAD" = true ] && [ "$WAS_LOADED" = true ] && [ -f "$PLIST" ]; then
+    "$LAUNCHCTL" bootstrap "$DOMAIN" "$PLIST" >/dev/null 2>&1
+  fi
+  set -e
+}
+
 cleanup() {
+  local status="$?"
+  trap - EXIT
+  if [ "$status" -ne 0 ] && [ "$ACTIVATED" = true ] && [ "$COMMITTED" = false ]; then
+    rollback_installation
+  fi
   /bin/rm -rf "$STAGING"
   /bin/rm -f "$PLIST_TEMP"
+  exit "$status"
 }
 trap cleanup EXIT
 
@@ -143,6 +169,7 @@ trap cleanup EXIT
 /bin/cp -R "$ROOT/integrations" "$STAGING/integrations"
 /usr/bin/install -m 600 "$ROOT/package.json" "$STAGING/package.json"
 /usr/bin/install -m 600 "$ROOT/LICENSE" "$STAGING/LICENSE"
+token_meter_mark_installation_directory "$STAGING" "$LABEL"
 "$ROOT/integrations/claude-desktop/scripts/build-app.sh" \
   --output "$STAGING/Token Meter for Claude.app"
 
@@ -159,7 +186,12 @@ EXECUTABLE="$INSTALL_ROOT/Token Meter for Claude.app/Contents/MacOS/TokenMeterCl
   --stderr "$LOG_DIR/overlay-error.log"
 /usr/bin/plutil -lint "$PLIST_TEMP" >/dev/null
 
-if [ "$LOAD" = true ] && "$LAUNCHCTL" print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
+if "$LAUNCHCTL" print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
+  if [ "$LOAD" = false ]; then
+    printf 'Refusing --no-load while the existing Claude Token Meter LaunchAgent is loaded.\n' >&2
+    exit 1
+  fi
+  WAS_LOADED=true
   "$LAUNCHCTL" bootout "$DOMAIN/$LABEL"
   for _ in $(/usr/bin/seq 1 80); do
     "$LAUNCHCTL" print "$DOMAIN/$LABEL" >/dev/null 2>&1 || break
@@ -179,6 +211,7 @@ if [ -f "$PLIST" ]; then
   /bin/mv "$PLIST" "$PLIST_BACKUP"
 fi
 /bin/mv "$PLIST_TEMP" "$PLIST"
+ACTIVATED=true
 
 APP_BUNDLE="$INSTALL_ROOT/Token Meter for Claude.app"
 if [ "$PROMPT" = true ]; then
@@ -186,25 +219,53 @@ if [ "$PROMPT" = true ]; then
   /bin/sleep 1
 fi
 
+if [ "$LOAD" = true ]; then
+  /bin/rm -f "$STATE_DIR/health.json"
+fi
 if [ "$LOAD" = true ] && ! "$LAUNCHCTL" bootstrap "$DOMAIN" "$PLIST"; then
-  /bin/rm -f "$PLIST"
-  if [ -f "$PLIST_BACKUP" ]; then
-    /bin/mv "$PLIST_BACKUP" "$PLIST"
-  fi
-  /bin/rm -rf "$INSTALL_ROOT"
-  if [ -d "$BACKUP" ]; then
-    /bin/mv "$BACKUP" "$INSTALL_ROOT"
-  fi
-  if [ -f "$PLIST" ]; then
-    "$LAUNCHCTL" bootstrap "$DOMAIN" "$PLIST" >/dev/null 2>&1 || true
-  fi
   printf 'LaunchAgent bootstrap failed; the previous installation was restored.\n' >&2
   exit 1
 fi
 
+PROCESS_READY=false
+if [ "$LOAD" = true ]; then
+  for _ in $(/usr/bin/seq 1 "$((READY_TIMEOUT_SECONDS * 4))"); do
+    HEALTH_FILE="$STATE_DIR/health.json"
+    if [ -s "$HEALTH_FILE" ]; then
+      READY_PID="$(/usr/bin/plutil -extract pid raw -o - "$HEALTH_FILE" 2>/dev/null || true)"
+      if token_meter_process_matches_executable "$READY_PID" "$EXECUTABLE"; then
+        PROCESS_READY=true
+        break
+      fi
+    fi
+    /bin/sleep 0.25
+  done
+  if [ "$PROCESS_READY" = false ]; then
+    printf 'The new Claude Token Meter did not become ready; the previous installation was restored.\n' >&2
+    exit 1
+  fi
+fi
+
+ACCESSIBILITY_GRANTED=false
+OVERLAY_READY=false
+if [ "$LOAD" = true ] && "$EXECUTABLE" --check-accessibility >/dev/null 2>&1; then
+  ACCESSIBILITY_GRANTED=true
+  for _ in $(/usr/bin/seq 1 "$((READY_TIMEOUT_SECONDS * 4))"); do
+    if [ "$(/usr/bin/plutil -extract overlayReady raw -o - "$STATE_DIR/health.json" 2>/dev/null || true)" = true ]; then
+      OVERLAY_READY=true
+      break
+    fi
+    /bin/sleep 0.25
+  done
+  if [ "$OVERLAY_READY" = false ]; then
+    printf 'The new Claude Token Meter UI did not become ready; the previous installation was restored.\n' >&2
+    exit 1
+  fi
+fi
+
 /bin/rm -rf "$BACKUP"
 /bin/rm -f "$PLIST_BACKUP"
-trap - EXIT
+COMMITTED=true
 
 printf 'Claude Desktop Token Meter installed at %s\n' "$INSTALL_ROOT"
 if [ "$LOAD" = true ]; then
@@ -212,29 +273,10 @@ if [ "$LOAD" = true ]; then
 else
   printf 'LaunchAgent written but not loaded (--no-load).\n'
 fi
-ACCESSIBILITY_GRANTED=false
-if [ "$LOAD" = true ]; then
-  for _ in $(/usr/bin/seq 1 20); do
-    READY_FILE="$STATE_DIR/ready.pid"
-    if [ -s "$READY_FILE" ]; then
-      READY_PID="$(/usr/bin/tr -d '[:space:]' < "$READY_FILE")"
-      case "$READY_PID" in
-        ''|*[!0-9]*)
-          ;;
-        *)
-          if token_meter_process_matches_executable "$READY_PID" "$EXECUTABLE"; then
-            ACCESSIBILITY_GRANTED=true
-            break
-          fi
-          ;;
-      esac
-    fi
-    /bin/sleep 0.25
-  done
-fi
 if [ "$ACCESSIBILITY_GRANTED" = true ]; then
   printf 'Accessibility permission: granted.\n'
 else
   printf 'Accessibility permission: required. Enable Token Meter for Claude in System Settings > Privacy & Security > Accessibility.\n'
 fi
 printf 'Logs: %s\n' "$LOG_DIR"
+trap - EXIT
