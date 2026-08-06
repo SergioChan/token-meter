@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { access, chmod, mkdtemp, rm } from "node:fs/promises";
+import { access, chmod, mkdtemp, realpath, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -7,6 +8,13 @@ import { promisify } from "node:util";
 import test from "node:test";
 
 const execFileAsync = promisify(execFile);
+
+async function compatibleNodePath() {
+  const candidate = existsSync("/opt/homebrew/bin/node")
+    ? "/opt/homebrew/bin/node"
+    : process.execPath;
+  return realpath(candidate);
+}
 
 test(
   "Claude native app builder produces a signed background application",
@@ -48,13 +56,14 @@ test(
     );
     context.after(() => rm(directory, { recursive: true, force: true }));
     const output = path.join(directory, "Token Meter for Claude.app");
+    const nodePath = await compatibleNodePath();
     await execFileAsync("integrations/claude-desktop/scripts/build-app.sh", [
       "--output",
       output,
       "--embed-runtime-root",
       process.cwd(),
       "--embed-node-root",
-      path.dirname(path.dirname(process.execPath)),
+      path.dirname(path.dirname(nodePath)),
       "--version",
       "0.2.0",
       "--build-number",

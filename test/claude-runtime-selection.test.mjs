@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -62,10 +63,13 @@ test(
   "Claude source-install doctor reports all build prerequisites",
   { skip: process.platform !== "darwin" },
   async () => {
+    const nodePath = await realpath(
+      existsSync("/opt/homebrew/bin/node") ? "/opt/homebrew/bin/node" : process.execPath,
+    );
     const { stdout } = await execFileAsync(
       "/bin/bash",
       ["integrations/claude-desktop/scripts/doctor.sh", "--json"],
-      { env: { ...process.env, TOKEN_METER_NODE: process.execPath } },
+      { env: { ...process.env, TOKEN_METER_NODE: nodePath } },
     );
     const result = JSON.parse(stdout);
     assert.equal(result.macosSupported, true);

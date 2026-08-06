@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-05
+
 ### Added
 
 - Public project documentation, reproducible screenshots, CI, contribution guidance, and security policy.
@@ -16,6 +18,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - An offline Claude Desktop Session resolver, de-duplicating transcript collector, read-only snapshot command, application identity verifier, persistent snapshot bridge, and content-discarding metrics path.
 - Claude Desktop build, install, status, update, and uninstall workflows that do not restart Claude.
 - Host-specific integration documentation and an Agent-ready automated installation prompt.
+- A self-contained Claude release app with embedded Node.js, dual-architecture assets, Developer ID signing, Hardened Runtime, Apple notarization, and a standalone installer/status/uninstaller.
+- Transactional Claude updates, managed-path deletion guards, explicit Accessibility reset, live structured health state, and source-install diagnostics.
 
 ### Changed
 
@@ -34,6 +38,8 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Claude context-window caching now follows the exact Session model and invalidates when the installed model catalog changes.
 - Claude readiness checks now require an exact executable command boundary, and CI syntax-checks integration shell scripts recursively.
 - Codex ignores deprecated shared-root environment overrides so stale local configuration cannot target the Claude runtime or saved layout state.
+- Claude status now separates process liveness, live Accessibility trust, UI readiness, bridge health, and exact Session binding instead of treating a readiness PID as proof of every layer.
+- Claude source installation now skips incompatible Node.js candidates and clearly requires Xcode Command Line Tools with Swift, while public release installation has no external Node.js or toolchain dependency.
 
 ## [0.1.0] - 2026-08-05
 
@@ -46,5 +52,6 @@ The project follows [Semantic Versioning](https://semver.org/).
 - Four-stage green, yellow, orange, and red rate gauge.
 - Safe macOS launch and cleanup scripts.
 
-[Unreleased]: https://github.com/SergioChan/token-meter/compare/99b274f...HEAD
+[Unreleased]: https://github.com/SergioChan/token-meter/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/SergioChan/token-meter/releases/tag/v0.2.0
 [0.1.0]: https://github.com/SergioChan/token-meter/tree/99b274f

@@ -1,7 +1,7 @@
 {
   "name": "token-meter",
-  "version": "0.1.0",
-  "description": "An open-source, session-aware live token meter for Codex Desktop.",
+  "version": "0.2.0",
+  "description": "An open-source, session-aware live token meter for Codex Desktop and Claude Code in Claude Desktop.",
   "type": "module",
   "private": true,
   "license": "MIT",
@@ -16,6 +16,8 @@
   },
   "keywords": [
     "codex",
+    "claude-code",
+    "claude-desktop",
     "token-meter",
     "agent-observability",
     "token-usage",

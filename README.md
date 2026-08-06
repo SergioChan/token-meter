@@ -6,9 +6,10 @@
 
 <p align="center">
   <a href="https://github.com/SergioChan/token-meter/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/SergioChan/token-meter/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/SergioChan/token-meter/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/SergioChan/token-meter?display_name=tag"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-2f6f52"></a>
   <img alt="macOS" src="https://img.shields.io/badge/platform-macOS-555">
-  <img alt="Node.js 22.12+" src="https://img.shields.io/badge/node-%3E%3D22.12-43853d">
+  <img alt="Local first" src="https://img.shields.io/badge/telemetry-local--first-2f6f52">
 </p>
 
 **See how hard the Agent is working. Catch runaway context before it consumes another turn.**
@@ -102,12 +103,37 @@ Neither host collector retains prompt, reasoning, tool, or assistant content in 
 
 Attach [INSTALL_WITH_AGENT.md](INSTALL_WITH_AGENT.md) to Codex, Claude Code, or another capable local coding Agent. The file is an executable installation prompt that covers host detection, tests, restart approval boundaries, Accessibility, installation, and real runtime verification.
 
+## Install the signed Claude release
+
+The recommended Claude installation downloads a self-contained, Developer ID-signed and Apple-notarized application from [GitHub Releases](https://github.com/SergioChan/token-meter/releases). It does not require Node.js, Swift, Xcode, administrator access, or a Claude restart.
+
+```bash
+curl -fLO https://github.com/SergioChan/token-meter/releases/latest/download/token-meter-claude
+chmod +x token-meter-claude
+./token-meter-claude install
+```
+
+The release manager verifies the archive checksum, bundle identifier, T54 signing Team ID, Developer ID authority, embedded runtime, and Gatekeeper assessment before replacing an existing installation. It keeps the previous app and LaunchAgent until the new companion has produced live health state.
+
+Manage the installed release with:
+
+```bash
+"$HOME/Library/Application Support/Token Meter/bin/token-meter-claude" status --json
+"$HOME/Library/Application Support/Token Meter/bin/token-meter-claude" uninstall
+```
+
+The release app is installed at `~/Applications/Token Meter/Token Meter for Claude.app`. Enable that exact application in System Settings > Privacy & Security > Accessibility when prompted.
+
+Release assets currently embed the official Node.js `v22.23.2` LTS runtime. Its upstream license is bundled at `Contents/Resources/Node/LICENSE`; Node.js is not linked into or required by source-only Codex installation.
+
 ## Install from source
 
 Requirements:
 
 - macOS.
-- Node.js 22.12 or newer for development and the Claude companion.
+- Git.
+- Node.js 22.12 or newer for development and source builds.
+- Xcode Command Line Tools with Swift for the Claude source build.
 - Official Codex Desktop and/or Claude Desktop application bundles.
 
 ```bash
@@ -130,17 +156,23 @@ After installation, Codex can be opened normally from the Dock or Applications f
 
 ### Claude Code in Claude Desktop
 
+Source installation is intended for contributors and local development. Check the build environment first:
+
+```bash
+./scripts/doctor-claude-meter-macos.sh
+```
+
 ```bash
 ./scripts/install-claude-meter-macos.sh
 ```
 
-If Node.js must be selected explicitly:
+The installer checks compatible runtimes in common Homebrew, PATH, and nvm locations instead of accepting the first old `node` it sees. If Node.js must be selected explicitly:
 
 ```bash
 ./scripts/install-claude-meter-macos.sh --node /opt/homebrew/bin/node
 ```
 
-Enable **Token Meter for Claude** in System Settings > Privacy & Security > Accessibility when prompted. Claude remains running throughout installation.
+Source builds use ad-hoc signing unless `TOKEN_METER_CODESIGN_IDENTITY` is set, so macOS may require Accessibility approval again after a rebuild. Public users should prefer the signed release. Claude remains running throughout installation.
 
 Verify:
 

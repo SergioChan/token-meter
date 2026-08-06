@@ -9,7 +9,7 @@ EMBED_RUNTIME_ROOT=""
 EMBED_NODE_ROOT=""
 EMBED_NODE=""
 EMBED_NODE_LICENSE=""
-VERSION="0.1.0"
+VERSION="$(/usr/bin/awk -F'"' '$2 == "version" { print $4; exit }' "$ROOT/package.json")"
 BUILD_NUMBER="1"
 ARCH=""
 DISTRIBUTION=false

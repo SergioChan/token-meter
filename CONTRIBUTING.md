@@ -11,13 +11,14 @@ Thank you for helping make agent token usage easier to understand.
 
 ## Development setup
 
-Token Meter requires Node.js 22.12 or newer and has no third-party runtime dependencies.
+Token Meter development requires Git and Node.js 22.12 or newer. Building the native Claude companion also requires macOS 13 or newer and Xcode Command Line Tools with Swift.
 
 ```bash
 git clone https://github.com/SergioChan/token-meter.git
 cd token-meter
 npm test
 npm run check
+./scripts/doctor-claude-meter-macos.sh
 ```
 
 ## Engineering invariants
@@ -66,6 +67,7 @@ For Claude compatibility changes, also verify:
 5. Active Context uses root input-side usage and an exact model-window source.
 6. Missing Accessibility permission produces no repeated prompt, process churn, or Claude restart.
 7. Install, status, update, and uninstall leave the official Claude.app untouched.
+8. Release builds pass Developer ID, notarization, checksum, architecture, transactional rollback, and live-health checks.
 
 ## Pull requests
 

@@ -115,9 +115,11 @@ The controller remains alive across later Codex launches and sleep/wake. `RunAtL
 
 ## Claude macOS companion lifecycle
 
-The Claude installer builds and signs an independent `Token Meter for Claude.app`, copies the minimum runtime into the user's Application Support directory, and loads a per-user LaunchAgent. Source builds use ad-hoc signing unless a stable identity is supplied. The executable owns a non-activating `NSPanel`; it never executes code inside Claude's renderer.
+The Claude integration ships an independent `Token Meter for Claude.app` and a per-user LaunchAgent. Public architecture-specific releases embed the minimum JavaScript runtime and official Node.js distribution, use a stable Developer ID identity plus Hardened Runtime, and are notarized by Apple. Source builds copy the runtime into Application Support and use ad-hoc signing unless a stable identity is supplied. The executable owns a non-activating `NSPanel`; it never executes code inside Claude's renderer.
 
-macOS Accessibility permission is granted to the companion, not to the repository shell and not to Claude.app. The process writes a PID readiness marker only after Accessibility trust succeeds. The status command validates both that marker and the exact executable command, so a loaded but permission-blocked LaunchAgent is not reported as ready. A blocked companion remains alive and polls the trust state quietly; it neither repeats the system prompt nor quits or relaunches Claude.
+macOS Accessibility permission is granted to the companion, not to the repository shell and not to Claude.app. The process writes atomic `health.json` state from startup onward. Status validates its PID against the exact executable, then checks Accessibility live and reports UI readiness, bridge health, and exact Session binding separately. A permission-blocked companion therefore reports a live waiting process without falsely reporting trust. It polls quietly and detects both grant and revocation without repeating the system prompt or quitting or relaunching Claude.
+
+The release manager verifies the archive checksum, bundle identity, complete signature, T54 Team ID, Developer ID authority, Gatekeeper assessment, embedded runtime, and architecture. During an update it retains the previous app and LaunchAgent until the new process produces matching live health state; bootstrap, process, or trusted-UI failure restores the previous installation.
 
 One persistent Node bridge holds the transcript stores and metrics engine in memory. The Swift host sends the exact selected Desktop Session ID and receives a newline-delimited numerical snapshot. Timeout, malformed output, or bridge termination causes a restart or hidden meter; no stale snapshot is assigned to a new Session.
 

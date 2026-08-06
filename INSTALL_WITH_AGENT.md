@@ -28,8 +28,8 @@ Finish only when each selected host is installed and its real runtime status has
 3. Confirm the operating system is macOS and record the installed host paths:
    - Codex: `/Applications/ChatGPT.app`
    - Claude: `/Applications/Claude.app`
-4. Locate Node.js 22.12 or newer. Prefer an existing absolute path. Check common locations and `command -v node`. If no compatible runtime exists, ask before installing or upgrading Node.js. Do not silently modify the user's package-manager state.
-5. Run the repository verification suite:
+4. Prefer the signed Claude GitHub Release for normal users. It embeds Node.js and does not require Swift or Xcode. Use the source installer only when the user explicitly requests a source/development installation or needs to verify un-released repository changes.
+5. For source work, run the repository verification suite:
 
    ```bash
    npm run ci
@@ -50,20 +50,25 @@ Finish only when each selected host is installed and its real runtime status has
 
    - If Codex is running without the endpoint, stop and obtain explicit approval for the installer's one normal quit/relaunch recovery.
    - Verify the LaunchAgent and endpoint. Then inspect the verified renderer and confirm `window.__tokenMeter.version >= 6`, the collapse control is visible, and the card has draggable layout enabled.
-7. If Claude Desktop is installed, run without quitting Claude:
+7. If Claude Desktop is installed, run without quitting Claude. For the signed release:
 
    ```bash
-   ./scripts/install-claude-meter-macos.sh --node /absolute/path/to/node
+   curl -fLO https://github.com/SergioChan/token-meter/releases/latest/download/token-meter-claude
+   chmod +x token-meter-claude
+   ./token-meter-claude install
    ```
+
+   For an explicitly requested source build, first run `./scripts/doctor-claude-meter-macos.sh`, then run `./scripts/install-claude-meter-macos.sh`. Let the installer select a compatible Node.js unless a specific absolute path is required. If the doctor reports a missing dependency, ask before changing package-manager or Xcode state.
 
 8. Check Claude companion status:
 
    ```bash
-   ./scripts/status-claude-meter-macos.sh --json
+   "$HOME/Library/Application Support/Token Meter/bin/token-meter-claude" status --json
    ```
 
    - If `accessibilityGranted` is `false`, open System Settings > Privacy & Security > Accessibility and ask the user to enable **Token Meter for Claude**.
-   - After approval, wait up to 60 seconds, polling no faster than every five seconds, until `running` and `accessibilityGranted` are both `true`.
+   - After approval, wait up to 60 seconds, polling no faster than every five seconds, until `running`, `accessibilityGranted`, and `overlayReady` are all `true`.
+   - Treat `bridgeHealthy` and `sessionBound` as foreground Session checks, not installation checks. They may correctly remain `false` while Claude is hidden or not showing Code.
    - Do not restart Claude while waiting.
 9. Bring each installed host to the foreground only when needed for visual verification. Confirm:
    - The Meter follows the exact selected Session.

@@ -157,13 +157,22 @@ The per-user LaunchAgent is:
 com.sergiochan.token-meter.claude-desktop
 ```
 
-It starts the native companion directly with absolute runtime, Node.js, Claude.app, and state paths. Unexpected non-zero exits are throttled. An Accessibility-blocked companion stays alive and checks the trust state quietly without repeating the system prompt or touching Claude.
+Source installations start the native companion with absolute runtime, Node.js, Claude.app, and state paths. Self-contained releases omit external runtime and Node.js arguments because both are sealed inside the application. Unexpected non-zero exits are throttled. An Accessibility-blocked companion stays alive and checks the trust state quietly without repeating the system prompt or touching Claude.
 
-The readiness marker is accepted only while its PID is alive and its command is the exact installed executable followed by an argument boundary. Prefix lookalikes are rejected.
+Structured health state is accepted only while its PID is alive and its command is the exact installed executable followed by an argument boundary. Prefix lookalikes are rejected. Live Accessibility trust, UI readiness, bridge health, and exact Session binding remain distinct status fields.
 
 Use:
 
 ```bash
+./token-meter-claude install
+./token-meter-claude status --json
+./token-meter-claude uninstall
+```
+
+For source development:
+
+```bash
+./scripts/doctor-claude-meter-macos.sh
 ./scripts/install-claude-meter-macos.sh
 ./scripts/status-claude-meter-macos.sh --json
 ./scripts/uninstall-claude-meter-macos.sh

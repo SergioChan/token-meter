@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -14,8 +15,12 @@ test(
   async (context) => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "token-meter-release-"));
     context.after(() => rm(directory, { recursive: true, force: true }));
-    const nodeRoot = path.dirname(path.dirname(process.execPath));
-    const arch = process.arch === "arm64" ? "arm64" : "x86_64";
+    const nodePath = await realpath(
+      existsSync("/opt/homebrew/bin/node") ? "/opt/homebrew/bin/node" : process.execPath,
+    );
+    const nodeRoot = path.dirname(path.dirname(nodePath));
+    const { stdout: nodeArch } = await execFileAsync(nodePath, ["-p", "process.arch"]);
+    const arch = nodeArch.trim() === "arm64" ? "arm64" : "x86_64";
     await execFileAsync(
       "integrations/claude-desktop/scripts/build-release.sh",
       [
