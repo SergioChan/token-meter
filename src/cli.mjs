@@ -42,6 +42,7 @@ if (options.command === "snapshot") {
     cdpPort: options.cdpPort || 9334,
     signal: controller.signal,
   });
+  if (controller.signal.aborted) process.exitCode = 130;
 } else if (options.command === "remove") {
   const modulePath = new URL("./codex/injector.mjs", import.meta.url);
   const { removeCodexMeter } = await import(modulePath);

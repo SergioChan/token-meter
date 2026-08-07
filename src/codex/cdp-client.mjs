@@ -2,7 +2,6 @@ function withTimeout(promise, timeoutMs, message) {
   let timer;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(message)), timeoutMs);
-    timer.unref?.();
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
@@ -55,6 +54,11 @@ export class CdpClient {
   }
 
   async call(method, params = {}, { timeoutMs = 5_000 } = {}) {
+    if (this.socket.readyState !== 1) {
+      throw new Error(
+        `CDP socket is not open (readyState ${this.socket.readyState})`,
+      );
+    }
     const id = this.nextId++;
     const response = new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
