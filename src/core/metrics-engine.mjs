@@ -45,6 +45,34 @@ function groupBySession(files) {
   return sessions;
 }
 
+function latestSkillInventory(files) {
+  return files
+    .filter((file) => Array.isArray(file.skills) && file.skillsUpdatedAtMs != null)
+    .sort((left, right) => left.skillsUpdatedAtMs - right.skillsUpdatedAtMs)
+    .at(-1) ?? null;
+}
+
+function buildSkillSnapshot(files) {
+  const inventory = latestSkillInventory(files);
+  if (inventory == null) {
+    return {
+      status: "unknown",
+      source: "unavailable",
+      updatedAtMs: null,
+      items: [],
+    };
+  }
+  return {
+    status: "loaded",
+    source: "rollout-world-state",
+    updatedAtMs: inventory.skillsUpdatedAtMs,
+    items: inventory.skills.map((name) => ({
+      name,
+      status: "loaded",
+    })),
+  };
+}
+
 function pickRoot(files, requestedThreadId) {
   const roots = files.filter(isRootUserRollout);
   if (requestedThreadId) {
@@ -150,6 +178,7 @@ export class MetricsEngine {
 
     const sessionId = root.meta.sessionId;
     const sessionFiles = files.filter((file) => file.meta?.sessionId === sessionId);
+    const skills = buildSkillSnapshot(sessionFiles);
     const latestRootUsage = root.usage.at(-1) ?? null;
     const latestCompactedAtMs = root.contextCompactions?.at(-1) ?? null;
     const hasFreshContextUsage =
@@ -234,6 +263,7 @@ export class MetricsEngine {
       account: {
         lastHourTokens: allHourTokens,
       },
+      skills,
       rate: {
         tokensPerMinute,
         windowMs: this.rateWindowMs,

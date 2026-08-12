@@ -39,6 +39,8 @@ function rollout({
   userMessages = [],
   turnCompletions = [],
   contextCompactions = [],
+  skills = null,
+  skillsUpdatedAtMs = null,
 }) {
   return {
     path: `/tmp/${id}.jsonl`,
@@ -57,8 +59,32 @@ function rollout({
     turnCompletions,
     turnAborts: [],
     contextCompactions,
+    skills,
+    skillsUpdatedAtMs,
   };
 }
+
+test("snapshot exposes the exact active Session skill inventory", () => {
+  const file = rollout({
+    id: "skills-session",
+    usageEvents: [usage(1, 10)],
+    skills: ["openai-docs", "visualize"],
+    skillsUpdatedAtMs: 2,
+  });
+  const snapshot = new MetricsEngine().snapshot([file], {
+    threadId: "skills-session",
+    nowMs: 3,
+  });
+  assert.deepEqual(snapshot.skills, {
+    status: "loaded",
+    source: "rollout-world-state",
+    updatedAtMs: 2,
+    items: [
+      { name: "openai-docs", status: "loaded" },
+      { name: "visualize", status: "loaded" },
+    ],
+  });
+});
 
 test("snapshot follows the selected session and includes its child agents", () => {
   const rootA = rollout({

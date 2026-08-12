@@ -25,12 +25,9 @@ codex_main_pid() {
   '
 }
 
-codex_bundle_processes_running() {
+codex_main_process_running() {
   local app_path="$1"
-  /bin/ps -axo command= | /usr/bin/awk -v prefix="$app_path/Contents/" '
-    index($0, prefix) > 0 { found = 1 }
-    END { exit found ? 0 : 1 }
-  '
+  [ -n "$(codex_main_pid "$app_path" 2>/dev/null || true)" ]
 }
 
 wait_for_codex_exit() {
@@ -39,7 +36,7 @@ wait_for_codex_exit() {
   local delay_seconds="${3:-0.25}"
   local attempt
   for attempt in $(/usr/bin/seq 1 "$attempts"); do
-    if ! codex_bundle_processes_running "$app_path"; then
+    if ! codex_main_process_running "$app_path"; then
       return 0
     fi
     /bin/sleep "$delay_seconds"

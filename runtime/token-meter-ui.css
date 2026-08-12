@@ -287,6 +287,213 @@
   display: grid;
 }
 
+.skills-panel {
+  display: none;
+  padding: 10px 11px 11px;
+  border-top: 1px solid rgb(28 31 28 / 0.09);
+}
+
+.meter-card.expanded .skills-panel {
+  display: block;
+}
+
+.skills-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: rgb(32 33 31 / 0.52);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+}
+
+.skills-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.skills-heading b {
+  color: var(--accent-strong);
+  font: 650 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.skills-reveal {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 18px;
+  padding: 2px 4px 2px 5px;
+  color: rgb(32 33 31 / 0.52);
+  background: transparent;
+  border: 1px solid rgb(32 33 31 / 0.15);
+  border-radius: 5px;
+  font: 700 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.skills-reveal:hover {
+  color: var(--accent-strong);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.skills-reveal:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--rate-color) 70%, transparent);
+  outline-offset: 1px;
+}
+
+.skills-reveal-icon {
+  font-size: 11px;
+  line-height: 8px;
+}
+
+.skill-lights {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(28px, 1fr));
+  align-items: start;
+  gap: 7px 3px;
+  max-height: 174px;
+  margin-top: 10px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.skill-light {
+  display: grid;
+  justify-items: center;
+  min-width: 0;
+  padding: 1px 0;
+  color: rgb(32 33 31 / 0.68);
+  font: 600 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  cursor: help;
+}
+
+.skill-logo {
+  --logo-color: #8b9189;
+  position: relative;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--logo-color) 66%, transparent);
+  border-radius: 8px;
+  color: var(--logo-color);
+  background: color-mix(in srgb, var(--logo-color) 12%, transparent);
+  box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.12);
+}
+
+.skill-logo::before {
+  content: attr(data-icon);
+  display: block;
+  font: 700 13px/1 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: -0.05em;
+}
+
+.skill-light:hover .skill-logo::before,
+.skill-logo:focus-visible::before {
+  content: "?";
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.skill-logo:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--status-color, #8b9189) 78%, transparent);
+  outline-offset: 2px;
+}
+
+.skill-logo[data-family="pdf"]::before {
+  font-size: 7px;
+  letter-spacing: -0.08em;
+}
+
+.skill-logo[data-family="figma"]::before,
+.skill-logo[data-family="github"]::before,
+.skill-logo[data-family="openai"]::before {
+  font-size: 15px;
+}
+
+.skill-status-dot {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 8px;
+  height: 8px;
+  box-sizing: border-box;
+  border: 2px solid rgb(247 247 244 / 0.94);
+  border-radius: 999px;
+  background: var(--status-color, #8b9189);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--status-color, #8b9189) 48%, transparent);
+}
+
+.skill-logo[data-family="image"] { --logo-color: #c277d1; }
+.skill-logo[data-family="openai"] { --logo-color: #74b891; }
+.skill-logo[data-family="plugin"] { --logo-color: #d59b52; }
+.skill-logo[data-family="skill"] { --logo-color: #55b7a2; }
+.skill-logo[data-family="installer"] { --logo-color: #70a8db; }
+.skill-logo[data-family="browser"],
+.skill-logo[data-family="chrome"] { --logo-color: #6fa8d8; }
+.skill-logo[data-family="commons"],
+.skill-logo[data-family="computer"] { --logo-color: #9d9bdd; }
+.skill-logo[data-family="documents"],
+.skill-logo[data-family="template"] { --logo-color: #d0a45d; }
+.skill-logo[data-family="figma"],
+.skill-logo[data-family="slack"] { --logo-color: #d37fba; }
+.skill-logo[data-family="github"] { --logo-color: #c1c7cf; }
+.skill-logo[data-family="gmail"],
+.skill-logo[data-family="pdf"] { --logo-color: #df7770; }
+.skill-logo[data-family="calendar"],
+.skill-logo[data-family="spreadsheets"] { --logo-color: #79b993; }
+.skill-logo[data-family="presentations"] { --logo-color: #dc9961; }
+.skill-logo[data-family="sites"],
+.skill-logo[data-family="visualize"] { --logo-color: #7aa9d3; }
+
+.skill-light[data-status="loaded"] {
+  --status-color: #5fbd83;
+}
+
+.skill-light[data-status="not-loaded"] {
+  --status-color: #d65d55;
+}
+
+.skill-light[data-status="not-loaded"] .skill-logo {
+  opacity: 0.48;
+  filter: grayscale(0.6);
+}
+
+.skill-name {
+  display: none;
+  min-width: 0;
+  width: 100%;
+  margin-top: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.skills-panel.labels-visible .skill-lights {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+
+.skills-panel.labels-visible .skill-light {
+  display: flex;
+  align-items: center;
+  justify-items: initial;
+  gap: 7px;
+  padding: 2px 0;
+}
+
+.skills-panel.labels-visible .skill-name {
+  display: block;
+}
+
 .meter-card.collapsed {
   width: 152px;
 }
@@ -307,8 +514,9 @@
 .collapsed .session-total-wrap,
 .collapsed .metric-row,
 .collapsed .context-row,
-.collapsed .details-row,
-.collapsed .warning,
+  .collapsed .details-row,
+  .collapsed .skills-panel,
+  .collapsed .warning,
 .collapsed .unbound {
   display: none;
 }
@@ -424,7 +632,8 @@
   .meter-header,
   .metric-row,
   .context-row,
-  .details-row {
+  .details-row,
+  .skills-panel {
     border-color: rgb(255 255 255 / 0.09);
   }
 
@@ -452,6 +661,25 @@
 
   .details-row b {
     color: #eceee9;
+  }
+
+  .skills-heading,
+  .skill-light {
+    color: rgb(236 238 233 / 0.58);
+  }
+
+  .skills-heading b {
+    color: #9fd2b5;
+  }
+
+  .skills-reveal {
+    color: rgb(236 238 233 / 0.58);
+    border-color: rgb(255 255 255 / 0.16);
+  }
+
+  .skills-reveal:hover {
+    color: #9fd2b5;
+    background: rgb(95 157 124 / 0.12);
   }
 
   .context-row b i {

@@ -1,5 +1,5 @@
 ((cssText) => {
-  const VERSION = 6;
+  const VERSION = 10;
   const existing = window.__tokenMeter;
   if (existing?.version === VERSION) {
     existing.ensureMounted();
@@ -75,6 +75,19 @@
       <span>Historical baseline</span><b class="baseline">Learning</b>
       <span>Context compactions</span><b class="compaction-count">0</b>
     </div>
+    <section class="skills-panel" aria-label="Session skills">
+      <div class="skills-heading">
+        <span>SESSION SKILLS</span>
+        <span class="skills-controls">
+          <b class="skills-summary">—</b>
+          <button class="skills-reveal" type="button" aria-expanded="false" aria-label="Show skill names" title="Show skill names" hidden>
+            <span class="skills-reveal-label">SHOW NAMES</span>
+            <span class="skills-reveal-icon" aria-hidden="true">+</span>
+          </button>
+        </span>
+      </div>
+      <div class="skill-lights" role="list"></div>
+    </section>
     <div class="warning" hidden>
       <strong>Unusually high token rate</strong>
       <span>Context pollution or a retry loop may be present. Consider a new session.</span>
@@ -107,6 +120,10 @@
     progress: card.querySelector(".gauge-progress"),
     warning: card.querySelector(".warning"),
     unbound: card.querySelector(".unbound"),
+    skillsPanel: card.querySelector(".skills-panel"),
+    skillsSummary: card.querySelector(".skills-summary"),
+    skillsReveal: card.querySelector(".skills-reveal"),
+    skillLights: card.querySelector(".skill-lights"),
   };
   const displayed = new Map();
   const animations = new Map();
@@ -120,6 +137,7 @@
   let storageKey = null;
   let position = null;
   let dragState = null;
+  let skillLabelsVisible = false;
 
   const format = (value) => {
     const number = Math.max(0, Number(value) || 0);
@@ -130,6 +148,86 @@
     if (number >= 1_000) return `${(number / 1_000).toFixed(2)}K`;
     return Math.round(number).toLocaleString();
   };
+
+  const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character]);
+
+  const setSkillLabelsVisible = (value) => {
+    skillLabelsVisible = value === true;
+    elements.skillsPanel.classList.toggle("labels-visible", skillLabelsVisible);
+    elements.skillsReveal.setAttribute("aria-expanded", String(skillLabelsVisible));
+    const action = skillLabelsVisible ? "Hide" : "Show";
+    elements.skillsReveal.setAttribute("aria-label", `${action} skill names`);
+    elements.skillsReveal.title = `${action} skill names`;
+    elements.skillsReveal.querySelector(".skills-reveal-label").textContent =
+      `${action.toUpperCase()} NAMES`;
+    elements.skillsReveal.querySelector(".skills-reveal-icon").textContent =
+      skillLabelsVisible ? "−" : "+";
+    return skillLabelsVisible;
+  };
+
+  const skillIconFor = (name) => {
+    const value = String(name).toLowerCase();
+    if (value === "imagegen") return { family: "image", symbol: "✦" };
+    if (value === "openai-docs") return { family: "openai", symbol: "◎" };
+    if (value === "plugin-creator") return { family: "plugin", symbol: "◇" };
+    if (value === "skill-creator") return { family: "skill", symbol: "✣" };
+    if (value === "skill-installer") return { family: "installer", symbol: "↓" };
+    if (value.startsWith("browser:")) return { family: "browser", symbol: "◉" };
+    if (value.startsWith("chrome:")) return { family: "chrome", symbol: "◌" };
+    if (value === "commons") return { family: "commons", symbol: "↔" };
+    if (value.startsWith("computer-use:")) return { family: "computer", symbol: "▣" };
+    if (value.startsWith("documents:")) return { family: "documents", symbol: "▤" };
+    if (value.startsWith("figma:")) return { family: "figma", symbol: "F" };
+    if (value.startsWith("github:")) return { family: "github", symbol: "◒" };
+    if (value.startsWith("gmail:")) return { family: "gmail", symbol: "✉" };
+    if (value.startsWith("google-calendar:")) return { family: "calendar", symbol: "▦" };
+    if (value.startsWith("pdf:")) return { family: "pdf", symbol: "PDF" };
+    if (value.startsWith("presentations:")) return { family: "presentations", symbol: "▰" };
+    if (value.startsWith("sites:")) return { family: "sites", symbol: "⌂" };
+    if (value.startsWith("slack:")) return { family: "slack", symbol: "✣" };
+    if (value.startsWith("spreadsheets:")) return { family: "spreadsheets", symbol: "▦" };
+    if (value.startsWith("template-creator:")) return { family: "template", symbol: "▥" };
+    if (value.startsWith("visualize:")) return { family: "visualize", symbol: "◉" };
+    const initial = value.match(/[a-z0-9]/)?.[0]?.toUpperCase() ?? "?";
+    return { family: "generic", symbol: initial };
+  };
+
+  const renderSkills = (skills) => {
+    const items = Array.isArray(skills?.items) ? skills.items : [];
+    const loadedCount = items.filter((item) => item?.status === "loaded").length;
+    const notLoadedCount = items.length - loadedCount;
+    elements.skillsSummary.textContent = skills?.status === "loaded"
+      ? `${loadedCount} loaded${notLoadedCount ? ` · ${notLoadedCount} not loaded` : ""}`
+      : "—";
+    elements.skillsReveal.hidden = items.length === 0;
+    elements.skillLights.replaceChildren();
+    for (const item of items) {
+      const status = item?.status === "loaded" ? "loaded" : "not-loaded";
+      const icon = skillIconFor(item?.name);
+      const light = document.createElement("span");
+      light.className = "skill-light";
+      light.dataset.status = status;
+      light.dataset.family = icon.family;
+      light.setAttribute("role", "listitem");
+      light.title = item.name;
+      light.setAttribute("aria-label", `${item.name}: Skill status ${status}`);
+      light.innerHTML = `
+        <span class="skill-logo" data-family="${icon.family}" data-icon="${escapeHtml(icon.symbol)}" title="${escapeHtml(item.name)}" tabindex="0" role="img" aria-label="${escapeHtml(item.name)}">
+          <i class="skill-status-dot"></i>
+        </span>
+        <b class="skill-name">${escapeHtml(item.name)}</b>
+      `;
+      elements.skillLights.append(light);
+    }
+  };
+
+  setSkillLabelsVisible(false);
 
   const animateNumber = (key, element, target, immediate = false) => {
     animations.get(key)?.cancel?.();
@@ -331,6 +429,8 @@
       elements.baseline.textContent = "—";
       elements.agentCount.textContent = "";
       elements.usageDelta.textContent = "";
+      setSkillLabelsVisible(false);
+      renderSkills({ status: "unknown", items: [] });
       currentSessionId = null;
       lastSessionTotal = 0;
       lastRate = null;
@@ -344,6 +444,7 @@
     const sessionChanged = currentSessionId !== snapshot.sessionId;
     if (sessionChanged) {
       currentSessionId = snapshot.sessionId;
+      setSkillLabelsVisible(false);
       card.classList.remove("session-switch");
       void card.offsetWidth;
       card.classList.add("session-switch");
@@ -389,6 +490,7 @@
         snapshot.context.percent == null ? "—" : `${snapshot.context.percent.toFixed(1)}%`;
     }
     elements.compactionCount.textContent = String(snapshot.context?.compactionCount ?? 0);
+    renderSkills(snapshot.skills);
 
     const rate = snapshot.rate.tokensPerMinute;
     const median = snapshot.anomaly.baseline.medianTokensPerMinute || 0;
@@ -421,8 +523,20 @@
     event.stopPropagation();
     setCollapsed(!collapsed);
   });
+  elements.skillsReveal.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSkillLabelsVisible(!skillLabelsVisible);
+  });
+  elements.skillsPanel.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
   card.addEventListener("click", () => {
-    if (!collapsed) card.classList.toggle("expanded");
+    if (!collapsed) {
+      const wasExpanded = card.classList.contains("expanded");
+      card.classList.toggle("expanded");
+      if (wasExpanded) setSkillLabelsVisible(false);
+    }
   });
   for (const [element, source] of [
     [elements.header, "header"],

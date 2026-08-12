@@ -4,9 +4,56 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  extractSkillNames,
   parseRolloutLine,
   RolloutStore,
 } from "../src/core/rollout-store.mjs";
+
+test("skill inventory parser keeps names only and de-duplicates entries", () => {
+  assert.deepEqual(
+    extractSkillNames(`
+### Available skills
+- browser:control-in-app-browser: Control the in-app Browser.
+- browser:control-in-app-browser: duplicate
+- visualize:visualize: Create visualizations.
+
+## Other instructions
+- not-a-skill: ignored
+`),
+    ["browser:control-in-app-browser", "visualize:visualize"],
+  );
+  assert.deepEqual(
+    extractSkillNames(`### Available skills
+- imagegen: Generate raster images: safely.
+- figma:figma-use: Use Figma: with a required prerequisite.
+`),
+    ["imagegen", "figma:figma-use"],
+  );
+});
+
+test("rollout parser records a Session skill inventory without retaining instructions", () => {
+  const parsed = parseRolloutLine(
+    JSON.stringify({
+      timestamp: "2026-08-05T00:00:00.000Z",
+      type: "world_state",
+      payload: {
+        state: {
+          host_skills: {
+            body: `### Available skills
+- openai-docs: Official docs
+`,
+          },
+        },
+      },
+    }),
+  );
+  assert.deepEqual(parsed, {
+    kind: "skillInventory",
+    timestampMs: Date.parse("2026-08-05T00:00:00.000Z"),
+    skills: ["openai-docs"],
+  });
+  assert.equal(JSON.stringify(parsed).includes("Official docs"), false);
+});
 
 test("rollout parser extracts usage without retaining message content", () => {
   const parsed = parseRolloutLine(

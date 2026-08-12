@@ -70,6 +70,11 @@ class FakeElement {
     for (const child of children) child.isConnected = this.isConnected;
   }
 
+  replaceChildren(...children) {
+    this.children = children;
+    for (const child of children) child.isConnected = this.isConnected;
+  }
+
   attachShadow() {
     const shadow = new FakeElement("shadow-root");
     this.shadowRoot = shadow;
@@ -265,4 +270,101 @@ test("injected hosts can drag and persist the compact meter layout", async () =>
   assert.equal(saved.collapsed, true);
   assert.equal(saved.left, 650);
   assert.equal(saved.top, 380);
+});
+
+test("expanded hosts render Session skill status lights", async () => {
+  const source = (
+    await readFile(new URL("../runtime/token-meter-ui.js", import.meta.url), "utf8")
+  ).replace("__TOKEN_METER_CSS_JSON__", JSON.stringify(""));
+  const created = [];
+  const documentElement = new FakeElement("html");
+  documentElement.isConnected = true;
+  const window = {
+    innerWidth: 1_200,
+    innerHeight: 800,
+    addEventListener() {},
+    localStorage: { getItem() { return null; }, setItem() {} },
+  };
+  const context = vm.createContext({
+    document: {
+      createElement(tagName) {
+        const element = new FakeElement(tagName);
+        created.push(element);
+        return element;
+      },
+      documentElement,
+    },
+    window,
+    MutationObserver: class {
+      observe() {}
+      disconnect() {}
+    },
+    performance: { now: () => 0 },
+    requestAnimationFrame() {},
+    clearTimeout() {},
+    setTimeout() {},
+  });
+
+  vm.runInContext(source, context);
+  const card = created.find((element) => element.tagName === "section");
+  const summary = card.querySelector(".skills-summary");
+  const panel = card.querySelector(".skills-panel");
+  const reveal = card.querySelector(".skills-reveal");
+  const lights = card.querySelector(".skill-lights");
+
+  window.__tokenMeter.configure({ collapsible: true });
+  assert.equal(card.classList.contains("expanded"), false);
+  window.__tokenMeter.update({
+    status: "bound",
+    binding: { exact: true },
+    sessionId: "session-skills",
+    session: { totalTokens: 10, lastHourTokens: 10 },
+    turn: { tokens: 10 },
+    context: { tokens: 10, windowTokens: 100, percent: 10, compactionCount: 0 },
+    account: { lastHourTokens: 10 },
+    rate: { tokensPerMinute: 1, intensity: 0, band: "green" },
+    anomaly: { level: "learning", baseline: { medianTokensPerMinute: 0 } },
+    skills: {
+      status: "loaded",
+      items: [
+        { name: "openai-docs", status: "loaded" },
+        { name: "visualize", status: "not-loaded" },
+      ],
+    },
+  });
+
+  assert.equal(summary.textContent, "1 loaded · 1 not loaded");
+  assert.equal(lights.children.length, 2);
+  assert.equal(lights.children[0].dataset.status, "loaded");
+  assert.equal(lights.children[0].title, "openai-docs");
+  assert.equal(lights.children[1].dataset.status, "not-loaded");
+  assert.match(lights.children[0].markup, /skill-logo/);
+  assert.match(lights.children[0].markup, /title="openai-docs"/);
+  assert.match(lights.children[0].markup, /tabindex="0"/);
+  assert.doesNotMatch(lights.children[0].markup, /skill-gauge/);
+  assert.match(lights.children[0].markup, /skill-name/);
+  assert.equal(panel.classList.contains("labels-visible"), false);
+  assert.equal(reveal.attributes.get("aria-expanded"), "false");
+  reveal.click();
+  assert.equal(panel.classList.contains("labels-visible"), true);
+  assert.equal(reveal.attributes.get("aria-expanded"), "true");
+  window.__tokenMeter.update({
+    status: "bound",
+    binding: { exact: true },
+    sessionId: "next-session",
+    session: { totalTokens: 20, lastHourTokens: 20 },
+    turn: { tokens: 20 },
+    context: { tokens: 20, windowTokens: 100, percent: 20, compactionCount: 0 },
+    account: { lastHourTokens: 20 },
+    rate: { tokensPerMinute: 1, intensity: 0, band: "green" },
+    anomaly: { level: "learning", baseline: { medianTokensPerMinute: 0 } },
+    skills: {
+      status: "loaded",
+      items: [{ name: "openai-docs", status: "loaded" }],
+    },
+  });
+  assert.equal(panel.classList.contains("labels-visible"), false);
+  assert.equal(reveal.attributes.get("aria-expanded"), "false");
+  reveal.click();
+  assert.equal(panel.classList.contains("labels-visible"), true);
 });

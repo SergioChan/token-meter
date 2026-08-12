@@ -9,6 +9,18 @@ function timestampToMs(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+export function extractSkillNames(body) {
+  if (typeof body !== "string") return [];
+  const section = body.match(/### Available skills([\s\S]*?)(?:\n## |$)/i)?.[1] ?? body;
+  const names = [];
+  for (const line of section.split(/\r?\n/)) {
+    const match = line.match(/^\s*-\s+(.+?):\s+\S/);
+    const name = match?.[1]?.trim();
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
 function normalizeBreakdown(value) {
   if (value == null || typeof value !== "object") return null;
   const totalTokens = Number(value.total_tokens ?? value.totalTokens);
@@ -43,6 +55,16 @@ export function parseRolloutLine(line) {
       originator: payload.originator ?? null,
       cwd: payload.cwd ?? null,
       timestampMs,
+    };
+  }
+
+  if (value.type === "world_state") {
+    const body = value.payload?.state?.host_skills?.body;
+    if (typeof body !== "string" || timestampMs == null) return null;
+    return {
+      kind: "skillInventory",
+      timestampMs,
+      skills: extractSkillNames(body),
     };
   }
 
@@ -104,6 +126,8 @@ function createFileState(filePath, discoveredId, modifiedMs) {
     turnCompletions: [],
     turnAborts: [],
     contextCompactions: [],
+    skills: null,
+    skillsUpdatedAtMs: null,
   };
 }
 
@@ -300,6 +324,8 @@ export class RolloutStore {
       file.turnCompletions = [];
       file.turnAborts = [];
       file.contextCompactions = [];
+      file.skills = null;
+      file.skillsUpdatedAtMs = null;
     }
     if (fileStat.size === file.offset) {
       file.modifiedMs = fileStat.mtimeMs;
@@ -352,6 +378,9 @@ export class RolloutStore {
       file.turnAborts.push(event.timestampMs);
     } else if (event.kind === "contextCompacted") {
       file.contextCompactions.push(event.timestampMs);
+    } else if (event.kind === "skillInventory") {
+      file.skills = event.skills;
+      file.skillsUpdatedAtMs = event.timestampMs;
     }
   }
 }

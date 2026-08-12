@@ -120,10 +120,11 @@ while [ "$STOPPING" = false ]; do
       break
     fi
     set_state "injector-exited" \
-      "Injector exited with status $INJECTOR_STATUS; waiting for the endpoint to change."
-    while [ "$STOPPING" = false ] && endpoint_ready; do
-      /bin/sleep 5
-    done
+      "Injector exited with status $INJECTOR_STATUS; retrying while the endpoint remains healthy."
+    # A renderer can reload or replace its CDP targets without changing the
+    # browser endpoint. Reconnect so the Meter does not remain as a stale,
+    # static card after the injector loses its target.
+    /bin/sleep 2
     continue
   fi
 
