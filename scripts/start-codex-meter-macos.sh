@@ -72,7 +72,7 @@ EOF
     exit 1
   fi
 
-  /usr/bin/open -na "$APP_PATH" --args \
+  /usr/bin/open -n "$APP_PATH" --args \
     --remote-debugging-address=127.0.0.1 \
     --remote-debugging-port="$PORT"
 

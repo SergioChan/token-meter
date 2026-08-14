@@ -7,6 +7,8 @@ APP_PATH="/Applications/ChatGPT.app"
 STOPPING=false
 INJECTOR_PID=""
 HANDLED_PID=""
+RECOVERY_ATTEMPTS=0
+MAX_RECOVERY_ATTEMPTS=2
 LAST_STATE=""
 
 usage() {
@@ -102,6 +104,8 @@ trap stop_service INT TERM
 
 while [ "$STOPPING" = false ]; do
   if endpoint_ready; then
+    HANDLED_PID=""
+    RECOVERY_ATTEMPTS=0
     NODE="$("$ROOT/scripts/verify-codex-app-macos.sh" "$APP_PATH")"
     if [ "$?" -ne 0 ] || [ -z "$NODE" ]; then
       set_state "verification-failed" \
@@ -138,19 +142,22 @@ while [ "$STOPPING" = false ]; do
   CURRENT_PID="$(codex_main_pid "$APP_PATH" 2>/dev/null || true)"
   if [ -z "$CURRENT_PID" ]; then
     HANDLED_PID=""
+    RECOVERY_ATTEMPTS=0
     set_state "waiting-for-codex" "Waiting for Codex to launch."
     /bin/sleep 1
     continue
   fi
 
-  if [ "$CURRENT_PID" = "$HANDLED_PID" ]; then
+  if [ "$CURRENT_PID" = "$HANDLED_PID" ] || \
+    [ "$RECOVERY_ATTEMPTS" -ge "$MAX_RECOVERY_ATTEMPTS" ]; then
     set_state "recovery-exhausted-$CURRENT_PID" \
-      "Codex PID $CURRENT_PID still lacks CDP after one recovery attempt; no retry will be made for this process."
+      "Codex PID $CURRENT_PID still lacks CDP after $RECOVERY_ATTEMPTS recovery attempts; no retry will be made for this process."
     /bin/sleep 5
     continue
   fi
 
   HANDLED_PID="$CURRENT_PID"
+  RECOVERY_ATTEMPTS=$((RECOVERY_ATTEMPTS + 1))
   NODE="$("$ROOT/scripts/verify-codex-app-macos.sh" "$APP_PATH")"
   if [ "$?" -ne 0 ] || [ -z "$NODE" ]; then
     set_state "verification-failed-$CURRENT_PID" \
@@ -160,7 +167,7 @@ while [ "$STOPPING" = false ]; do
   fi
 
   set_state "recovering-$CURRENT_PID" \
-    "Codex PID $CURRENT_PID lacks the loopback endpoint; performing one normal quit and relaunch."
+    "Codex PID $CURRENT_PID lacks the loopback endpoint; performing normal quit and relaunch attempt $RECOVERY_ATTEMPTS of $MAX_RECOVERY_ATTEMPTS."
   /usr/bin/osascript -e 'tell application id "com.openai.codex" to quit' >/dev/null
   if ! wait_for_codex_exit "$APP_PATH" 160 0.25; then
     set_state "quit-failed-$CURRENT_PID" \
@@ -175,7 +182,7 @@ while [ "$STOPPING" = false ]; do
     continue
   fi
 
-  /usr/bin/open -na "$APP_PATH" --args \
+  /usr/bin/open -n "$APP_PATH" --args \
     --remote-debugging-address=127.0.0.1 \
     --remote-debugging-port="$PORT"
 
@@ -185,9 +192,6 @@ while [ "$STOPPING" = false ]; do
       break
     fi
     NEW_PID="$(codex_main_pid "$APP_PATH" 2>/dev/null || true)"
-    if [ -n "$NEW_PID" ]; then
-      HANDLED_PID="$NEW_PID"
-    fi
     if endpoint_ready; then
       ENDPOINT_STARTED=true
       break
@@ -195,8 +199,8 @@ while [ "$STOPPING" = false ]; do
     /bin/sleep 0.25
   done
   if [ "$ENDPOINT_STARTED" = false ] && [ "$STOPPING" = false ]; then
-    set_state "launch-failed-${HANDLED_PID:-unknown}" \
-      "Codex did not expose CDP after the single relaunch; no further retry will be made for this process."
+    set_state "launch-failed-${NEW_PID:-unknown}" \
+      "Codex did not expose CDP after recovery attempt $RECOVERY_ATTEMPTS of $MAX_RECOVERY_ATTEMPTS."
     /bin/sleep 5
   fi
 done

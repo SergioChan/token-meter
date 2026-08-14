@@ -73,5 +73,5 @@ if [ "$RESTART_CODEX" = true ]; then
     printf 'Codex did not quit cleanly; no force-quit was attempted.\n' >&2
     exit 1
   fi
-  /usr/bin/open -a "$APP_PATH"
+  /usr/bin/open "$APP_PATH"
 fi
