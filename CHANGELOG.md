@@ -4,11 +4,30 @@ The top entry is the current source version. Binary release metadata appears at
 `/api/v1/latest` only after a signed and notarized DMG has actually been
 published.
 
-## Unreleased
+## 0.2.1 — 2026-08-14
 
+- Sharing consent now runs through a browser wizard: pick a handle with live
+  availability checks and verified-available suggestions, see exactly what
+  leaves the machine, and publish with an explicit button. Nothing uploads
+  until the agreement is accepted.
+- Switching back to "Data stays local" deletes the shared aggregates from the
+  server through a signed withdrawal; the handle claim survives, wiped meters
+  leave the leaderboard, and an unreachable registry retries the wipe
+  automatically.
+- The public profile page (`/u/<handle>`) mirrors the local dashboard: stat
+  strip, activity calendar, platform split, coding patterns, activity
+  insights, daily rhythm, top days, and a live weekly rank badge.
+- Usage reports carry the full aggregate stat set (hour-of-day rhythm, top
+  days, session sizes, cache and output shares) — aggregates only, validated
+  strictly server-side, additive for older clients and servers.
+- The leaderboard name column prefers claimed @handles.
+- The widget settings panel shows the installed version (and any available
+  update) on its tip line, and a one-time first-run banner offers to reserve
+  an @handle.
+- Fixed the settings panel truncating when opened while the detail-metrics
+  view was up.
 - Leaderboard Session totals now use the same rolling seven-day window as the
   ranked Token totals; lifetime Session counts remain profile statistics.
-
 - Passwordless browser pairing: the local Ed25519 Meter identity creates a
   five-minute, single-use pairing link and a revocable secure browser session.
 - The live community Leaderboard now highlights the authenticated Meter as
