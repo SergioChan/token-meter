@@ -90,6 +90,8 @@ TOKEN_METER_CODESIGN_IDENTITY="Apple Development: Name (TEAMID)" \
 
 List available identities with `security find-identity -v -p codesigning`. If Accessibility contains an entry from an older signature, remove that entry, add the current app from the installation path above, and enable it once.
 
+The installer reads Accessibility state from the newly launched companion's health file. If that LaunchAgent is not trusted yet, installation still succeeds and the companion waits quietly; a permission check from the invoking terminal is not used as a substitute because macOS can evaluate those process contexts differently.
+
 ## Verify
 
 ```bash

@@ -12,6 +12,9 @@ published.
   **you**, reports its weekly rank, and contains no sample rows.
 - Enabling community sharing performs an immediate signed aggregate upload;
   local-only mode remains the default and pairing does not imply consent.
+- Source updates now accept a healthy, permission-blocked companion and wait
+  quietly for Accessibility instead of misreading the invoking terminal's TCC
+  state and restoring the previous build.
 
 ## 0.2.0 — 2026-08-13
 

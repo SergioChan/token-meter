@@ -214,6 +214,7 @@ private struct SnapshotBridgeError: Error, CustomStringConvertible {
 private final class RuntimeHealth {
     private let url: URL
     private let pid = ProcessInfo.processInfo.processIdentifier
+    private var accessibilityChecked = false
     private var accessibilityGranted = false
     private var overlayReady = false
     private var bridgeHealthy = false
@@ -230,7 +231,10 @@ private final class RuntimeHealth {
         bridgeHealthy: Bool? = nil,
         sessionBound: Bool? = nil
     ) {
-        if let accessibilityGranted { self.accessibilityGranted = accessibilityGranted }
+        if let accessibilityGranted {
+            self.accessibilityGranted = accessibilityGranted
+            accessibilityChecked = true
+        }
         if let overlayReady { self.overlayReady = overlayReady }
         if let bridgeHealthy { self.bridgeHealthy = bridgeHealthy }
         if let sessionBound { self.sessionBound = sessionBound }
@@ -246,6 +250,7 @@ private final class RuntimeHealth {
             "schemaVersion": 1,
             "pid": pid,
             "updatedAt": ISO8601DateFormatter().string(from: Date()),
+            "accessibilityChecked": accessibilityChecked,
             "accessibilityGranted": accessibilityGranted,
             "overlayReady": overlayReady,
             "bridgeHealthy": bridgeHealthy,

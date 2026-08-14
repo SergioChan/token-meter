@@ -246,8 +246,33 @@ fi
 
 ACCESSIBILITY_GRANTED=false
 OVERLAY_READY=false
-if [ "$LOAD" = true ] && "$EXECUTABLE" --check-accessibility >/dev/null 2>&1; then
-  ACCESSIBILITY_GRANTED=true
+ACCESSIBILITY_CHECKED=false
+if [ "$LOAD" = true ]; then
+  for _ in $(/usr/bin/seq 1 "$((READY_TIMEOUT_SECONDS * 4))"); do
+    if [ "$(/usr/bin/plutil -extract accessibilityChecked raw -o - "$STATE_DIR/health.json" 2>/dev/null || true)" = true ]; then
+      ACCESSIBILITY_CHECKED=true
+      break
+    fi
+    /bin/sleep 0.25
+  done
+  if [ "$ACCESSIBILITY_CHECKED" = false ]; then
+    printf 'The new Claude Token Meter did not report its Accessibility state; the previous installation was restored.\n' >&2
+    exit 1
+  fi
+  HEALTH_ACCESSIBILITY="$(/usr/bin/plutil -extract accessibilityGranted raw -o - "$STATE_DIR/health.json" 2>/dev/null || true)"
+  case "$HEALTH_ACCESSIBILITY" in
+    true)
+      ACCESSIBILITY_GRANTED=true
+      ;;
+    false)
+      ;;
+    *)
+      printf 'The new Claude Token Meter reported an invalid Accessibility state; the previous installation was restored.\n' >&2
+      exit 1
+      ;;
+  esac
+fi
+if [ "$LOAD" = true ] && [ "$ACCESSIBILITY_GRANTED" = true ]; then
   for _ in $(/usr/bin/seq 1 "$((READY_TIMEOUT_SECONDS * 4))"); do
     if [ "$(/usr/bin/plutil -extract overlayReady raw -o - "$STATE_DIR/health.json" 2>/dev/null || true)" = true ]; then
       OVERLAY_READY=true

@@ -91,6 +91,13 @@ test(
     assert.equal(child.exitCode, null, `companion exited early: ${stderr}`);
     assert.equal((stderr.match(/Waiting quietly for permission/g) ?? []).length, 1);
     assert.doesNotMatch(stderr, /prompt-accessibility/);
+    const health = JSON.parse(
+      await readFile(path.join(stateDirectory, "health.json"), "utf8"),
+    );
+    assert.equal(health.pid, child.pid);
+    assert.equal(health.accessibilityChecked, true);
+    assert.equal(health.accessibilityGranted, false);
+    assert.equal(health.overlayReady, false);
     child.kill("SIGTERM");
     await once(child, "exit");
   },
@@ -121,4 +128,19 @@ test("Claude companion waits quietly for Accessibility and passes valid bridge a
   assert.match(source, /url\.query == nil/);
   assert.match(source, /url\.fragment\?\.hasPrefix\("pair="\) == true/);
   assert.doesNotMatch(source, /openInstalledPage\("web\/leaderboard\.html"\)/);
+});
+
+test("Claude installer trusts the LaunchAgent health state for Accessibility", async () => {
+  const source = await readFile(
+    "integrations/claude-desktop/scripts/install.sh",
+    "utf8",
+  );
+  const healthGate = source.match(
+    /ACCESSIBILITY_CHECKED=false([\s\S]+?)\n\/bin\/rm -rf "\$BACKUP"/,
+  )?.[1];
+  assert.ok(healthGate, "installer Accessibility gate must remain inspectable");
+  assert.match(healthGate, /-extract accessibilityChecked/);
+  assert.match(healthGate, /-extract accessibilityGranted/);
+  assert.match(healthGate, /\[ "\$ACCESSIBILITY_GRANTED" = true \]/);
+  assert.doesNotMatch(healthGate, /--check-accessibility/);
 });
