@@ -6,6 +6,11 @@ published.
 
 ## 0.2.1 — 2026-08-14
 
+- The signed, notarized "Token Widget.app" DMG returns as the primary
+  distribution: download, drag to Applications, double-click to self-install.
+  Updates ship as new DMGs that overwrite the app; the in-widget auto-update
+  channel stays dark until public launch. The command-line source install
+  remains available as the secondary path.
 - Sharing consent now runs through a browser wizard: pick a handle with live
   availability checks and verified-available suggestions, see exactly what
   leaves the machine, and publish with an explicit button. Nothing uploads

@@ -184,7 +184,7 @@
       <a href="/leaderboard">Leaderboard</a>
       <a href="https://github.com/SergioChan/token-meter">GitHub</a>
     </div>
-    <a class="pill forest small" href="#install">Install</a>
+    <a class="pill forest small" href="https://github.com/SergioChan/token-meter/releases/latest/download/TokenWidget.dmg">Download</a>
   </div>
 </nav>
 
@@ -196,10 +196,10 @@
       <p class="sub">Live gauge, runaway-context alarm, and your usage patterns. Without your data leaving the machine.</p>
 
       <div class="cta-row">
-        <a class="pill forest" href="#install" id="install-btn">Install on Mac&nbsp; &#8681;</a>
-        <button class="cli-link" type="button" id="cli-toggle">show installation options</button>
+        <a class="pill forest" href="https://github.com/SergioChan/token-meter/releases/latest/download/TokenWidget.dmg" id="install-btn">Download for Mac&nbsp; &#8681;</a>
+        <button class="cli-link" type="button" id="cli-toggle">or install from the command line</button>
       </div>
-      <p class="cta-note">✓&nbsp; Open source · Builds locally · Claude Code and Codex Desktop on macOS</p>
+      <p class="cta-note">✓&nbsp; Notarized by Apple · Drag to Applications · Claude Code and Codex Desktop on macOS</p>
 
       <div class="cli-box" id="install">
         <h4>Terminal</h4>
@@ -286,11 +286,6 @@
   const installBox = document.getElementById("install");
   const toggleInstall = () => installBox.classList.toggle("open");
   document.getElementById("cli-toggle").addEventListener("click", toggleInstall);
-  document.getElementById("install-btn").addEventListener("click", (event) => {
-    event.preventDefault();
-    installBox.classList.add("open");
-    installBox.scrollIntoView({ behavior: "smooth", block: "center" });
-  });
   for (const button of document.querySelectorAll("[data-copy]")) {
     button.addEventListener("click", async () => {
       const text = document.getElementById(button.dataset.copy).textContent;
