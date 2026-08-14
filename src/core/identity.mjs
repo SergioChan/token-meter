@@ -132,6 +132,22 @@ export function markHandleClaimed(dirPath = defaultIdentityDir()) {
   return saveIdentity(identity, dirPath);
 }
 
+// Remembers that the first-run handle prompt was shown so the overlay never
+// nags twice, regardless of whether a handle was reserved.
+export function markHandlePrompted(dirPath = defaultIdentityDir(), nowMs = Date.now()) {
+  const identity = loadOrCreateIdentity(dirPath);
+  identity.handlePromptedAtMs = nowMs;
+  return saveIdentity(identity, dirPath);
+}
+
+// A withdrawal the registry has not confirmed yet: sharing is already off
+// locally, and the sync worker retries the server-side wipe until it lands.
+export function setPendingWithdraw(pending, dirPath = defaultIdentityDir()) {
+  const identity = loadOrCreateIdentity(dirPath);
+  identity.sharing = { ...identity.sharing, pendingWithdraw: Boolean(pending) };
+  return saveIdentity(identity, dirPath);
+}
+
 export function buildSignedUsageReport(identity, usage) {
   const payload = {
     version: IDENTITY_VERSION,

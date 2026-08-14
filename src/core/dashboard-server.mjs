@@ -6,16 +6,36 @@ import {
   defaultIdentityDir,
   isValidHandle,
   loadOrCreateIdentity,
+  markHandleClaimed,
   setHandle,
+  setPendingWithdraw,
   setSharingEnabled,
 } from "./identity.mjs";
 import { UsageHistory } from "./usage-history.mjs";
 import {
   registryEnabled,
+  checkHandleAvailable,
   claimHandle,
   createLeaderboardUrl,
   uploadUsage,
+  withdrawUsage,
 } from "./registry-client.mjs";
+import { communityWebBase } from "./registry-config.mjs";
+
+// Candidate handles offered when the wanted one is taken. Kept short and
+// human — the kind of alternative a person would actually pick.
+export function handleCandidates(base, nowMs = Date.now()) {
+  const trimmed = String(base).slice(0, 24);
+  const year = String(new Date(nowMs).getFullYear());
+  return [
+    `${trimmed}-dev`,
+    `${trimmed}-ai`,
+    `${trimmed}${year.slice(-2)}`,
+    `${trimmed}-codes`,
+    `real-${trimmed}`,
+    `${trimmed}-io`,
+  ].filter((candidate) => isValidHandle(candidate) && candidate !== base);
+}
 
 const MAX_BODY_BYTES = 4096;
 const USAGE_TTL_MS = 60_000;
@@ -30,6 +50,9 @@ export class DashboardServer {
     usageHistory = null,
     leaderboardUrlFactory = createLeaderboardUrl,
     usageUploader = uploadUsage,
+    usageWithdrawer = withdrawUsage,
+    handleChecker = checkHandleAvailable,
+    handleClaimer = claimHandle,
   }) {
     if (!webDir) throw new TypeError("webDir is required");
     this.webDir = webDir;
@@ -37,6 +60,9 @@ export class DashboardServer {
     this.usageHistory = usageHistory ?? new UsageHistory();
     this.leaderboardUrlFactory = leaderboardUrlFactory;
     this.usageUploader = usageUploader;
+    this.usageWithdrawer = usageWithdrawer;
+    this.handleChecker = handleChecker;
+    this.handleClaimer = handleClaimer;
     this.usageMemo = null;
     this.nonce = randomBytes(16).toString("hex");
     this.server = null;
@@ -64,6 +90,35 @@ export class DashboardServer {
     return publicFields;
   }
 
+  async #readBody(request) {
+    let raw = "";
+    for await (const chunk of request) {
+      raw += chunk;
+      if (raw.length > MAX_BODY_BYTES) {
+        const error = new Error("body too large");
+        error.status = 413;
+        throw error;
+      }
+    }
+    return raw;
+  }
+
+  // Up to three candidates that are actually free right now. Registry
+  // hiccups just shorten the list — suggestions are best-effort.
+  async #availableCandidates(base) {
+    const checks = await Promise.all(
+      handleCandidates(base).map(async (candidate) => {
+        try {
+          const { available } = await this.handleChecker(candidate);
+          return available ? candidate : null;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return checks.filter(Boolean).slice(0, 3);
+  }
+
   async #handle(request, response) {
     const requestUrl = new URL(request.url, `http://127.0.0.1:${this.port}`);
     const reply = (status, type, body) => {
@@ -80,6 +135,113 @@ export class DashboardServer {
     if (request.method === "GET" && requestUrl.pathname === "/") {
       const html = readFileSync(join(this.webDir, "dashboard.html"), "utf8");
       return reply(200, "text/html; charset=utf-8", html);
+    }
+    if (request.method === "GET" && requestUrl.pathname === "/share") {
+      const html = readFileSync(join(this.webDir, "share.html"), "utf8");
+      return reply(200, "text/html; charset=utf-8", html);
+    }
+    if (request.method === "GET" && requestUrl.pathname === "/api/share/handle-check") {
+      const handle = (requestUrl.searchParams.get("handle") ?? "").toLowerCase();
+      if (!isValidHandle(handle)) {
+        return replyJson(200, { valid: false, available: false });
+      }
+      const identity = loadOrCreateIdentity(this.identityDir);
+      if (handle === identity.handle && identity.handleClaimed) {
+        return replyJson(200, { valid: true, available: true, current: true });
+      }
+      if (!registryEnabled()) {
+        return replyJson(200, { valid: true, available: null, offline: true });
+      }
+      try {
+        const { available } = await this.handleChecker(handle);
+        if (available) return replyJson(200, { valid: true, available: true });
+        return replyJson(200, {
+          valid: true,
+          available: false,
+          suggestions: await this.#availableCandidates(handle),
+        });
+      } catch {
+        return replyJson(200, { valid: true, available: null, offline: true });
+      }
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/api/share/publish") {
+      let body;
+      try {
+        body = JSON.parse(await this.#readBody(request));
+      } catch (error) {
+        return replyJson(error.status ?? 400, { error: error.message ?? "invalid JSON" });
+      }
+      if (body.agree !== true) {
+        return replyJson(422, { error: "the privacy agreement was not accepted" });
+      }
+      const handle = String(body.handle ?? "").toLowerCase();
+      if (!isValidHandle(handle)) {
+        return replyJson(422, {
+          error: "handle must be 2-30 chars: lowercase letters, digits, hyphens",
+        });
+      }
+      // Publishing is all-or-nothing: the handle claim must land before
+      // sharing turns on, so a failure leaves everything as it was.
+      const previous = loadOrCreateIdentity(this.identityDir);
+      const updated = setHandle(handle, this.identityDir);
+      if (registryEnabled()) {
+        try {
+          await this.handleClaimer(updated, this.identityDir);
+        } catch (error) {
+          setHandle(previous.handle ?? null, this.identityDir);
+          if (previous.handleClaimed) markHandleClaimed(this.identityDir);
+          if (error.status === 409) {
+            return replyJson(409, {
+              error: `@${handle} is already claimed — first come, first served.`,
+              suggestions: await this.#availableCandidates(handle),
+            });
+          }
+          return replyJson(502, { error: "the community registry is unreachable — try again shortly" });
+        }
+      }
+      const identity = setSharingEnabled(true, this.identityDir);
+      let sync = "ok";
+      if (registryEnabled()) {
+        try {
+          await this.usageUploader(identity, this.#usage());
+        } catch {
+          sync = "pending"; // the hourly worker retries; consent is recorded
+        }
+      }
+      const webBase = communityWebBase();
+      return replyJson(200, {
+        ...this.#publicIdentity(),
+        sync,
+        profileUrl: webBase ? `${webBase}/u/${handle}` : null,
+      });
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/api/share/withdraw") {
+      let body;
+      try {
+        body = JSON.parse(await this.#readBody(request));
+      } catch (error) {
+        return replyJson(error.status ?? 400, { error: error.message ?? "invalid JSON" });
+      }
+      if (body.confirm !== true) {
+        return replyJson(422, { error: "withdrawal was not confirmed" });
+      }
+      const identity = loadOrCreateIdentity(this.identityDir);
+      let wiped = false;
+      if (registryEnabled()) {
+        try {
+          const result = await this.usageWithdrawer(identity);
+          wiped = Boolean(result.ok);
+          setPendingWithdraw(false, this.identityDir);
+        } catch {
+          setPendingWithdraw(true, this.identityDir);
+        }
+      }
+      setSharingEnabled(false, this.identityDir);
+      return replyJson(200, {
+        ...this.#publicIdentity(),
+        wiped,
+        pendingWithdraw: !wiped && registryEnabled(),
+      });
     }
     if (request.method === "GET" && requestUrl.pathname === "/api/profile") {
       return replyJson(200, this.#publicIdentity());
@@ -190,9 +352,12 @@ export class DashboardServer {
     return this;
   }
 
-  url() {
+  url(view = null) {
     if (this.port == null) throw new Error("server is not started");
-    return `http://127.0.0.1:${this.port}/?token=${this.nonce}`;
+    const base = `http://127.0.0.1:${this.port}`;
+    if (view === "share") return `${base}/share?token=${this.nonce}`;
+    if (view === "withdraw") return `${base}/share?token=${this.nonce}&mode=withdraw`;
+    return `${base}/?token=${this.nonce}`;
   }
 
   async stop() {

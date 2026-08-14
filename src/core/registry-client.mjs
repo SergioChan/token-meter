@@ -100,10 +100,11 @@ export async function claimHandle(identity, identityDir = undefined) {
 export async function uploadUsage(identity, usage = null) {
   const collected = usage ?? new UsageHistory().collect();
   const stats = collected.stats;
-  const days = collected.days.slice(-90).map((day) => ({
+  const days = collected.days.slice(-119).map((day) => ({
     date: day.date,
     total: day.total,
   }));
+  const share = (value) => Math.round((value ?? 0) * 10_000) / 10_000;
   const signed = signPayload(identity, {
     kind: "usage",
     meterId: identity.meterId,
@@ -123,6 +124,26 @@ export async function uploadUsage(identity, usage = null) {
         codex: stats.byPlatform.codex.tokens,
         cline: stats.byPlatform.cline.tokens,
       },
+      // Aggregate-only extras so the community profile can mirror the local
+      // dashboard. Servers before v0.3 drop unknown fields on validation.
+      daysActive: stats.daysActive,
+      daysObserved: stats.daysObserved,
+      avgPerActiveDay: stats.avgPerActiveDay,
+      firstActivityDate: stats.firstActivityDate,
+      medianSessionTokens: stats.medianSessionTokens,
+      largestSessionTokens: stats.largestSessionTokens,
+      longestSessionMs: stats.longestSessionMs,
+      cacheReadShare: share(stats.cacheReadShare),
+      outputShare: share(stats.outputShare),
+      peakHour: stats.peakHour,
+      busiestWeekday: stats.busiestWeekday,
+      hours: collected.hours,
+      topDays: stats.topDays,
+      byPlatformSessions: {
+        claudeCode: stats.byPlatform.claudeCode.sessions,
+        codex: stats.byPlatform.codex.sessions,
+        cline: stats.byPlatform.cline.sessions,
+      },
     },
     weekTokens: days
       .filter((day) =>
@@ -131,6 +152,22 @@ export async function uploadUsage(identity, usage = null) {
       .reduce((sum, day) => sum + day.total, 0),
   });
   return call("/api/v1/report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(signed),
+  });
+}
+
+// Delete this meter's shared aggregates from the registry. The handle claim
+// survives — withdrawing data does not surrender the identity.
+export async function withdrawUsage(identity, nowMs = Date.now()) {
+  const signed = signPayload(identity, {
+    kind: "withdraw",
+    meterId: identity.meterId,
+    publicKey: identity.publicKey,
+    generatedAtMs: nowMs,
+  });
+  return call("/api/v1/withdraw", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(signed),
