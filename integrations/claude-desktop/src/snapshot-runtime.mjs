@@ -97,6 +97,7 @@ export class ClaudeSnapshotRuntime {
     snapshot.meterId = identity?.meterId ?? null;
     snapshot.meterHandle = identity?.handle ?? null;
     snapshot.sharingEnabled = identity?.sharing?.enabled ?? false;
+    snapshot.handlePrompted = identity?.handlePromptedAtMs != null;
     snapshot.meterStats = this.#usageStats();
     return snapshot;
   }

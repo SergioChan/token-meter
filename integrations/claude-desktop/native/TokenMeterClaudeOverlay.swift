@@ -829,8 +829,13 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         case "open-dashboard":
             // The dashboard is served by the bridge's loopback server so the
             // page can read the profile and claim a handle. Only a loopback
-            // URL returned by our own bridge is ever opened.
-            snapshotBridge.command(["command": "dashboard-url"]) { result in
+            // URL returned by our own bridge is ever opened. The optional
+            // view ("share" / "withdraw") selects the consent wizard page.
+            var command: [String: Any] = ["command": "dashboard-url"]
+            if let view = body["view"] as? String, view == "share" || view == "withdraw" {
+                command["view"] = view
+            }
+            snapshotBridge.command(command) { result in
                 guard case .success(let payload) = result,
                       let urlString = payload["url"] as? String,
                       let url = URL(string: urlString),
@@ -865,6 +870,8 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         case "set-sharing":
             let enabled = body["enabled"] as? Bool ?? false
             snapshotBridge.command(["command": "set-sharing", "enabled": enabled]) { _ in }
+        case "dismiss-handle-prompt":
+            snapshotBridge.command(["command": "dismiss-handle-prompt"]) { _ in }
         case "open-update":
             // The web layer never supplies the URL; the bridge derives it from
             // its baked-in registry endpoint.

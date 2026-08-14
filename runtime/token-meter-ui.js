@@ -102,6 +102,14 @@
       <span class="update-sub">Click to download the new version.</span>
       <button class="update-dismiss" type="button" aria-label="Dismiss update notice">&times;</button>
     </div>
+    <div class="handle-prompt" hidden>
+      <strong>Pick your @handle</strong>
+      <span>Reserve your community name — first come, first served.</span>
+      <div class="handle-prompt-actions">
+        <button class="handle-prompt-go" type="button">Choose handle</button>
+        <button class="handle-prompt-later" type="button">Later</button>
+      </div>
+    </div>
     <div class="unbound" hidden>
       <strong>SESSION UNKNOWN</strong>
       <span>The meter will not guess which session is active.</span>
@@ -179,6 +187,9 @@
     updateTitle: card.querySelector(".update-title"),
     updateSub: card.querySelector(".update-sub"),
     updateDismiss: card.querySelector(".update-dismiss"),
+    handlePrompt: card.querySelector(".handle-prompt"),
+    handlePromptGo: card.querySelector(".handle-prompt-go"),
+    handlePromptLater: card.querySelector(".handle-prompt-later"),
   };
   const displayed = new Map();
   const animations = new Map();
@@ -485,6 +496,21 @@
     elements.updateBanner.hidden = !available || updateDismissed || !elements.warning.hidden;
   };
 
+  // First-run nudge for the bottom slot, lowest priority: the anomaly warning
+  // and a pending update both win. Persistently dismissed via the identity
+  // file, so it appears at most once per machine.
+  let handlePromptDismissed = false;
+  const renderHandlePrompt = (snapshot) => {
+    const wanted =
+      nativeActions() != null &&
+      !handlePromptDismissed &&
+      snapshot?.meterId != null &&
+      snapshot?.meterHandle == null &&
+      snapshot?.handlePrompted !== true;
+    elements.handlePrompt.hidden =
+      !wanted || !elements.warning.hidden || !elements.updateBanner.hidden;
+  };
+
   const update = (snapshot) => {
     ensureMounted();
     const bound = snapshot?.status === "bound" && snapshot?.binding?.exact;
@@ -493,6 +519,7 @@
     if (!bound) {
       elements.warning.hidden = true;
       renderUpdateBanner(snapshot);
+      renderHandlePrompt(snapshot);
       elements.sessionId.textContent = "UNBOUND";
       elements.sessionTotal.textContent = "—";
       elements.dayTotal.textContent = "—";
@@ -618,6 +645,7 @@
     card.dataset.level = snapshot.anomaly.level;
     elements.warning.hidden = !["warning", "critical"].includes(snapshot.anomaly.level);
     renderUpdateBanner(snapshot);
+    renderHandlePrompt(snapshot);
   };
 
   const destroy = () => {
@@ -703,6 +731,23 @@
     updateDismissed = true;
     elements.updateBanner.hidden = true;
   });
+  // "Choose handle" opens the dashboard claim card in the browser (the panel
+  // itself never takes keyboard focus); either button retires the nudge.
+  elements.handlePromptGo.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    handlePromptDismissed = true;
+    elements.handlePrompt.hidden = true;
+    postAction({ type: "dismiss-handle-prompt" });
+    postAction({ type: "open-dashboard" });
+  });
+  elements.handlePromptLater.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    handlePromptDismissed = true;
+    elements.handlePrompt.hidden = true;
+    postAction({ type: "dismiss-handle-prompt" });
+  });
   let tipLockedUntilMs = 0;
   const showTip = (text, lockMs = 0) => {
     if (lockMs === 0 && Date.now() < tipLockedUntilMs) return;
@@ -760,25 +805,34 @@
   elements.settingsLeaderboard.addEventListener("click", () => {
     postAction({ type: "open-leaderboard" });
   });
+  let privacySharingOn = false;
   const setPrivacyUI = (sharingOn) => {
+    privacySharingOn = sharingOn;
     elements.privacyLocal.classList.toggle("active", !sharingOn);
     elements.privacyLocal.setAttribute("aria-pressed", String(!sharingOn));
     elements.privacyShare.classList.toggle("active", sharingOn);
     elements.privacyShare.setAttribute("aria-pressed", String(sharingOn));
   };
-  const chooseSharing = (enabled) => {
-    sharingToggledAtMs = Date.now();
-    setPrivacyUI(enabled);
-    postAction({ type: "set-sharing", enabled });
-    showTip(
-      enabled
-        ? "Sharing with the community — signed totals only."
-        : "Everything stays on this machine.",
-      1400,
-    );
-  };
-  elements.privacyLocal.addEventListener("click", () => chooseSharing(false));
-  elements.privacyShare.addEventListener("click", () => chooseSharing(true));
+  // Both directions run through the browser wizard: turning sharing on needs
+  // the handle check and privacy agreement, turning it off confirms the
+  // server-side deletion. The toggle itself never flips optimistically — the
+  // snapshot reflects the real state once the wizard completes.
+  elements.privacyShare.addEventListener("click", () => {
+    if (privacySharingOn) {
+      showTip("Already sharing — signed aggregate totals only.", 1400);
+      return;
+    }
+    postAction({ type: "open-dashboard", view: "share" });
+    showTip("Opening the browser to pick your handle and confirm…", 2500);
+  });
+  elements.privacyLocal.addEventListener("click", () => {
+    if (!privacySharingOn) {
+      showTip("Everything already stays on this machine.", 1400);
+      return;
+    }
+    postAction({ type: "open-dashboard", view: "withdraw" });
+    showTip("Opening the browser to confirm deleting your shared data…", 2500);
+  });
   // The bottom section flips between the primary rows and the compact stats
   // view in place; the card never changes size (the native panel is fixed).
   let statsView = false;

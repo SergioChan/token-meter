@@ -6,7 +6,11 @@ import { Worker } from "node:worker_threads";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { ClaudeSnapshotRuntime } from "./snapshot-runtime.mjs";
-import { setSharingEnabled, loadOrCreateIdentity } from "../../../src/core/identity.mjs";
+import {
+  loadOrCreateIdentity,
+  markHandlePrompted,
+  setSharingEnabled,
+} from "../../../src/core/identity.mjs";
 import { DashboardServer } from "../../../src/core/dashboard-server.mjs";
 import { readFileSync } from "node:fs";
 import {
@@ -176,7 +180,14 @@ for await (const line of input) {
         });
         await dashboardServer.start();
       }
-      await writeLine({ requestId, ok: true, url: dashboardServer.url() });
+      const view = request.view === "share" || request.view === "withdraw" ? request.view : null;
+      await writeLine({ requestId, ok: true, url: dashboardServer.url(view) });
+      continue;
+    }
+    if (request?.command === "dismiss-handle-prompt") {
+      const identity = markHandlePrompted();
+      runtime.identityMemo = { atMs: Date.now(), value: identity };
+      await writeLine({ requestId, ok: true });
       continue;
     }
     if (request?.command === "leaderboard-url") {
