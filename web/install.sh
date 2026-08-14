@@ -1,9 +1,9 @@
 #!/bin/bash
-# Token Widget installer — fetched via curl, so macOS applies no quarantine
-# and no Gatekeeper dialogs appear. Replace BASE when the real domain lands.
+# Token Widget source installer. It builds the local companion on the user's
+# Mac and does not modify or restart Claude Desktop.
 set -euo pipefail
 
-BASE="https://mlb-newsletter-door-constructed.trycloudflare.com"
+BASE="https://tokenwidget.app"
 
 bold() { printf '\033[1m%s\033[0m\n' "$1"; }
 fail() { printf '\033[31m%s\033[0m\n%s\n' "$1" "${2:-}"; exit 1; }

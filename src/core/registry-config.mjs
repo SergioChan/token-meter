@@ -1,7 +1,6 @@
-// Community registry endpoint. Temporary tunnel domain for internal testing —
-// replace with the real Token Meter domain when it exists. An empty string
-// disables all registry traffic (fully local mode).
-export const REGISTRY_URL = "https://mlb-newsletter-door-constructed.trycloudflare.com";
+// Community registry endpoint. An empty TOKEN_METER_REGISTRY_URL disables all
+// registry traffic and keeps the widget in fully local mode.
+export const REGISTRY_URL = "https://api.tokenwidget.app";
 
 export function registryBase() {
   const url = process.env.TOKEN_METER_REGISTRY_URL ?? REGISTRY_URL;

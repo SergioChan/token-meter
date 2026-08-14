@@ -34,10 +34,11 @@ kubectl apply -f deploy/gke/token-widget.yaml
 kubectl -n token-widget rollout status deployment/token-widget-registry
 ```
 
-After the Ingress receives the reserved address, create this DNS record:
+The Ingress uses the reserved global address `34.102.136.142`. Create this DNS
+record after the registry Pod and database health check pass:
 
 ```text
-api.tokenwidget.app  A  <token-widget-api address>
+api.tokenwidget.app  A  34.102.136.142
 ```
 
 The managed certificate remains in `Provisioning` until public DNS points to
