@@ -65,6 +65,87 @@ function timelySignedRequest(payload, nowMs) {
   );
 }
 
+// Optional aggregate fields a v0.3+ client may attach to `stats`. Older
+// clients omit them all; if one is present it must be well-formed, so a
+// malformed report is rejected instead of stored half-valid.
+function normalizeExtendedStats(stats) {
+  const extended = {};
+  const optionalInt = (key, maximum = Number.MAX_SAFE_INTEGER) => {
+    if (stats[key] == null) return true;
+    if (!safeInteger(stats[key], { maximum })) return false;
+    extended[key] = stats[key];
+    return true;
+  };
+  const optionalShare = (key) => {
+    if (stats[key] == null) return true;
+    if (typeof stats[key] !== "number" || !Number.isFinite(stats[key])) return false;
+    if (stats[key] < 0 || stats[key] > 1) return false;
+    extended[key] = stats[key];
+    return true;
+  };
+  if (
+    !optionalInt("daysActive", 100_000) ||
+    !optionalInt("daysObserved", 100_000) ||
+    !optionalInt("avgPerActiveDay") ||
+    !optionalInt("medianSessionTokens") ||
+    !optionalInt("largestSessionTokens") ||
+    !optionalInt("longestSessionMs") ||
+    !optionalShare("cacheReadShare") ||
+    !optionalShare("outputShare")
+  ) {
+    return null;
+  }
+  if (stats.peakHour != null) {
+    if (!safeInteger(stats.peakHour, { maximum: 23 })) return null;
+    extended.peakHour = stats.peakHour;
+  }
+  if (stats.busiestWeekday != null) {
+    if (!safeInteger(stats.busiestWeekday, { maximum: 6 })) return null;
+    extended.busiestWeekday = stats.busiestWeekday;
+  }
+  if (stats.firstActivityDate != null) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(stats.firstActivityDate)) return null;
+    extended.firstActivityDate = stats.firstActivityDate;
+  }
+  if (stats.hours != null) {
+    if (!Array.isArray(stats.hours) || stats.hours.length !== 24) return null;
+    if (!stats.hours.every((value) => safeInteger(value))) return null;
+    extended.hours = [...stats.hours];
+  }
+  if (stats.topDays != null) {
+    if (!Array.isArray(stats.topDays) || stats.topDays.length > 10) return null;
+    extended.topDays = [];
+    for (const day of stats.topDays) {
+      if (
+        day == null ||
+        typeof day !== "object" ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(day.date) ||
+        !safeInteger(day.tokens)
+      ) {
+        return null;
+      }
+      extended.topDays.push({ date: day.date, tokens: day.tokens });
+    }
+  }
+  if (stats.byPlatformSessions != null) {
+    const sessions = stats.byPlatformSessions;
+    if (
+      typeof sessions !== "object" ||
+      !safeInteger(sessions.claudeCode) ||
+      !safeInteger(sessions.codex) ||
+      !safeInteger(sessions.cline)
+    ) {
+      return null;
+    }
+    extended.byPlatformSessions = {
+      claudeCode: sessions.claudeCode,
+      codex: sessions.codex,
+      cline: sessions.cline,
+    };
+  }
+  return extended;
+}
+
 function normalizeUsagePayload(payload, nowMs) {
   if (
     !safeInteger(payload.generatedAtMs) ||
@@ -111,6 +192,8 @@ function normalizeUsagePayload(payload, nowMs) {
   ) {
     return null;
   }
+  const extended = normalizeExtendedStats(stats);
+  if (extended == null) return null;
   return {
     days,
     stats: {
@@ -128,6 +211,7 @@ function normalizeUsagePayload(payload, nowMs) {
         codex: stats.byPlatform.codex,
         cline: stats.byPlatform.cline,
       },
+      ...extended,
     },
     weekTokens: payload.weekTokens,
     generatedAtMs: payload.generatedAtMs,
@@ -366,6 +450,32 @@ export class RegistryServer {
         await this.store.revokeBrowserSession(hashSecret(token));
       }
       return json(200, { ok: true }, { "Set-Cookie": clearedSessionCookie() });
+    }
+
+    if (request.method === "POST" && path === "/api/v1/withdraw") {
+      let signed;
+      try {
+        signed = await readBody();
+      } catch (error) {
+        return json(400, { error: String(error.message) });
+      }
+      if (!verifySignedPayload(signed)) return json(401, { error: "invalid signature" });
+      const payload = signed.payload;
+      const nowMs = this.now();
+      if (payload.kind !== "withdraw" || !timelySignedRequest(payload, nowMs)) {
+        return json(422, { error: "invalid withdrawal" });
+      }
+      const result = await this.store.withdraw({
+        meterId: payload.meterId,
+        publicKey: payload.publicKey,
+        nowMs,
+      });
+      if (result.reason === "identity-collision") {
+        return json(409, { error: "identity collision" });
+      }
+      // Unknown meters report wiped:false but still succeed — withdrawing
+      // data that was never uploaded is not an error.
+      return json(200, { ok: true, wiped: result.wiped });
     }
 
     if (request.method === "POST" && (path === "/api/v1/claim" || path === "/api/v1/report")) {

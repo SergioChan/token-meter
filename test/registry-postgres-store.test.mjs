@@ -167,3 +167,55 @@ test("Postgres store hashes one-time pairings and resolves authenticated rank", 
     await store.close();
   }
 });
+
+test("Postgres store withdraw wipes usage, keeps the claim, and re-reporting restores the row", async () => {
+  const store = createStore();
+  await store.init();
+  try {
+    await store.claim({ ...alice, handle: "drew", nowMs: 100 });
+    await store.report({
+      ...alice,
+      handle: "drew",
+      days: [{ date: "2026-08-13", total: 500 }],
+      stats: { lifetimeTokens: 500, sessionCount: 1 },
+      weekTokens: 500,
+      generatedAtMs: 200,
+      nowMs: 201,
+    });
+    assert.equal((await store.leaderboard()).length, 1);
+
+    // Wrong key never wipes someone else's data.
+    assert.deepEqual(
+      await store.withdraw({ meterId: alice.meterId, publicKey: bob.publicKey, nowMs: 300 }),
+      { wiped: false, reason: "identity-collision" },
+    );
+
+    assert.deepEqual(
+      await store.withdraw({ ...alice, nowMs: 301 }),
+      { wiped: true },
+    );
+    assert.deepEqual(await store.leaderboard(), []);
+    assert.deepEqual(await store.profile("drew"), { handle: "drew", shared: false });
+    assert.equal(await store.handleAvailable("drew"), false);
+
+    // Idempotent: nothing left to wipe.
+    assert.deepEqual(await store.withdraw({ ...alice, nowMs: 302 }), { wiped: false });
+
+    // Re-sharing works even with an older generatedAtMs than the wiped one.
+    await store.report({
+      ...alice,
+      handle: "drew",
+      days: [{ date: "2026-08-14", total: 900 }],
+      stats: { lifetimeTokens: 900, sessionCount: 2 },
+      weekTokens: 900,
+      generatedAtMs: 150,
+      nowMs: 400,
+    });
+    const rows = await store.leaderboard();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].handle, "drew");
+    assert.equal(rows[0].tokens, 900);
+  } finally {
+    await store.close();
+  }
+});

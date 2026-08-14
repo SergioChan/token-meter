@@ -264,10 +264,14 @@ export class FileRegistryStore {
     const session = this.data.browserSessions[sessionTokenHash];
     if (pruned) this.#save();
     if (!session) return null;
-    const sorted = Object.entries(this.data.meters).sort(compareMeters);
-    const index = sorted.findIndex(([meterId]) => meterId === session.meterId);
-    const meter = index >= 0 ? sorted[index][1] : null;
+    const meter = this.data.meters[session.meterId] ?? null;
     if (meter?.publicKey && meter.publicKey !== session.publicKey) return null;
+    // Rank and totals only count meters with shared data — a withdrawn
+    // meter keeps its handle but disappears from the board.
+    const sorted = Object.entries(this.data.meters)
+      .filter(([, value]) => value.generatedAtMs != null)
+      .sort(compareMeters);
+    const index = sorted.findIndex(([meterId]) => meterId === session.meterId);
     return {
       meterId: session.meterId,
       rowId: registryRowId(session.meterId),
@@ -278,7 +282,7 @@ export class FileRegistryStore {
       tokens: meter?.weekTokens ?? 0,
       sessions: meter?.stats?.sessionsLast7Days ?? null,
       sessionWindowDays: 7,
-      sharingReported: meter != null,
+      sharingReported: meter?.generatedAtMs != null,
       expiresAtMs: session.expiresAtMs,
     };
   }
@@ -290,8 +294,26 @@ export class FileRegistryStore {
     return true;
   }
 
+  async withdraw({ meterId, publicKey, nowMs }) {
+    const meter = this.data.meters[meterId];
+    if (!meter || meter.generatedAtMs == null) return { wiped: false };
+    if (meter.publicKey && meter.publicKey !== publicKey) {
+      return { wiped: false, reason: "identity-collision" };
+    }
+    // The handle claim survives a withdrawal: identity is the user's to keep,
+    // only the shared usage aggregates are deleted.
+    delete meter.days;
+    delete meter.stats;
+    delete meter.weekTokens;
+    delete meter.generatedAtMs;
+    meter.updatedAtMs = nowMs;
+    this.#save();
+    return { wiped: true };
+  }
+
   async leaderboard(limit = 100) {
     return Object.entries(this.data.meters)
+      .filter(([, meter]) => meter.generatedAtMs != null)
       .sort(compareMeters)
       .map(([meterId, meter]) => publicMeterRow(meterId, meter))
       .slice(0, limit);
@@ -301,8 +323,10 @@ export class FileRegistryStore {
     const meterId = this.data.handles[handle]?.meterId;
     const meter = meterId ? this.data.meters[meterId] : null;
     if (!meter) return null;
+    if (meter.generatedAtMs == null) return { handle, shared: false };
     return {
       handle,
+      shared: true,
       days: meter.days ?? [],
       stats: meter.stats ?? {},
       weekTokens: meter.weekTokens ?? 0,
@@ -603,23 +627,24 @@ export class PostgresRegistryStore {
       return null;
     }
     const totalResult = await this.pool.query(
-      "SELECT COUNT(*)::bigint AS total FROM registry_meters",
+      "SELECT COUNT(*)::bigint AS total FROM registry_meters WHERE generated_at_ms IS NOT NULL",
     );
     const meterResult = await this.pool.query(
-      `SELECT meter_id, public_key, handle, week_tokens, stats, updated_at_ms
+      `SELECT meter_id, public_key, handle, week_tokens, stats, generated_at_ms, updated_at_ms
        FROM registry_meters
        WHERE meter_id = $1 AND public_key = $2`,
       [session.meter_id, session.public_key],
     );
     const meter = meterResult.rows[0];
     let rank = null;
-    if (meter) {
+    if (meter && meter.generated_at_ms != null) {
       const rankResult = await this.pool.query(
         `SELECT COUNT(*)::bigint AS ahead
          FROM registry_meters
-         WHERE week_tokens > $1
+         WHERE generated_at_ms IS NOT NULL
+           AND (week_tokens > $1
             OR (week_tokens = $1 AND updated_at_ms > $2)
-            OR (week_tokens = $1 AND updated_at_ms = $2 AND meter_id < $3)`,
+            OR (week_tokens = $1 AND updated_at_ms = $2 AND meter_id < $3))`,
         [meter.week_tokens, meter.updated_at_ms, meter.meter_id],
       );
       rank = Number(rankResult.rows[0].ahead) + 1;
@@ -634,7 +659,7 @@ export class PostgresRegistryStore {
       tokens: asNumber(meter?.week_tokens) ?? 0,
       sessions: meter?.stats?.sessionsLast7Days ?? null,
       sessionWindowDays: 7,
-      sharingReported: meter != null,
+      sharingReported: meter?.generated_at_ms != null,
       expiresAtMs: Number(session.expires_at_ms),
     };
   }
@@ -647,10 +672,31 @@ export class PostgresRegistryStore {
     return result.rowCount > 0;
   }
 
+  async withdraw({ meterId, publicKey, nowMs }) {
+    const result = await this.pool.query(
+      `UPDATE registry_meters
+       SET days = '[]'::jsonb,
+           stats = '{}'::jsonb,
+           week_tokens = 0,
+           generated_at_ms = NULL,
+           updated_at_ms = $3
+       WHERE meter_id = $1 AND public_key = $2 AND generated_at_ms IS NOT NULL`,
+      [meterId, publicKey, nowMs],
+    );
+    if (result.rowCount > 0) return { wiped: true };
+    const collision = await this.pool.query(
+      "SELECT 1 FROM registry_meters WHERE meter_id = $1 AND public_key <> $2",
+      [meterId, publicKey],
+    );
+    if (collision.rowCount > 0) return { wiped: false, reason: "identity-collision" };
+    return { wiped: false };
+  }
+
   async leaderboard(limit = 100) {
     const result = await this.pool.query(
       `SELECT meter_id, handle, week_tokens, stats, updated_at_ms
        FROM registry_meters
+       WHERE generated_at_ms IS NOT NULL
        ORDER BY week_tokens DESC, updated_at_ms DESC, meter_id ASC
        LIMIT $1`,
       [limit],
@@ -669,7 +715,7 @@ export class PostgresRegistryStore {
 
   async profile(handle) {
     const result = await this.pool.query(
-      `SELECT m.days, m.stats, m.week_tokens, m.updated_at_ms
+      `SELECT m.days, m.stats, m.week_tokens, m.generated_at_ms, m.updated_at_ms
        FROM registry_handles AS h
        JOIN registry_meters AS m ON m.meter_id = h.meter_id
        WHERE h.handle = $1`,
@@ -677,8 +723,10 @@ export class PostgresRegistryStore {
     );
     const meter = result.rows[0];
     if (!meter) return null;
+    if (meter.generated_at_ms == null) return { handle, shared: false };
     return {
       handle,
+      shared: true,
       days: meter.days ?? [],
       stats: meter.stats ?? {},
       weekTokens: asNumber(meter.week_tokens) ?? 0,

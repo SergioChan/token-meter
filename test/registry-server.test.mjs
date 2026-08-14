@@ -325,3 +325,112 @@ test("latest release endpoint 404s without a published dmg", async () => {
     await server.stop();
   }
 });
+
+test("extended aggregate stats round-trip; malformed extras reject the report", async () => {
+  const { server, base } = await startRegistry();
+  try {
+    const identity = createIdentity();
+    const report = (extraStats) => {
+      const signed = usageReport(identity, 1_000);
+      Object.assign(signed.payload.stats, extraStats);
+      return fetch(`${base}/api/v1/report`, {
+        method: "POST",
+        body: JSON.stringify(signPayload(identity, signed.payload)),
+      });
+    };
+
+    // Legacy minimal payload still accepted (installed-client contract).
+    assert.equal((await report({})).status, 200);
+
+    const extended = {
+      daysActive: 20, daysObserved: 30, avgPerActiveDay: 50,
+      firstActivityDate: "2026-06-01", medianSessionTokens: 10,
+      largestSessionTokens: 400, longestSessionMs: 7_200_000,
+      cacheReadShare: 0.95, outputShare: 0.004, peakHour: 11, busiestWeekday: 4,
+      hours: Array(24).fill(1),
+      topDays: [{ date: "2026-08-13", tokens: 1_000 }],
+      byPlatformSessions: { claudeCode: 5, codex: 1, cline: 0 },
+    };
+    assert.equal((await report(extended)).status, 200);
+
+    await fetch(`${base}/api/v1/claim`, {
+      method: "POST",
+      body: JSON.stringify(signPayload(identity, {
+        kind: "claim", meterId: identity.meterId, publicKey: identity.publicKey,
+        handle: "stats", generatedAtMs: nowMs,
+      })),
+    });
+    const profile = await (await fetch(`${base}/api/v1/profile/stats`)).json();
+    assert.equal(profile.stats.peakHour, 11);
+    assert.equal(profile.stats.hours.length, 24);
+    assert.equal(profile.stats.byPlatformSessions.claudeCode, 5);
+
+    assert.equal((await report({ hours: Array(23).fill(1) })).status, 422);
+    assert.equal((await report({ cacheReadShare: 1.5 })).status, 422);
+    assert.equal((await report({ peakHour: 24 })).status, 422);
+    assert.equal((await report({ topDays: [{ date: "13/08", tokens: 1 }] })).status, 422);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("withdraw is signed, deletes the row from the board, and spares the handle", async () => {
+  const { server, base } = await startRegistry();
+  try {
+    const alice = { ...createIdentity(), handle: "wanda" };
+    const mallory = createIdentity();
+    await fetch(`${base}/api/v1/claim`, {
+      method: "POST",
+      body: JSON.stringify(signPayload(alice, {
+        kind: "claim", meterId: alice.meterId, publicKey: alice.publicKey,
+        handle: "wanda", generatedAtMs: nowMs,
+      })),
+    });
+    await fetch(`${base}/api/v1/report`, {
+      method: "POST",
+      body: JSON.stringify(usageReport(alice, 9_000)),
+    });
+    assert.equal(((await (await fetch(`${base}/api/v1/leaderboard`)).json()).rows).length, 1);
+
+    // A forged withdrawal (mallory signing alice's identity) is rejected.
+    const forged = signPayload(mallory, {
+      kind: "withdraw", meterId: alice.meterId, publicKey: alice.publicKey,
+      generatedAtMs: nowMs,
+    });
+    assert.equal(
+      (await fetch(`${base}/api/v1/withdraw`, { method: "POST", body: JSON.stringify(forged) })).status,
+      401,
+    );
+
+    // A stale signed withdrawal replayed later is rejected.
+    const stale = signPayload(alice, {
+      kind: "withdraw", meterId: alice.meterId, publicKey: alice.publicKey,
+      generatedAtMs: nowMs - 16 * 60 * 1_000,
+    });
+    assert.equal(
+      (await fetch(`${base}/api/v1/withdraw`, { method: "POST", body: JSON.stringify(stale) })).status,
+      422,
+    );
+
+    const genuine = signPayload(alice, {
+      kind: "withdraw", meterId: alice.meterId, publicKey: alice.publicKey,
+      generatedAtMs: nowMs,
+    });
+    const response = await fetch(`${base}/api/v1/withdraw`, {
+      method: "POST",
+      body: JSON.stringify(genuine),
+    });
+    assert.deepEqual(await response.json(), { ok: true, wiped: true });
+    assert.equal(((await (await fetch(`${base}/api/v1/leaderboard`)).json()).rows).length, 0);
+    assert.deepEqual(
+      await (await fetch(`${base}/api/v1/profile/wanda`)).json(),
+      { handle: "wanda", shared: false },
+    );
+    assert.equal(
+      (await (await fetch(`${base}/api/v1/handle/wanda/available`)).json()).available,
+      false,
+    );
+  } finally {
+    await server.stop();
+  }
+});
