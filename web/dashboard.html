@@ -315,11 +315,19 @@
 </div>
 
 <script>
-  const fmt = (n) =>
-    n >= 1e9 ? (n / 1e9).toFixed(2) + "B"
-    : n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M"
-    : n >= 1e3 ? (n / 1e3).toFixed(0) + "K"
-    : String(Math.round(n));
+  function formatTokenCount(value) {
+    const number = Math.max(0, Number(value) || 0);
+    const units = [
+      [1e12, "T"],
+      [1e9, "B"],
+      [1e6, "M"],
+      [1e3, "K"],
+    ];
+    const unit = units.find(([threshold]) => number >= threshold);
+    if (!unit) return String(Math.round(number));
+    return `${(number / unit[0]).toFixed(1).replace(/\.0$/, "")}${unit[1]}`;
+  }
+  const fmt = formatTokenCount;
   const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const WINDOW_DAYS = 371;
   const dateKey = (d) =>
