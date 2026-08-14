@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { readFileSync, existsSync, statSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { verifySignedPayload, isValidHandle } from "../src/core/identity.mjs";
 import { FileRegistryStore } from "./registry-store.mjs";
@@ -8,9 +8,61 @@ import { FileRegistryStore } from "./registry-store.mjs";
 const MAX_BODY_BYTES = 512 * 1024;
 const MAX_REPORT_AGE_MS = 15 * 60 * 1_000;
 const MAX_REPORT_FUTURE_MS = 5 * 60 * 1_000;
+const BROWSER_PAIRING_TTL_MS = 5 * 60 * 1_000;
+const BROWSER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+export const BROWSER_SESSION_COOKIE = "__Host-token_widget_session";
+
+function hashSecret(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function readCookie(header, name) {
+  for (const item of String(header ?? "").split(";")) {
+    const separator = item.indexOf("=");
+    if (separator < 0) continue;
+    if (item.slice(0, separator).trim() === name) {
+      return item.slice(separator + 1).trim();
+    }
+  }
+  return null;
+}
+
+function sessionCookie(token) {
+  return `${BROWSER_SESSION_COOKIE}=${token}; Path=/; Max-Age=${Math.floor(
+    BROWSER_SESSION_TTL_MS / 1_000,
+  )}; Secure; HttpOnly; SameSite=Lax`;
+}
+
+function clearedSessionCookie() {
+  return `${BROWSER_SESSION_COOKIE}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax`;
+}
+
+function browserOriginAllowed(origin) {
+  if (!origin) return true;
+  if (origin === "https://www.tokenwidget.app" || origin === "https://tokenwidget.app") {
+    return true;
+  }
+  try {
+    const url = new URL(origin);
+    return (
+      url.protocol === "http:" &&
+      (url.hostname === "127.0.0.1" || url.hostname === "localhost")
+    );
+  } catch {
+    return false;
+  }
+}
 
 function safeInteger(value, { minimum = 0, maximum = Number.MAX_SAFE_INTEGER } = {}) {
   return Number.isSafeInteger(value) && value >= minimum && value <= maximum;
+}
+
+function timelySignedRequest(payload, nowMs) {
+  return (
+    safeInteger(payload.generatedAtMs) &&
+    payload.generatedAtMs >= nowMs - MAX_REPORT_AGE_MS &&
+    payload.generatedAtMs <= nowMs + MAX_REPORT_FUTURE_MS
+  );
 }
 
 function normalizeUsagePayload(payload, nowMs) {
@@ -124,7 +176,8 @@ export class RegistryServer {
       response.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store", ...extra });
       response.end(body);
     };
-    const json = (status, value) => reply(status, "application/json", JSON.stringify(value));
+    const json = (status, value, extra = {}) =>
+      reply(status, "application/json", JSON.stringify(value), extra);
     const page = (name) => {
       try {
         return reply(200, "text/html; charset=utf-8", readFileSync(join(this.webDir, name), "utf8"));
@@ -174,6 +227,22 @@ export class RegistryServer {
         const rows = await this.store.leaderboard(100);
         return json(200, { rows, generatedAtMs: this.now() });
       }
+      if (path === "/api/v1/me") {
+        const token = readCookie(request.headers.cookie, BROWSER_SESSION_COOKIE);
+        if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) {
+          return json(401, { error: "browser is not paired" });
+        }
+        const viewer = await this.store.viewerForBrowserSession({
+          sessionTokenHash: hashSecret(token),
+          nowMs: this.now(),
+        });
+        if (!viewer) {
+          return json(401, { error: "browser session expired" }, {
+            "Set-Cookie": clearedSessionCookie(),
+          });
+        }
+        return json(200, { viewer });
+      }
       const profile = path.match(/^\/api\/v1\/profile\/([^/]+)$/);
       if (profile) {
         const handle = decodeURIComponent(profile[1]).replace(/^@/, "").toLowerCase();
@@ -219,6 +288,82 @@ export class RegistryServer {
       return json(404, { error: "not found" });
     }
 
+    if (request.method === "POST" && path === "/api/v1/browser-pairings") {
+      let signed;
+      try {
+        signed = await readBody();
+      } catch (error) {
+        return json(400, { error: String(error.message) });
+      }
+      if (!verifySignedPayload(signed)) return json(401, { error: "invalid signature" });
+      const payload = signed.payload;
+      const nowMs = this.now();
+      if (payload.kind !== "browser-pairing" || !timelySignedRequest(payload, nowMs)) {
+        return json(422, { error: "invalid pairing request" });
+      }
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const code = randomBytes(24).toString("base64url");
+        const expiresAtMs = nowMs + BROWSER_PAIRING_TTL_MS;
+        const result = await this.store.createBrowserPairing({
+          codeHash: hashSecret(code),
+          meterId: payload.meterId,
+          publicKey: payload.publicKey,
+          nowMs,
+          expiresAtMs,
+        });
+        if (result.created) return json(201, { code, expiresAtMs });
+        if (result.reason === "identity-collision") {
+          return json(409, { error: "identity collision" });
+        }
+      }
+      return json(503, { error: "could not allocate pairing" });
+    }
+
+    if (request.method === "POST" && path === "/api/v1/browser-sessions") {
+      if (!browserOriginAllowed(request.headers.origin)) {
+        return json(403, { error: "untrusted browser origin" });
+      }
+      let body;
+      try {
+        body = await readBody();
+      } catch (error) {
+        return json(400, { error: String(error.message) });
+      }
+      if (typeof body.code !== "string" || !/^[A-Za-z0-9_-]{32}$/.test(body.code)) {
+        return json(422, { error: "invalid pairing code" });
+      }
+      const nowMs = this.now();
+      const sessionToken = randomBytes(32).toString("base64url");
+      const sessionExpiresAtMs = nowMs + BROWSER_SESSION_TTL_MS;
+      const result = await this.store.exchangeBrowserPairing({
+        codeHash: hashSecret(body.code),
+        sessionTokenHash: hashSecret(sessionToken),
+        nowMs,
+        sessionExpiresAtMs,
+      });
+      if (!result.exchanged) {
+        return json(401, { error: "pairing code is invalid, expired, or already used" });
+      }
+      const viewer = await this.store.viewerForBrowserSession({
+        sessionTokenHash: hashSecret(sessionToken),
+        nowMs,
+      });
+      return json(200, { ok: true, viewer }, {
+        "Set-Cookie": sessionCookie(sessionToken),
+      });
+    }
+
+    if (request.method === "DELETE" && path === "/api/v1/browser-sessions/current") {
+      if (!browserOriginAllowed(request.headers.origin)) {
+        return json(403, { error: "untrusted browser origin" });
+      }
+      const token = readCookie(request.headers.cookie, BROWSER_SESSION_COOKIE);
+      if (token && /^[A-Za-z0-9_-]{43}$/.test(token)) {
+        await this.store.revokeBrowserSession(hashSecret(token));
+      }
+      return json(200, { ok: true }, { "Set-Cookie": clearedSessionCookie() });
+    }
+
     if (request.method === "POST" && (path === "/api/v1/claim" || path === "/api/v1/report")) {
       let signed;
       try {
@@ -235,9 +380,7 @@ export class RegistryServer {
         if (
           payload.kind !== "claim" ||
           !isValidHandle(payload.handle ?? "") ||
-          !safeInteger(payload.generatedAtMs) ||
-          payload.generatedAtMs < nowMs - MAX_REPORT_AGE_MS ||
-          payload.generatedAtMs > nowMs + MAX_REPORT_FUTURE_MS
+          !timelySignedRequest(payload, nowMs)
         ) {
           return json(422, { error: "invalid claim" });
         }

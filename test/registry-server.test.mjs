@@ -3,7 +3,10 @@ import test from "node:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RegistryServer } from "../server/registry-server.mjs";
+import {
+  BROWSER_SESSION_COOKIE,
+  RegistryServer,
+} from "../server/registry-server.mjs";
 import { createIdentity, signPayload } from "../src/core/identity.mjs";
 
 const nowMs = Date.parse("2026-08-13T12:00:00Z");
@@ -18,6 +21,26 @@ async function startRegistry() {
   });
   await server.start(0);
   return { server, base: `http://127.0.0.1:${server.port}` };
+}
+
+function usageReport(identity, total) {
+  return signPayload(identity, {
+    kind: "usage",
+    meterId: identity.meterId,
+    publicKey: identity.publicKey,
+    handle: identity.handle ?? null,
+    generatedAtMs: nowMs,
+    days: [{ date: "2026-08-13", total }],
+    stats: {
+      lifetimeTokens: total,
+      sessionCount: 1,
+      currentStreakDays: 1,
+      longestStreakDays: 1,
+      peakDay: { date: "2026-08-13", tokens: total },
+      byPlatform: { claudeCode: total, codex: 0, cline: 0 },
+    },
+    weekTokens: total,
+  });
 }
 
 test("claims are signed, first-come-first-served, and idempotent", async () => {
@@ -99,6 +122,127 @@ test("signed usage reports feed leaderboard and profile", async () => {
     assert.equal(profile.stats.lifetimeTokens, 9_000_000);
     assert.equal(profile.days.length, 1);
     assert.equal((await fetch(`${base}/api/v1/profile/nobody`)).status, 404);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("passwordless browser pairing is signed, one-time, and resolves the viewer rank", async () => {
+  const { server, base } = await startRegistry();
+  try {
+    const alice = createIdentity();
+    const bob = createIdentity();
+    const pairingRequest = signPayload(alice, {
+      kind: "browser-pairing",
+      meterId: alice.meterId,
+      publicKey: alice.publicKey,
+      generatedAtMs: nowMs,
+    });
+    const pairingResponse = await fetch(`${base}/api/v1/browser-pairings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(pairingRequest),
+    });
+    assert.equal(pairingResponse.status, 201);
+    const pairing = await pairingResponse.json();
+    assert.match(pairing.code, /^[A-Za-z0-9_-]{32}$/);
+    assert.equal(pairing.expiresAtMs, nowMs + 5 * 60_000);
+
+    const untrusted = await fetch(`${base}/api/v1/browser-sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://attacker.example",
+      },
+      body: JSON.stringify({ code: pairing.code }),
+    });
+    assert.equal(untrusted.status, 403);
+
+    const exchange = await fetch(`${base}/api/v1/browser-sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: base },
+      body: JSON.stringify({ code: pairing.code }),
+    });
+    assert.equal(exchange.status, 200);
+    const setCookie = exchange.headers.get("set-cookie");
+    assert.match(setCookie, new RegExp(`^${BROWSER_SESSION_COOKIE}=[A-Za-z0-9_-]{43};`));
+    assert.match(setCookie, /Path=\//);
+    assert.match(setCookie, /Secure/);
+    assert.match(setCookie, /HttpOnly/);
+    assert.match(setCookie, /SameSite=Lax/);
+    const cookie = setCookie.split(";", 1)[0];
+    const beforeSharing = await (
+      await fetch(`${base}/api/v1/me`, { headers: { Cookie: cookie } })
+    ).json();
+    assert.equal(beforeSharing.viewer.meterId, alice.meterId);
+    assert.equal(beforeSharing.viewer.rank, null);
+    assert.equal(beforeSharing.viewer.sharingReported, false);
+
+    const replay = await fetch(`${base}/api/v1/browser-sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: base },
+      body: JSON.stringify({ code: pairing.code }),
+    });
+    assert.equal(replay.status, 401);
+
+    assert.equal((await fetch(`${base}/api/v1/report`, {
+      method: "POST", body: JSON.stringify(usageReport(bob, 20_000)),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/api/v1/report`, {
+      method: "POST", body: JSON.stringify(usageReport(alice, 10_000)),
+    })).status, 200);
+
+    const me = await (
+      await fetch(`${base}/api/v1/me`, { headers: { Cookie: cookie } })
+    ).json();
+    assert.equal(me.viewer.rank, 2);
+    assert.equal(me.viewer.totalMeters, 2);
+    assert.equal(me.viewer.tokens, 10_000);
+    assert.equal(me.viewer.sharingReported, true);
+    const board = await (await fetch(`${base}/api/v1/leaderboard`)).json();
+    assert.equal(board.rows[1].rowId, me.viewer.rowId);
+    assert.equal(board.rows[1].name, `${alice.meterId.slice(0, 10)}…`);
+
+    const logout = await fetch(`${base}/api/v1/browser-sessions/current`, {
+      method: "DELETE",
+      headers: { Cookie: cookie, Origin: base },
+    });
+    assert.equal(logout.status, 200);
+    assert.match(logout.headers.get("set-cookie"), /Max-Age=0/);
+    assert.equal(
+      (await fetch(`${base}/api/v1/me`, { headers: { Cookie: cookie } })).status,
+      401,
+    );
+  } finally {
+    await server.stop();
+  }
+});
+
+test("browser pairing rejects forged and stale identity proofs", async () => {
+  const { server, base } = await startRegistry();
+  try {
+    const owner = createIdentity();
+    const attacker = createIdentity();
+    const forged = signPayload(attacker, {
+      kind: "browser-pairing",
+      meterId: owner.meterId,
+      publicKey: owner.publicKey,
+      generatedAtMs: nowMs,
+    });
+    assert.equal((await fetch(`${base}/api/v1/browser-pairings`, {
+      method: "POST",
+      body: JSON.stringify(forged),
+    })).status, 401);
+    const stale = signPayload(owner, {
+      kind: "browser-pairing",
+      meterId: owner.meterId,
+      publicKey: owner.publicKey,
+      generatedAtMs: nowMs - 16 * 60_000,
+    });
+    assert.equal((await fetch(`${base}/api/v1/browser-pairings`, {
+      method: "POST",
+      body: JSON.stringify(stale),
+    })).status, 422);
   } finally {
     await server.stop();
   }

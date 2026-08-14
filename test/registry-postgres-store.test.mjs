@@ -79,3 +79,75 @@ test("Postgres store keeps the newest signed usage snapshot", async () => {
     await store.close();
   }
 });
+
+test("Postgres store hashes one-time pairings and resolves authenticated rank", async () => {
+  const store = createStore();
+  await store.init();
+  try {
+    const codeHash = "a".repeat(64);
+    const sessionTokenHash = "b".repeat(64);
+    assert.deepEqual(
+      await store.createBrowserPairing({
+        ...alice,
+        codeHash,
+        nowMs: 100,
+        expiresAtMs: 400,
+      }),
+      { created: true },
+    );
+    const persisted = await store.pool.query(
+      "SELECT code_hash, meter_id FROM registry_browser_pairings",
+    );
+    assert.equal(persisted.rows[0].code_hash.trim(), codeHash);
+    assert.equal(persisted.rows[0].meter_id, alice.meterId);
+    assert.deepEqual(
+      await store.exchangeBrowserPairing({
+        codeHash,
+        sessionTokenHash,
+        nowMs: 200,
+        sessionExpiresAtMs: 1_000,
+      }),
+      { exchanged: true, meterId: alice.meterId, expiresAtMs: 1_000 },
+    );
+    assert.equal(
+      (await store.exchangeBrowserPairing({
+        codeHash,
+        sessionTokenHash: "c".repeat(64),
+        nowMs: 201,
+        sessionExpiresAtMs: 1_000,
+      })).exchanged,
+      false,
+    );
+    const beforeSharing = await store.viewerForBrowserSession({
+      sessionTokenHash,
+      nowMs: 300,
+    });
+    assert.equal(beforeSharing.rank, null);
+    assert.equal(beforeSharing.sharingReported, false);
+
+    const base = {
+      handle: null,
+      days: [{ date: "2026-08-13", total: 1 }],
+      stats: { lifetimeTokens: 1, sessionCount: 1 },
+      generatedAtMs: 500,
+      nowMs: 501,
+    };
+    await store.report({ ...base, ...bob, weekTokens: 20_000 });
+    await store.report({ ...base, ...alice, weekTokens: 10_000 });
+    const viewer = await store.viewerForBrowserSession({
+      sessionTokenHash,
+      nowMs: 600,
+    });
+    assert.equal(viewer.rank, 2);
+    assert.equal(viewer.totalMeters, 2);
+    assert.equal(viewer.tokens, 10_000);
+    assert.equal(viewer.rowId, (await store.leaderboard())[1].rowId);
+    assert.equal(await store.revokeBrowserSession(sessionTokenHash), true);
+    assert.equal(
+      await store.viewerForBrowserSession({ sessionTokenHash, nowMs: 601 }),
+      null,
+    );
+  } finally {
+    await store.close();
+  }
+});
