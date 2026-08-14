@@ -55,6 +55,21 @@ test("claims are signed, first-come-first-served, and idempotent", async () => {
   }
 });
 
+test("liveness does not depend on registry storage", async () => {
+  const { server, base } = await startRegistry();
+  try {
+    assert.deepEqual(await (await fetch(`${base}/api/v1/live`)).json(), {
+      ok: true,
+    });
+    assert.deepEqual(await (await fetch(`${base}/api/v1/health`)).json(), {
+      ok: true,
+      meters: 0,
+    });
+  } finally {
+    await server.stop();
+  }
+});
+
 test("signed usage reports feed leaderboard and profile", async () => {
   const { server, base } = await startRegistry();
   try {

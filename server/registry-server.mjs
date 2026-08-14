@@ -143,6 +143,7 @@ export class RegistryServer {
 
     const path = url.pathname;
     if (request.method === "GET") {
+      if (path === "/api/v1/live") return json(200, { ok: true });
       if (path === "/api/v1/health") {
         const health = await this.store.health();
         return json(200, { ok: true, ...health });
