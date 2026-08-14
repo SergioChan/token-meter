@@ -15,6 +15,8 @@ published.
 - Source updates now accept a healthy, permission-blocked companion and wait
   quietly for Accessibility instead of misreading the invoking terminal's TCC
   state and restoring the previous build.
+- Status now reports the verified LaunchAgent's live Accessibility health
+  instead of the potentially different result of a terminal-launched check.
 
 ## 0.2.0 — 2026-08-13
 

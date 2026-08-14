@@ -108,7 +108,9 @@ test(
       mkdir(stateDirectory, { recursive: true }),
       mkdir(launchAgentsDirectory, { recursive: true }),
     ]);
-    const source = `#include <string.h>\n#include <unistd.h>\nint main(int c,char**v){if(c>1&&!strcmp(v[1],"--check-accessibility"))return 2;sleep(30);return 0;}\n`;
+    // Direct invocation deliberately claims permission. Status must still use
+    // the verified LaunchAgent process's health state, which says false.
+    const source = `#include <string.h>\n#include <unistd.h>\nint main(int c,char**v){if(c>1&&!strcmp(v[1],"--check-accessibility"))return 0;sleep(30);return 0;}\n`;
     const cFile = path.join(directory, "health-fixture.c");
     await writeFile(cFile, source);
     await execFileAsync("/usr/bin/clang", [cFile, "-o", executable]);

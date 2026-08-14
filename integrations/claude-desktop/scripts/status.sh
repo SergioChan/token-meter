@@ -60,10 +60,8 @@ if [ "$LOADED" = true ] && [ -s "$HEALTH_FILE" ]; then
       ;;
   esac
 fi
-if [ "$RUNNING" = true ] && "$EXECUTABLE" --check-accessibility >/dev/null 2>&1; then
-  ACCESSIBILITY=true
-fi
 if [ "$RUNNING" = true ]; then
+  [ "$(/usr/bin/plutil -extract accessibilityGranted raw -o - "$HEALTH_FILE" 2>/dev/null || true)" = true ] && ACCESSIBILITY=true
   [ "$(/usr/bin/plutil -extract overlayReady raw -o - "$HEALTH_FILE" 2>/dev/null || true)" = true ] && OVERLAY_READY=true
   [ "$(/usr/bin/plutil -extract bridgeHealthy raw -o - "$HEALTH_FILE" 2>/dev/null || true)" = true ] && BRIDGE_HEALTHY=true
   [ "$(/usr/bin/plutil -extract sessionBound raw -o - "$HEALTH_FILE" 2>/dev/null || true)" = true ] && SESSION_BOUND=true
