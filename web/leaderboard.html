@@ -357,7 +357,7 @@
       if (!response.ok) throw new Error(body.error || "leaderboard unavailable");
       renderBoard(body.rows.map((row) => ({
         rowId: row.rowId,
-        display: row.name,
+        display: row.handle ? `@${row.handle}` : row.name,
         full: row.handle ? `@${row.handle}` : row.name,
         tokens: row.tokens,
         sessions: row.sessions,
