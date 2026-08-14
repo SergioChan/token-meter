@@ -1,9 +1,22 @@
-import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 const CACHE_VERSION = 1;
 const MS_PER_DAY = 86_400_000;
+const JSONL_CHUNK_BYTES = 1024 * 1024;
+const MAX_JSONL_LINE_CHARS = 8 * 1024 * 1024;
 
 export function defaultSourceRoots() {
   const home = homedir();
@@ -76,21 +89,81 @@ function newSummary(platform) {
   };
 }
 
+// Iterate large JSONL files without ever materializing the entire transcript.
+// Content-bearing rows can be very large, while numerical usage rows are
+// small. Oversized individual rows are discarded until the next newline so a
+// single tool payload cannot exhaust the dashboard or community sync process.
+function forEachJsonlLine(filePath, visit) {
+  const descriptor = openSync(filePath, "r");
+  const buffer = Buffer.allocUnsafe(JSONL_CHUNK_BYTES);
+  const decoder = new StringDecoder("utf8");
+  let carry = "";
+  let droppingOversizedLine = false;
+
+  const consume = (text) => {
+    let start = 0;
+    while (start < text.length) {
+      const newline = text.indexOf("\n", start);
+      if (newline < 0) break;
+      const segment = text.slice(start, newline);
+      if (droppingOversizedLine) {
+        droppingOversizedLine = false;
+      } else {
+        const line = carry + segment;
+        if (line.length <= MAX_JSONL_LINE_CHARS) {
+          visit(line.endsWith("\r") ? line.slice(0, -1) : line);
+        }
+      }
+      carry = "";
+      start = newline + 1;
+    }
+
+    const tail = text.slice(start);
+    if (droppingOversizedLine || tail.length === 0) return;
+    if (carry.length + tail.length > MAX_JSONL_LINE_CHARS) {
+      carry = "";
+      droppingOversizedLine = true;
+      return;
+    }
+    carry += tail;
+  };
+
+  try {
+    while (true) {
+      const bytesRead = readSync(
+        descriptor,
+        buffer,
+        0,
+        buffer.length,
+        null,
+      );
+      if (bytesRead === 0) break;
+      consume(decoder.write(buffer.subarray(0, bytesRead)));
+    }
+    consume(decoder.end());
+    if (!droppingOversizedLine && carry.length > 0) {
+      visit(carry.endsWith("\r") ? carry.slice(0, -1) : carry);
+    }
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 function parseClaudeTranscript(filePath) {
   const summary = newSummary("claudeCode");
   let sawPrimary = false;
-  for (const line of readFileSync(filePath, "utf8").split("\n")) {
-    if (line.length === 0) continue;
+  forEachJsonlLine(filePath, (line) => {
+    if (line.length === 0) return;
     let value;
     try {
       value = JSON.parse(line);
     } catch {
-      continue;
+      return;
     }
     if (value?.isSidechain === false) sawPrimary = true;
     const usage = value?.message?.usage;
     const tsMs = Date.parse(value?.timestamp ?? "");
-    if (usage == null || Number.isNaN(tsMs)) continue;
+    if (usage == null || Number.isNaN(tsMs)) return;
     const input = usage.input_tokens ?? 0;
     const output = usage.output_tokens ?? 0;
     const cacheWrite = usage.cache_creation_input_tokens ?? 0;
@@ -102,25 +175,26 @@ function parseClaudeTranscript(filePath) {
       cacheRead,
       cacheWrite,
     });
-  }
+  });
   summary.sidechain = !sawPrimary && summary.events > 0;
   return summary;
 }
 
 function parseCodexRollout(filePath) {
   const summary = newSummary("codex");
-  for (const line of readFileSync(filePath, "utf8").split("\n")) {
-    if (line.length === 0) continue;
+  forEachJsonlLine(filePath, (line) => {
+    if (line.length === 0) return;
+    if (!line.includes('"token_count"')) return;
     let value;
     try {
       value = JSON.parse(line);
     } catch {
-      continue;
+      return;
     }
     const info = value?.payload?.type === "token_count" ? value.payload.info : null;
     const last = info?.last_token_usage;
     const tsMs = Date.parse(value?.timestamp ?? "");
-    if (last == null || Number.isNaN(tsMs)) continue;
+    if (last == null || Number.isNaN(tsMs)) return;
     const cacheRead = last.cached_input_tokens ?? 0;
     const rawInput = last.input_tokens ?? 0;
     const output = last.output_tokens ?? 0;
@@ -131,7 +205,7 @@ function parseCodexRollout(filePath) {
       cacheRead,
       cacheWrite: 0,
     });
-  }
+  });
   return summary;
 }
 
@@ -232,22 +306,34 @@ export class UsageHistory {
   #saveCache(files) {
     try {
       mkdirSync(dirname(this.cacheFile), { recursive: true });
+      const temporaryFile = `${this.cacheFile}.writing.${process.pid}`;
       writeFileSync(
-        this.cacheFile,
+        temporaryFile,
         JSON.stringify({ version: CACHE_VERSION, files }),
         { mode: 0o600 },
       );
+      renameSync(temporaryFile, this.cacheFile);
     } catch {
       /* cache is an optimization; never fail the scan over it */
     }
+  }
+
+  collectCached() {
+    const startMs = this.now();
+    const summaries = Object.values(this.#loadCache())
+      .map((entry) => entry?.summary)
+      .filter(Boolean);
+    return this.#aggregate(summaries, { startMs, parsedFiles: 0 });
   }
 
   collect() {
     const startMs = this.now();
     const cache = this.#loadCache();
     const nextCache = {};
+    const checkpointCache = { ...cache };
     const summaries = [];
     let parsedFiles = 0;
+    let lastCheckpointMs = Date.now();
     for (const { file, parse } of this.#discover()) {
       let stats;
       try {
@@ -264,8 +350,18 @@ export class UsageHistory {
       }
       const summary = parse(file);
       parsedFiles += 1;
-      nextCache[cacheKey] = { size: stats.size, mtimeMs: stats.mtimeMs, summary };
+      const entry = { size: stats.size, mtimeMs: stats.mtimeMs, summary };
+      nextCache[cacheKey] = entry;
+      checkpointCache[cacheKey] = entry;
       summaries.push(summary);
+      const checkpointDue =
+        stats.size >= 64 * 1024 * 1024 ||
+        parsedFiles % 25 === 0 ||
+        Date.now() - lastCheckpointMs >= 5_000;
+      if (checkpointDue) {
+        this.#saveCache(checkpointCache);
+        lastCheckpointMs = Date.now();
+      }
     }
     this.#saveCache(nextCache);
     return this.#aggregate(summaries, { startMs, parsedFiles });

@@ -2,6 +2,7 @@
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
+import { Worker } from "node:worker_threads";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { ClaudeSnapshotRuntime } from "./snapshot-runtime.mjs";
@@ -10,29 +11,56 @@ import { DashboardServer } from "../../../src/core/dashboard-server.mjs";
 import { readFileSync } from "node:fs";
 import {
   registryEnabled,
-  uploadUsage,
-  claimHandle,
   createLeaderboardUrl,
   fetchLatestRelease,
   isNewerVersion,
 } from "../../../src/core/registry-client.mjs";
 import { registryBase } from "../../../src/core/registry-config.mjs";
+import { UsageHistory } from "../../../src/core/usage-history.mjs";
 
-// Fire-and-forget community sync: only when the user has opted in, and only
-// signed aggregates. Failures are logged and never disturb the meter.
+let communitySyncPromise = null;
+
+function runCommunitySyncWorker(reason) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(
+      new URL("./community-sync-worker.mjs", import.meta.url),
+      { workerData: { reason } },
+    );
+    let settled = false;
+    const finish = (error, result = null) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else resolve(result);
+    };
+    worker.once("message", (message) => {
+      if (message?.ok === true) finish(null, message);
+      else finish(new Error(message?.error || "community sync failed"));
+    });
+    worker.once("error", (error) => finish(error));
+    worker.once("exit", (code) => {
+      if (code !== 0) finish(new Error(`community sync worker exited with ${code}`));
+      else finish(new Error("community sync worker exited without a result"));
+    });
+  });
+}
+
+// Community aggregation runs outside the snapshot event loop, so a first
+// scan of multi-gigabyte histories cannot freeze the live meter.
 async function syncCommunity(reason) {
   if (!registryEnabled()) return;
-  try {
-    const identity = loadOrCreateIdentity();
-    if (identity.sharing?.enabled !== true) return;
-    if (identity.handle && !identity.handleClaimed) {
-      await claimHandle(identity).catch(() => {});
-    }
-    await uploadUsage(identity);
-    process.stderr.write(`community sync ok (${reason})\n`);
-  } catch (error) {
-    process.stderr.write(`community sync failed (${reason}): ${error.message}\n`);
-  }
+  const identity = loadOrCreateIdentity();
+  if (identity.sharing?.enabled !== true) return;
+  if (communitySyncPromise) return communitySyncPromise;
+  communitySyncPromise = runCommunitySyncWorker(reason)
+    .then(() => process.stderr.write(`community sync ok (${reason})\n`))
+    .catch((error) => {
+      process.stderr.write(`community sync failed (${reason}): ${error.message}\n`);
+    })
+    .finally(() => {
+      communitySyncPromise = null;
+    });
+  return communitySyncPromise;
 }
 setTimeout(() => syncCommunity("startup"), 15_000).unref();
 setInterval(() => syncCommunity("interval"), 3_600_000).unref();
@@ -107,6 +135,7 @@ if (options.help) {
   process.exit(0);
 }
 
+const cachedUsageHistory = new UsageHistory();
 const runtime = new ClaudeSnapshotRuntime({
   sessionsDirectory:
     options.sessionsDirectory ??
@@ -119,6 +148,7 @@ const runtime = new ClaudeSnapshotRuntime({
     ),
   projectsDirectory:
     options.projectsDirectory ?? path.join(os.homedir(), ".claude", "projects"),
+  usageHistory: { collect: () => cachedUsageHistory.collectCached() },
 });
 let dashboardServer = null;
 const input = readline.createInterface({
@@ -151,7 +181,7 @@ for await (const line of input) {
     }
     if (request?.command === "leaderboard-url") {
       const identity = loadOrCreateIdentity();
-      if (identity.sharing?.enabled === true) await syncCommunity("leaderboard");
+      if (identity.sharing?.enabled === true) void syncCommunity("leaderboard");
       const url = await createLeaderboardUrl(identity);
       await writeLine({ requestId, ok: true, url });
       continue;

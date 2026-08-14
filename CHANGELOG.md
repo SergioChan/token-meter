@@ -17,6 +17,12 @@ published.
   state and restoring the previous build.
 - Status now reports the verified LaunchAgent's live Accessibility health
   instead of the potentially different result of a terminal-launched check.
+- Cross-platform usage history now streams multi-gigabyte Codex and Claude
+  JSONL files in bounded chunks and skips oversized content rows, so one
+  runaway rollout cannot prevent the combined community report.
+- Live Claude snapshots read cached lifetime statistics while community scans
+  run in a single background Worker with periodic cache checkpoints; large
+  Codex histories no longer freeze the active overlay or restart from zero.
 
 ## 0.2.0 — 2026-08-13
 

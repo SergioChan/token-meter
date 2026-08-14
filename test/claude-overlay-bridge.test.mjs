@@ -53,7 +53,15 @@ test("Claude overlay bridge serves multiple snapshots in one process", async (co
       "--projects-dir",
       projectsDirectory,
     ],
-    { cwd: path.resolve("."), stdio: ["pipe", "pipe", "pipe"] },
+    {
+      cwd: path.resolve("."),
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        HOME: root,
+        TOKEN_METER_REGISTRY_URL: "",
+      },
+    },
   );
   let stdout = "";
   let stderr = "";
@@ -86,6 +94,8 @@ test("Claude overlay bridge asks the registry for a signed browser pairing URL",
     "utf8",
   );
   assert.match(source, /request\?\.command === "leaderboard-url"/);
-  assert.match(source, /await syncCommunity\("leaderboard"\)/);
+  assert.match(source, /void syncCommunity\("leaderboard"\)/);
+  assert.match(source, /new Worker\(/);
+  assert.match(source, /cachedUsageHistory\.collectCached\(\)/);
   assert.match(source, /await createLeaderboardUrl\(identity\)/);
 });

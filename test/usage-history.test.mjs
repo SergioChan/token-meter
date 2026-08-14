@@ -88,6 +88,9 @@ test("cache short-circuits unchanged files and invalidates on change", () => {
   const second = history.collect();
   assert.equal(second.parsedFiles, 0);
   assert.equal(second.stats.lifetimeTokens, first.stats.lifetimeTokens);
+  const cached = history.collectCached();
+  assert.equal(cached.parsedFiles, 0);
+  assert.equal(cached.stats.lifetimeTokens, first.stats.lifetimeTokens);
 
   const cache = JSON.parse(readFileSync(join(root, "cache.json"), "utf8"));
   assert.equal(cache.version, 1);
@@ -107,4 +110,47 @@ test("streaks count consecutive active days ending now", () => {
   // Active days: 8/11 (cline), 8/12, 8/13 → 3-day streak ending today (NOW = 8/13).
   assert.equal(result.stats.currentStreakDays, 3);
   assert.equal(result.stats.longestStreakDays, 3);
+});
+
+test("streams large Codex rollouts and recovers after an oversized content row", () => {
+  const root = mkdtempSync(join(tmpdir(), "token-meter-large-usage-"));
+  const codexDir = join(root, "codex");
+  mkdirSync(codexDir, { recursive: true });
+  const oversizedContent = JSON.stringify({
+    timestamp: "2026-08-13T21:00:00Z",
+    type: "response_item",
+    payload: { type: "message", content: "x".repeat(9 * 1024 * 1024) },
+  });
+  const tokenEventAcrossChunks = JSON.stringify({
+    padding: "y".repeat(2 * 1024 * 1024),
+    timestamp: "2026-08-13T22:00:00Z",
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: {
+        last_token_usage: {
+          input_tokens: 800,
+          cached_input_tokens: 500,
+          output_tokens: 200,
+          total_tokens: 1000,
+        },
+      },
+    },
+  });
+  writeFileSync(
+    join(codexDir, "large-rollout.jsonl"),
+    `${oversizedContent}\n${tokenEventAcrossChunks}\n`,
+  );
+
+  const history = new UsageHistory({
+    claudeProjectsDir: join(root, "missing-claude"),
+    codexSessionsDir: codexDir,
+    clineTaskDirs: [],
+    cacheFile: join(root, "cache.json"),
+    now: () => NOW,
+  });
+  const result = history.collect();
+  assert.equal(result.byPlatform.codex.tokens, 1000);
+  assert.equal(result.byPlatform.codex.events, 1);
+  assert.equal(result.stats.lifetimeTokens, 1000);
 });

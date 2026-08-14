@@ -133,6 +133,10 @@ The registry stores only SHA-256 hashes of the random pairing and session secret
 
 Pairing succeeds even in local-only mode and returns `rank: null` until the Meter has reported usage. Enabling **Share with community** causes an immediate signed aggregate upload and future periodic uploads. Disabling it stops future uploads; it does not retroactively delete already shared public totals. Pairing never flips the sharing flag.
 
+The aggregate history scan covers Codex, Claude Code, and Cline roots on the same machine. JSONL sources are read synchronously in bounded chunks rather than as whole strings; individual content rows above the safety limit are discarded until the next newline, while small numerical usage rows continue to be counted. Large or long-running scans checkpoint their file summaries atomically, so an interruption does not discard completed work.
+
+The Claude snapshot hot path reads only the last completed aggregate cache. Signed community scans run in one background Worker and never block Session snapshots. This keeps a multi-gigabyte runaway rollout from freezing the live overlay while preserving one combined cross-platform report.
+
 ## Codex macOS lifecycle controller
 
 The source installer copies the minimal runtime into the isolated `Token Meter/Codex Desktop` Application Support directory and loads a per-user LaunchAgent. The controller waits for Codex instead of opening it at login. A normal Dock launch without loopback CDP receives at most one normal quit/relaunch attempt for that process. Failed verification, an occupied port, a failed normal quit, or a failed relaunch all fail closed without a force-quit or relaunch loop.
