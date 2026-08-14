@@ -4,11 +4,14 @@ ENV NODE_ENV=production \
     TOKEN_METER_REGISTRY_HOST=0.0.0.0 \
     TOKEN_METER_REGISTRY_PORT=8787
 
-WORKDIR /app
+WORKDIR /app/server
 
-COPY package.json package-lock.json ./
+COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
+WORKDIR /app
+
+COPY package.json ./
 COPY server ./server
 COPY src ./src
 COPY web ./web
