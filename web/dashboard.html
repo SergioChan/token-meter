@@ -610,25 +610,10 @@
     shareModal.hidden = false;
   }
 
-  document.getElementById("modal-share").addEventListener("click", async (event) => {
-    event.target.disabled = true;
-    try {
-      const response = await api("/api/sharing", {
-        method: "POST",
-        body: JSON.stringify({ enabled: true }),
-      });
-      const profile = await response.json();
-      if (!response.ok) throw new Error(profile.error || "failed");
-      renderProfile(profile);
-      modalNote.textContent =
-        profile.communitySync === "ok"
-          ? "Sharing is on — your signed totals are now in the community registry."
-          : "Sharing is on — the app will retry the signed upload automatically.";
-      setTimeout(() => { shareModal.hidden = true; }, 1800);
-    } catch (error) {
-      modalNote.textContent = String(error.message || error);
-      event.target.disabled = false;
-    }
+  document.getElementById("modal-share").addEventListener("click", () => {
+    // Consent now runs through the share wizard: handle check, a precise
+    // list of what leaves the machine, and an explicit publish step.
+    location.href = `/share?token=${TOKEN}`;
   });
   document.getElementById("modal-local").addEventListener("click", () => {
     shareModal.hidden = true;

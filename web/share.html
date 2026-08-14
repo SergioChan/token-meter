@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27 fill=%27none%27><path d=%27M20.5 51.92A23 23 0 1 1 43.5 51.92%27 stroke=%27%235b6f00%27 stroke-width=%277%27 stroke-linecap=%27round%27/><path d=%27M32 9A23 23 0 0 1 48.26 15.74%27 stroke=%27%23b2c248%27 stroke-width=%277%27 stroke-linecap=%27round%27/><line x1=%2732%27 y1=%2732%27 x2=%2742.6%27 y2=%2721.4%27 stroke=%27%235b6f00%27 stroke-width=%276%27 stroke-linecap=%27round%27/><circle cx=%2732%27 cy=%2732%27 r=%275%27 fill=%27%235b6f00%27/><circle cx=%2732%27 cy=%2755%27 r=%273.5%27 fill=%27%23b2c248%27/></svg>">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Widget — Share with the community</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --canvas: #f7f7f2; --card: #ffffff; --ink: #0e0f0c; --charcoal: #292929;
+    --carbon: #454745; --slate: #72726e; --graphite: #818179;
+    --ash: #e3e3e3; --stone: #d5d5d2; --fog: #eaebe5;
+    --olive: #b2c248; --forest: #5b6f00; --fern: #788c15; --sprout: #e5eacd;
+    --clay: #b45f4d;
+    --serif: "Playfair Display", Georgia, serif;
+    --sans: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--canvas); color: var(--ink); font: 400 15px/1.5 var(--sans); letter-spacing: 0.01em; }
+  main { max-width: 560px; margin: 0 auto; padding: 48px 24px 72px; }
+  .brand { display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; margin-bottom: 28px; }
+  h1 { margin: 0 0 8px; text-align: center; font: 400 clamp(28px, 5vw, 38px)/1.15 var(--serif); letter-spacing: -0.5px; }
+  .lede { margin: 0 0 30px; text-align: center; color: var(--slate); font-weight: 300; }
+
+  .step { background: var(--card); border: 1px solid var(--ash); border-radius: 12px; padding: 22px 24px; margin-bottom: 16px; }
+  .step h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; font-size: 15px; }
+  .step h2 .num {
+    display: grid; place-items: center; width: 22px; height: 22px; flex: 0 0 22px;
+    background: var(--sprout); border: 1px solid var(--fern); border-radius: 50%;
+    font-size: 12px; font-weight: 600; color: var(--forest);
+  }
+  .step p { margin: 0 0 14px; color: var(--slate); font-size: 13.5px; }
+
+  .handle-row { display: flex; align-items: center; gap: 8px; }
+  .handle-row .at { color: var(--graphite); font-weight: 600; font-size: 17px; }
+  .handle-row input {
+    flex: 1; padding: 10px 12px; font: 500 15px var(--sans); color: var(--ink);
+    background: var(--canvas); border: 1px solid var(--stone); border-radius: 8px;
+  }
+  .handle-row input:focus { outline: 2px solid var(--fern); outline-offset: -1px; }
+  .handle-status { min-height: 20px; margin-top: 8px; font-size: 13px; }
+  .handle-status.ok { color: var(--forest); }
+  .handle-status.err { color: var(--clay); }
+  .handle-status.dim { color: var(--graphite); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .chips button {
+    padding: 5px 12px; font: 500 13px var(--sans); color: var(--forest); cursor: pointer;
+    background: var(--sprout); border: 1px solid var(--fern); border-radius: 9999px;
+  }
+  .chips button:hover { background: var(--olive); color: var(--ink); }
+
+  .shares { margin: 0 0 4px; padding: 0; list-style: none; font-size: 13.5px; }
+  .shares li { display: flex; gap: 9px; padding: 4px 0; align-items: baseline; }
+  .shares .yes { color: var(--forest); font-weight: 600; }
+  .shares .no { color: var(--clay); font-weight: 600; }
+  .agree { display: flex; gap: 10px; align-items: flex-start; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--fog); font-size: 13.5px; cursor: pointer; }
+  .agree input { margin-top: 3px; accent-color: var(--forest); }
+
+  .actions { text-align: center; margin-top: 24px; }
+  .publish {
+    padding: 12px 30px; font: 600 15px var(--sans); color: #fcfcf8; cursor: pointer;
+    background: var(--forest); border: 0; border-radius: 9999px;
+  }
+  .publish:hover:not(:disabled) { background: #4c5616; }
+  .publish:disabled { opacity: 0.45; cursor: default; }
+  .publish.danger { background: var(--clay); }
+  .publish.danger:hover:not(:disabled) { background: #9c4c3c; }
+  .cancel { display: inline-block; margin-left: 14px; color: var(--slate); font-size: 14px; background: none; border: none; cursor: pointer; text-decoration: underline; }
+  .note { min-height: 20px; margin-top: 14px; text-align: center; font-size: 13.5px; color: var(--clay); }
+  .note.ok { color: var(--forest); }
+
+  .done { text-align: center; padding: 40px 0 10px; }
+  .done .mark { font-size: 44px; }
+  .done h2 { font: 400 26px var(--serif); margin: 12px 0 6px; }
+  .done p { color: var(--slate); margin: 0 0 20px; }
+  .done a { color: var(--forest); font-weight: 600; }
+  footer { margin-top: 30px; text-align: center; color: var(--graphite); font-size: 12.5px; line-height: 1.55; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand"><svg width="20" height="20" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M20.5 51.92A23 23 0 1 1 43.5 51.92" stroke="#5b6f00" stroke-width="7" stroke-linecap="round"/><path d="M32 9A23 23 0 0 1 48.26 15.74" stroke="#b2c248" stroke-width="7" stroke-linecap="round"/><line x1="32" y1="32" x2="42.6" y2="21.4" stroke="#5b6f00" stroke-width="6" stroke-linecap="round"/><circle cx="32" cy="32" r="5" fill="#5b6f00"/><circle cx="32" cy="55" r="3.5" fill="#b2c248"/></svg>Token Widget</div>
+
+  <!-- ============ SHARE MODE ============ -->
+  <section id="share-flow" hidden>
+    <h1>Join the community leaderboard</h1>
+    <p class="lede">Two quick steps — nothing is published until you hit the button.</p>
+
+    <div class="step">
+      <h2><span class="num">1</span>Pick your public @handle</h2>
+      <p>This is the name other meters see — first come, first served, yours once claimed.</p>
+      <div class="handle-row">
+        <span class="at">@</span>
+        <input id="handle-input" type="text" maxlength="30" autocomplete="off" spellcheck="false" placeholder="yourhandle">
+      </div>
+      <div class="handle-status dim" id="handle-status"></div>
+      <div class="chips" id="handle-chips" hidden></div>
+    </div>
+
+    <div class="step">
+      <h2><span class="num">2</span>Know exactly what leaves this machine</h2>
+      <ul class="shares">
+        <li><span class="yes">✓</span>Daily token totals (last ~4 months) and lifetime aggregates</li>
+        <li><span class="yes">✓</span>Streaks, session counts, platform split, hour-of-day rhythm</li>
+        <li><span class="yes">✓</span>Your @handle, signed by this device's key</li>
+        <li><span class="no">✗</span>Never: prompts, transcripts, code, file names, or per-session content</li>
+      </ul>
+      <label class="agree">
+        <input type="checkbox" id="agree-box">
+        <span>I understand these aggregate stats will be published on the public leaderboard and my profile page, and I can delete them from the server at any time by switching back to "Data stays local".</span>
+      </label>
+    </div>
+
+    <div class="actions">
+      <button class="publish" id="publish-button" disabled>Publish to leaderboard</button>
+      <button class="cancel" id="share-cancel" type="button">Not now</button>
+      <div class="note" id="share-note"></div>
+    </div>
+  </section>
+
+  <!-- ============ WITHDRAW MODE ============ -->
+  <section id="withdraw-flow" hidden>
+    <h1>Take your data local again</h1>
+    <p class="lede">Here is exactly what happens when you confirm.</p>
+    <div class="step">
+      <ul class="shares">
+        <li><span class="yes">✓</span>Your leaderboard row and public profile data are <b>deleted from the server now</b></li>
+        <li><span class="yes">✓</span>Uploads stop — future usage never leaves this machine</li>
+        <li><span class="yes">✓</span>Your @handle stays reserved for you and comes back if you re-share</li>
+        <li><span class="yes">✓</span>Your local dashboard keeps working exactly as before</li>
+      </ul>
+    </div>
+    <div class="actions">
+      <button class="publish danger" id="withdraw-button">Delete my shared data</button>
+      <button class="cancel" id="withdraw-cancel" type="button">Keep sharing</button>
+      <div class="note" id="withdraw-note"></div>
+    </div>
+  </section>
+
+  <!-- ============ DONE ============ -->
+  <section id="done" class="done" hidden>
+    <div class="mark" id="done-mark">✓</div>
+    <h2 id="done-title"></h2>
+    <p id="done-copy"></p>
+    <p><a id="done-link" href="#" hidden></a></p>
+  </section>
+
+  <!-- ============ NO TOKEN (opened outside the widget) ============ -->
+  <section id="no-token" class="done" hidden>
+    <div class="mark">🔒</div>
+    <h2>Open this page from your widget</h2>
+    <p>Sharing settings live on your Mac. Click the privacy toggle in the Token Widget settings panel to open this page with local access.</p>
+  </section>
+
+  <footer>All uploads are aggregate statistics signed by your local key. Session content never leaves your machine.<br>Questions? The full data policy ships in the repository as <b>docs/sharing-flow.md</b>.</footer>
+</main>
+
+<script>
+  const TOKEN = new URLSearchParams(location.search).get("token");
+  const MODE = new URLSearchParams(location.search).get("mode") === "withdraw" ? "withdraw" : "share";
+  const api = (path, options) => fetch(`${path}${path.includes("?") ? "&" : "?"}token=${TOKEN}`, options);
+  const el = (id) => document.getElementById(id);
+
+  function show(section) {
+    for (const id of ["share-flow", "withdraw-flow", "done", "no-token"]) el(id).hidden = id !== section;
+  }
+
+  function finish(title, copy, link) {
+    el("done-title").textContent = title;
+    el("done-copy").textContent = copy;
+    if (link) {
+      el("done-link").textContent = link.label;
+      el("done-link").href = link.href;
+      el("done-link").hidden = false;
+    }
+    show("done");
+  }
+
+  if (!TOKEN) {
+    show("no-token");
+  } else if (MODE === "withdraw") {
+    show("withdraw-flow");
+  } else {
+    show("share-flow");
+  }
+
+  /* ---------- share flow ---------- */
+  const handleInput = el("handle-input");
+  const handleStatus = el("handle-status");
+  const chips = el("handle-chips");
+  const agreeBox = el("agree-box");
+  const publishButton = el("publish-button");
+  const shareNote = el("share-note");
+  let handleState = { value: "", available: false };
+  let checkTimer = null;
+  let checkSeq = 0;
+
+  function renderSuggestions(suggestions) {
+    chips.textContent = "";
+    for (const suggestion of suggestions ?? []) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.textContent = `@${suggestion}`;
+      chip.addEventListener("click", () => {
+        handleInput.value = suggestion;
+        checkHandle();
+      });
+      chips.append(chip);
+    }
+    chips.hidden = chips.childElementCount === 0;
+  }
+
+  function setPublishEnabled() {
+    publishButton.disabled = !(handleState.available && agreeBox.checked);
+  }
+
+  async function checkHandle() {
+    const value = handleInput.value.trim().toLowerCase();
+    handleState = { value, available: false };
+    chips.hidden = true;
+    setPublishEnabled();
+    if (value.length < 2) {
+      handleStatus.className = "handle-status dim";
+      handleStatus.textContent = value ? "Handles need at least 2 characters." : "";
+      return;
+    }
+    handleStatus.className = "handle-status dim";
+    handleStatus.textContent = "Checking availability…";
+    const seq = ++checkSeq;
+    try {
+      const body = await (await api(`/api/share/handle-check?handle=${encodeURIComponent(value)}`)).json();
+      if (seq !== checkSeq) return; // a newer keystroke superseded this check
+      if (!body.valid) {
+        handleStatus.className = "handle-status err";
+        handleStatus.textContent = "Lowercase letters, digits, and hyphens only.";
+      } else if (body.current) {
+        handleState.available = true;
+        handleStatus.className = "handle-status ok";
+        handleStatus.textContent = `✓ @${value} is already yours.`;
+      } else if (body.available === true) {
+        handleState.available = true;
+        handleStatus.className = "handle-status ok";
+        handleStatus.textContent = `✓ @${value} is available.`;
+      } else if (body.available === false) {
+        handleStatus.className = "handle-status err";
+        handleStatus.textContent = `@${value} is taken — one of these is free:`;
+        renderSuggestions(body.suggestions);
+      } else {
+        handleState.available = true; // offline: the claim itself decides
+        handleStatus.className = "handle-status dim";
+        handleStatus.textContent = "Registry unreachable — availability is checked again when you publish.";
+      }
+    } catch {
+      if (seq !== checkSeq) return;
+      handleStatus.className = "handle-status err";
+      handleStatus.textContent = "Could not reach the widget — is it still running?";
+    }
+    setPublishEnabled();
+  }
+
+  handleInput.addEventListener("input", () => {
+    handleInput.value = handleInput.value.toLowerCase().replace(/[^a-z0-9-]/g, "");
+    clearTimeout(checkTimer);
+    checkTimer = setTimeout(checkHandle, 350);
+  });
+  agreeBox.addEventListener("change", setPublishEnabled);
+
+  publishButton.addEventListener("click", async () => {
+    publishButton.disabled = true;
+    shareNote.className = "note";
+    shareNote.textContent = "";
+    try {
+      const response = await api("/api/share/publish", {
+        method: "POST",
+        body: JSON.stringify({ handle: handleState.value, agree: agreeBox.checked }),
+      });
+      const body = await response.json();
+      if (response.status === 409) {
+        handleStatus.className = "handle-status err";
+        handleStatus.textContent = `@${handleState.value} was claimed a moment ago — one of these is free:`;
+        renderSuggestions(body.suggestions);
+        handleState.available = false;
+        setPublishEnabled();
+        return;
+      }
+      if (!response.ok) throw new Error(body.error || "publishing failed");
+      const profileUrl = body.profileUrl;
+      finish(
+        "You're on the leaderboard",
+        body.sync === "pending"
+          ? "Sharing is on. Your first upload retries automatically within the hour."
+          : "Your aggregate stats are live. Taking you to your public profile…",
+        profileUrl ? { label: profileUrl.replace(/^https?:\/\//, ""), href: profileUrl } : null,
+      );
+      if (profileUrl && body.sync !== "pending") {
+        setTimeout(() => { location.href = profileUrl; }, 1600);
+      }
+    } catch (error) {
+      shareNote.textContent = String(error.message || error);
+      setPublishEnabled();
+    }
+  });
+  el("share-cancel").addEventListener("click", () => {
+    finish("Nothing was shared", "Your data stays local. You can revisit this any time from the widget's settings.", null);
+  });
+
+  /* ---------- withdraw flow ---------- */
+  el("withdraw-button").addEventListener("click", async (event) => {
+    event.target.disabled = true;
+    const withdrawNote = el("withdraw-note");
+    withdrawNote.className = "note";
+    withdrawNote.textContent = "";
+    try {
+      const response = await api("/api/share/withdraw", {
+        method: "POST",
+        body: JSON.stringify({ confirm: true }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "withdrawal failed");
+      el("done-mark").textContent = "🏡";
+      finish(
+        "Your data stays local now",
+        body.wiped
+          ? "Your shared stats were deleted from the server, and uploads have stopped. Your @handle stays reserved for you."
+          : "Uploads have stopped. The server-side deletion completes automatically the next time the registry is reachable.",
+        null,
+      );
+    } catch (error) {
+      withdrawNote.textContent = String(error.message || error);
+      event.target.disabled = false;
+    }
+  });
+  el("withdraw-cancel").addEventListener("click", () => {
+    el("done-mark").textContent = "✓";
+    finish("Still sharing", "Nothing changed — your stats remain on the leaderboard.", null);
+  });
+
+  /* Prefill the handle from the local identity. */
+  if (TOKEN && MODE === "share") {
+    api("/api/profile").then((r) => r.json()).then((profile) => {
+      if (profile.handle && !handleInput.value) {
+        handleInput.value = profile.handle;
+        checkHandle();
+      }
+    }).catch(() => {});
+  }
+</script>
+</body>
+</html>
