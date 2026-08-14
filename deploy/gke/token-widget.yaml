@@ -168,15 +168,6 @@ spec:
 apiVersion: networking.gke.io/v1
 kind: ManagedCertificate
 metadata:
-  name: token-widget-api
-  namespace: token-widget
-spec:
-  domains:
-    - api.tokenwidget.app
----
-apiVersion: networking.gke.io/v1
-kind: ManagedCertificate
-metadata:
   name: token-widget-api-v2
   namespace: token-widget
 spec:
@@ -192,7 +183,7 @@ metadata:
     kubernetes.io/ingress.class: gce
     kubernetes.io/ingress.allow-http: "false"
     kubernetes.io/ingress.global-static-ip-name: token-widget-api
-    networking.gke.io/managed-certificates: token-widget-api,token-widget-api-v2
+    networking.gke.io/managed-certificates: token-widget-api-v2
 spec:
   rules:
     - host: api.tokenwidget.app
