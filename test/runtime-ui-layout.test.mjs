@@ -265,6 +265,30 @@ test("injected hosts can drag and persist the compact meter layout", async () =>
 
   assert.equal(host.style.left, "650px");
   assert.equal(host.style.top, "380px");
+
+  const interactiveTarget = {
+    closest(selector) {
+      return selector.includes("button") ? this : null;
+    },
+  };
+  header.dispatch("pointerdown", {
+    target: interactiveTarget,
+    clientX: 700,
+    clientY: 400,
+  });
+  header.dispatch("pointermove", {
+    target: interactiveTarget,
+    clientX: 500,
+    clientY: 200,
+  });
+  header.dispatch("pointerup", {
+    target: interactiveTarget,
+    clientX: 500,
+    clientY: 200,
+  });
+  assert.equal(host.style.left, "650px");
+  assert.equal(host.style.top, "380px");
+
   toggle.click();
   const saved = JSON.parse(stored.get("token-meter:codex-layout"));
   assert.equal(saved.collapsed, true);

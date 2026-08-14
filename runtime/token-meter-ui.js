@@ -1,5 +1,5 @@
 ((cssText) => {
-  const VERSION = 10;
+  const VERSION = 11;
   const existing = window.__tokenMeter;
   if (existing?.version === VERSION) {
     existing.ensureMounted();
@@ -422,10 +422,13 @@
   };
 
   const beginDrag = (event, source) => {
+    const interactiveTarget = event.target.closest?.(
+      "button, a, input, select, textarea, [role='button']",
+    );
     if (
       !draggable ||
       event.button !== 0 ||
-      event.target.closest?.(".collapse-toggle") ||
+      interactiveTarget ||
       (source === "gauge" && !collapsed)
     ) {
       return;
