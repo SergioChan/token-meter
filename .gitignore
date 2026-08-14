@@ -6,3 +6,4 @@ dist/
 .token-meter/
 local-artifacts/
 .commons/
+.vercel
