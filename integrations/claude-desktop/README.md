@@ -26,6 +26,7 @@ See [the complete installation guide](../../docs/install-claude-desktop.md).
 - `src/transcript-store.mjs` incrementally reads numerical usage while discarding prompt, tool, reasoning, and response content.
 - `src/snapshot-runtime.mjs` is the deep measurement module used by both CLI inspection and the overlay.
 - `src/overlay-bridge.mjs` keeps one Node process alive and serves newline-delimited numerical snapshots to the native host.
+- The same bridge creates signed, single-use Leaderboard pairing URLs; the native host opens only the fixed production HTTPS origin and path.
 - `scripts/` builds the background `.app` and manages its isolated LaunchAgent.
 
 ## Invariants
@@ -36,4 +37,5 @@ See [the complete installation guide](../../docs/install-claude-desktop.md).
 - Read local content only to extract identifiers, timestamps, event types, and numerical usage; do not retain message content.
 - Require macOS Accessibility permission for the companion itself and fail closed until it is granted.
 - Never read static text, values, descriptions, or conversation bodies while resolving a Session or Context window.
+- Never treat browser pairing as usage-sharing consent; sharing remains an explicit local opt-in.
 - Never quit, relaunch, modify, patch, or re-sign Claude.app.

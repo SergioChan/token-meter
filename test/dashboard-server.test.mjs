@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DashboardServer } from "../src/core/dashboard-server.mjs";
 
-async function startServer() {
+async function startServer(options = {}) {
   const webDir = mkdtempSync(join(tmpdir(), "token-meter-web-"));
   writeFileSync(join(webDir, "dashboard.html"), "<!doctype html><title>dash</title>");
   const identityDir = mkdtempSync(join(tmpdir(), "token-meter-identity-"));
@@ -16,6 +16,7 @@ async function startServer() {
     webDir,
     identityDir,
     usageHistory: { collect: () => ({ days: [], hours: [], stats: { lifetimeTokens: 7 } }) },
+    ...options,
   });
   await server.start();
   return server;
@@ -39,6 +40,64 @@ test("sharing consent endpoint flips the flag and validates input", async () => 
     ).json();
     assert.equal(on.sharing.enabled, true);
     assert.equal(on.privateKeyPem, undefined);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("enabling sharing uploads immediately when the registry is configured", async () => {
+  const previousRegistry = process.env.TOKEN_METER_REGISTRY_URL;
+  const uploads = [];
+  process.env.TOKEN_METER_REGISTRY_URL = "https://registry.example";
+  const server = await startServer({
+    usageUploader: async (identity, usage) => {
+      uploads.push({ identity, usage });
+      return { ok: true };
+    },
+  });
+  try {
+    const token = new URL(server.url()).searchParams.get("token");
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/api/sharing?token=${token}`,
+      { method: "POST", body: JSON.stringify({ enabled: true }) },
+    );
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(body.sharing.enabled, true);
+    assert.equal(body.communitySync, "ok");
+    assert.equal(body.privateKeyPem, undefined);
+    assert.equal(uploads.length, 1);
+    assert.match(uploads[0].identity.meterId, /^TM-/);
+    assert.equal(uploads[0].usage.stats.lifetimeTokens, 7);
+  } finally {
+    await server.stop();
+    if (previousRegistry == null) delete process.env.TOKEN_METER_REGISTRY_URL;
+    else process.env.TOKEN_METER_REGISTRY_URL = previousRegistry;
+  }
+});
+
+test("leaderboard pairing endpoint returns a trusted URL without exposing the private key", async () => {
+  let pairedMeterId = null;
+  const server = await startServer({
+    leaderboardUrlFactory: async (identity) => {
+      pairedMeterId = identity.meterId;
+      return "https://www.tokenwidget.app/leaderboard#pair=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    },
+  });
+  try {
+    const token = new URL(server.url()).searchParams.get("token");
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/api/leaderboard-pairing?token=${token}`,
+      { method: "POST" },
+    );
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(
+      body.url,
+      "https://www.tokenwidget.app/leaderboard#pair=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    );
+    assert.match(pairedMeterId, /^TM-/);
+    assert.equal(body.privateKeyPem, undefined);
   } finally {
     await server.stop();
   }

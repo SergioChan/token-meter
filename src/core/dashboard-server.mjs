@@ -10,21 +10,33 @@ import {
   setSharingEnabled,
 } from "./identity.mjs";
 import { UsageHistory } from "./usage-history.mjs";
-import { registryEnabled, claimHandle } from "./registry-client.mjs";
+import {
+  registryEnabled,
+  claimHandle,
+  createLeaderboardUrl,
+  uploadUsage,
+} from "./registry-client.mjs";
 
 const MAX_BODY_BYTES = 4096;
 const USAGE_TTL_MS = 60_000;
 
-// Loopback-only profile and handle-claim server for the dashboard page.
+// Loopback-only profile and community-action server for the dashboard page.
 // Every request must carry the per-instance nonce; the browser page reads it
-// from its own URL. Handles are reserved locally until a public registry
-// exists to make first-come-first-serve claims global.
+// from its own URL. Registry calls remain signed by the local identity.
 export class DashboardServer {
-  constructor({ webDir, identityDir = defaultIdentityDir(), usageHistory = null }) {
+  constructor({
+    webDir,
+    identityDir = defaultIdentityDir(),
+    usageHistory = null,
+    leaderboardUrlFactory = createLeaderboardUrl,
+    usageUploader = uploadUsage,
+  }) {
     if (!webDir) throw new TypeError("webDir is required");
     this.webDir = webDir;
     this.identityDir = identityDir;
     this.usageHistory = usageHistory ?? new UsageHistory();
+    this.leaderboardUrlFactory = leaderboardUrlFactory;
+    this.usageUploader = usageUploader;
     this.usageMemo = null;
     this.nonce = randomBytes(16).toString("hex");
     this.server = null;
@@ -90,8 +102,34 @@ export class DashboardServer {
       if (typeof enabled !== "boolean") {
         return replyJson(422, { error: "enabled must be a boolean" });
       }
-      setSharingEnabled(enabled, this.identityDir);
-      return replyJson(200, this.#publicIdentity());
+      const identity = setSharingEnabled(enabled, this.identityDir);
+      let communitySync = null;
+      if (enabled && registryEnabled()) {
+        try {
+          await this.usageUploader(identity, this.#usage());
+          communitySync = "ok";
+        } catch {
+          communitySync = "pending";
+        }
+      }
+      return replyJson(200, { ...this.#publicIdentity(), communitySync });
+    }
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname === "/api/leaderboard-pairing"
+    ) {
+      const identity = loadOrCreateIdentity(this.identityDir);
+      if (identity.sharing?.enabled === true && registryEnabled()) {
+        await this.usageUploader(identity, this.#usage()).catch(() => {});
+      }
+      try {
+        const url = await this.leaderboardUrlFactory(identity);
+        return replyJson(200, { url });
+      } catch (error) {
+        return replyJson(502, {
+          error: error instanceof Error ? error.message : "pairing failed",
+        });
+      }
     }
     if (request.method === "POST" && requestUrl.pathname === "/api/handle") {
       let raw = "";

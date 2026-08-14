@@ -98,6 +98,20 @@ Output is intentionally excluded from context occupancy. The denominator comes f
 
 Neither host collector retains prompt, reasoning, tool, or assistant content in the metrics index.
 
+## Identity, sharing, and “you”
+
+Token Widget creates one Ed25519 key pair on the Mac. The public-key hash becomes a stable Meter ID such as `TM-ABCD-EFGH-JKLM`; the private key remains in the local Application Support directory and is used only to sign registry requests. No account, email address, or password is required.
+
+Choose **Check your ranking** in the widget, or **Open community leaderboard** in the local dashboard, to connect a browser:
+
+1. The local app signs a short-lived browser-pairing request.
+2. The registry returns a random, single-use code that expires after five minutes.
+3. The code travels in the URL fragment, which is removed before the page makes a request.
+4. After a successful exchange, the browser receives an HTTP-only, secure, 30-day session cookie.
+5. The Leaderboard compares the authenticated Meter's opaque row ID with each public row and labels the match **you**.
+
+Browser pairing and community sharing are separate choices. Pairing identifies the browser but does not upload usage. **Data stays local** is the default; a Meter appears in the ranking only after **Share with community** is enabled. The registry receives signed aggregate totals and platform counts, never transcript content or the private key. Disconnecting the browser revokes that browser session without changing the local Meter identity.
+
 ## Install with an Agent
 
 Attach [INSTALL_WITH_AGENT.md](INSTALL_WITH_AGENT.md) to Codex, Claude Code, or another capable local coding Agent. The file is an executable installation prompt that covers host detection, tests, restart approval boundaries, Accessibility, installation, and real runtime verification.
@@ -213,6 +227,10 @@ flowchart LR
   A2["Focused Claude local Session ID"] --> CORE
   CORE --> NATIVE["Native Claude companion"]
   NATIVE --> UI
+
+  ID["Local Ed25519 identity"] -->|"signed opt-in totals"| REG["Community registry"]
+  UI -->|"signed one-time pairing"| REG
+  REG --> WEB["Leaderboard with you"]
 ```
 
 The shared core owns Session, hour, turn, context, rate, baseline, and alert semantics. Each host integration owns only its identity, telemetry, lifecycle, and presentation adapter.

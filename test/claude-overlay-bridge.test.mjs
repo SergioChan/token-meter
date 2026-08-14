@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -78,4 +78,14 @@ test("Claude overlay bridge serves multiple snapshots in one process", async (co
   assert.equal(responses[0].snapshot.session.totalTokens, 10);
   assert.equal(responses[1].requestId, 2);
   assert.equal(responses[1].snapshot.status, "unbound");
+});
+
+test("Claude overlay bridge asks the registry for a signed browser pairing URL", async () => {
+  const source = await readFile(
+    "integrations/claude-desktop/src/overlay-bridge.mjs",
+    "utf8",
+  );
+  assert.match(source, /request\?\.command === "leaderboard-url"/);
+  assert.match(source, /await syncCommunity\("leaderboard"\)/);
+  assert.match(source, /await createLeaderboardUrl\(identity\)/);
 });

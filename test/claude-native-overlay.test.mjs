@@ -114,4 +114,11 @@ test("Claude companion waits quietly for Accessibility and passes valid bridge a
     source,
     /"--sessions-dir",\s*configuration\.sessionsDirectoryURL\.path/,
   );
+  assert.match(source, /command\(\["command": "leaderboard-url"\]\)/);
+  assert.match(source, /url\.scheme == "https"/);
+  assert.match(source, /url\.host == "www\.tokenwidget\.app"/);
+  assert.match(source, /url\.path == "\/leaderboard"/);
+  assert.match(source, /url\.query == nil/);
+  assert.match(source, /url\.fragment\?\.hasPrefix\("pair="\) == true/);
+  assert.doesNotMatch(source, /openInstalledPage\("web\/leaderboard\.html"\)/);
 });

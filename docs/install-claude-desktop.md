@@ -125,6 +125,8 @@ No Claude restart is required. Bring Claude Desktop to the foreground and select
 - Drag the gauge while collapsed.
 - Switching Claude Code Sessions atomically switches every displayed metric.
 - The overlay hides when Claude is not frontmost, when the Code surface is not selected, or when Session identity is unavailable.
+- **Check your ranking** opens a five-minute, single-use link that pairs the browser to this Mac's Meter identity. No email or password is required.
+- The Leaderboard labels the matching row **you** after **Share with community** is enabled. Browser pairing alone never enables sharing.
 
 Position and collapsed state survive companion restarts and updates.
 

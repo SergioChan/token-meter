@@ -107,6 +107,32 @@ The App Server's `account/usage/read` method has no parameters and returns an ac
 
 Token Meter therefore does not infer an exact per-Session backend number. Account deltas cannot be assigned safely when Sessions, child Agents, other devices, or delayed backend aggregation overlap. The meter retains raw workload because repeated cached requests are still useful evidence of agent intensity and runaway loops, while documentation and UI must not call that reading an account bill or `/usage` equivalent.
 
+## Community identity and passwordless browser pairing
+
+Community identity starts locally. The client generates an Ed25519 key pair, derives the stable Meter ID from the SHA-256 hash of the public-key DER, and keeps the private key in the local identity directory. Registry writes are canonicalized and signed; the server independently derives the Meter ID before accepting them. A claimable handle is an optional public alias, not an authentication credential.
+
+Sharing and browser authentication are deliberately separate state machines:
+
+```mermaid
+sequenceDiagram
+  participant W as Local Token Widget
+  participant R as Registry API
+  participant B as Browser Leaderboard
+
+  W->>R: Signed browser-pairing request
+  R-->>W: Five-minute single-use code
+  W->>B: Open /leaderboard#pair=code
+  B->>B: Remove fragment from history
+  B->>R: Exchange code once
+  R-->>B: Secure HTTP-only session cookie + viewer
+  B->>R: GET /me and GET /leaderboard
+  R-->>B: Opaque rowId, rank, and public rows
+```
+
+The registry stores only SHA-256 hashes of the random pairing and session secrets. The browser cookie uses the `__Host-` prefix, has no `Domain` attribute, and expires after 30 days. Public ranking rows use a stable truncated hash of the Meter ID rather than the full ID. An authenticated `/me` response returns the same opaque row ID, allowing the web client to label exactly one row **you** without putting the local private key or full Meter ID in public data.
+
+Pairing succeeds even in local-only mode and returns `rank: null` until the Meter has reported usage. Enabling **Share with community** causes an immediate signed aggregate upload and future periodic uploads. Disabling it stops future uploads; it does not retroactively delete already shared public totals. Pairing never flips the sharing flag.
+
 ## Codex macOS lifecycle controller
 
 The source installer copies the minimal runtime into the isolated `Token Meter/Codex Desktop` Application Support directory and loads a per-user LaunchAgent. The controller waits for Codex instead of opening it at login. A normal Dock launch without loopback CDP receives at most one normal quit/relaunch attempt for that process. Failed verification, an occupied port, a failed normal quit, or a failed relaunch all fail closed without a force-quit or relaunch loop.
@@ -122,6 +148,8 @@ macOS Accessibility permission is granted to the companion, not to the repositor
 During an update, the installer retains the previous app and LaunchAgent until the replacement process produces matching live health state. Bootstrap, process, or trusted-UI failure restores the previous installation.
 
 One persistent Node bridge holds the transcript stores and metrics engine in memory. The Swift host sends the exact selected Desktop Session ID and receives a newline-delimited numerical snapshot. Timeout, malformed output, or bridge termination causes a restart or hidden meter; no stale snapshot is assigned to a new Session.
+
+The same bridge owns community actions. **Check your ranking** asks it to sign a one-time pairing request, optionally refreshes already-consented aggregate usage, and returns a fixed `https://www.tokenwidget.app/leaderboard#pair=...` URL. The Swift host rejects any other scheme, host, path, query, or fragment shape before asking macOS to open it.
 
 The identity probe inspects at most 512 Accessibility roles in a shallow focused-window search and never descends into the selected web area's conversation tree. Context enrichment is separate and runs at most once every five seconds: it reads titles from buttons inside that same web area until an exact Context-window ratio is found. It does not read static text, values, descriptions, or message bodies. The model-catalog fallback is keyed by the exact model returned with the Session snapshot and invalidates cached windows when the installed catalog fingerprint changes.
 

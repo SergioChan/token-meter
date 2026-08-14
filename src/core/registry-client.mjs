@@ -1,5 +1,5 @@
 import { signPayload, markHandleClaimed } from "./identity.mjs";
-import { registryBase } from "./registry-config.mjs";
+import { communityWebBase, registryBase } from "./registry-config.mjs";
 import { UsageHistory } from "./usage-history.mjs";
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -26,6 +26,33 @@ async function call(path, options = {}) {
 
 export function checkHandleAvailable(handle) {
   return call(`/api/v1/handle/${encodeURIComponent(handle)}/available`);
+}
+
+export async function createBrowserPairing(identity, nowMs = Date.now()) {
+  const signed = signPayload(identity, {
+    kind: "browser-pairing",
+    meterId: identity.meterId,
+    publicKey: identity.publicKey,
+    generatedAtMs: nowMs,
+  });
+  const pairing = await call("/api/v1/browser-pairings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(signed),
+  });
+  if (!/^[A-Za-z0-9_-]{32}$/.test(pairing.code ?? "")) {
+    throw new Error("registry returned an invalid browser pairing");
+  }
+  return pairing;
+}
+
+export async function createLeaderboardUrl(identity, nowMs = Date.now()) {
+  const webBase = communityWebBase();
+  if (webBase == null) throw new Error("community website is not configured");
+  const pairing = await createBrowserPairing(identity, nowMs);
+  const url = new URL("/leaderboard", `${webBase}/`);
+  url.hash = new URLSearchParams({ pair: pairing.code }).toString();
+  return url.toString();
 }
 
 // Latest published release: {version, path, sha256, size}. Carries no

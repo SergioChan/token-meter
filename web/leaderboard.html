@@ -69,6 +69,29 @@
     font-size: 13px; letter-spacing: 0.13px; color: var(--ink);
   }
 
+  .viewer-card {
+    display: flex; align-items: center; justify-content: space-between; gap: 20px;
+    margin: 28px 0 0; padding: 18px 20px;
+    background: var(--card); border: 1px solid var(--ash); border-radius: 12px;
+  }
+  .viewer-card[data-state="authenticated"] {
+    background: var(--sprout); border-color: var(--fern);
+  }
+  .viewer-card[data-state="error"] { border-color: #b45f4d; }
+  .viewer-card small {
+    display: block; margin-bottom: 3px; color: var(--forest);
+    font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .viewer-card strong { display: block; font-size: 17px; }
+  .viewer-card p { margin: 3px 0 0; color: var(--slate); font-size: 13px; }
+  .viewer-card button {
+    flex: 0 0 auto; padding: 7px 13px; color: var(--carbon); background: var(--card);
+    border: 1px solid var(--stone); border-radius: 999px; font: 500 12px var(--sans);
+    cursor: pointer;
+  }
+  .viewer-card button:hover { background: var(--fog); }
+  .empty-state { padding: 28px 20px; text-align: center; color: var(--slate); }
+
   .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 32px 0; }
   .tile { background: var(--card); border: 1px solid var(--ash); border-radius: 8px; padding: 20px 24px; }
   .tile small { display: block; color: var(--slate); font-size: 13px; letter-spacing: 0.13px; }
@@ -147,8 +170,17 @@
   <header class="page">
     <h1>Community leaderboard</h1>
     <p>Opt-in usage totals from anonymous meters. Every entry is a signed report — no accounts, no emails, no session content.</p>
-    <span class="period">Past 7 days · Aug 5 – Aug 12, 2026</span>
+    <span class="period">Past 7 days · loading</span>
   </header>
+
+  <section class="viewer-card" id="viewer-card" data-state="anonymous" aria-live="polite">
+    <div>
+      <small>Your browser</small>
+      <strong id="viewer-title">Checking for a paired Token Widget…</strong>
+      <p id="viewer-copy">A password is never required.</p>
+    </div>
+    <button id="disconnect-browser" type="button" hidden>Disconnect</button>
+  </section>
 
   <section class="tiles" aria-label="Summary">
     <div class="tile"><small>Meters sharing</small><strong id="tile-meters">—</strong></div>
@@ -164,38 +196,55 @@
   </section>
 
   <footer>
-    Sample data — the public registry is not live yet. Meter IDs are derived locally from a client-generated key;
-    sharing is off by default and per-period totals are the only data transmitted.
-    ✓ = signature verified against the meter's public key.
+    Live community data — signed usage reports from real meters. Sharing is opt-in;
+    session content and private keys never leave the device. ✓ = signature verified on the server.
   </footer>
 </main>
 
 <div class="tooltip" id="tooltip"></div>
 
 <script>
-  const SAMPLE = [
-    { meterId: "TM-7KQX-M3RA-9WFD", tokens: 48200000, sessions: 61, peakTpm: 212000 },
-    { meterId: "TM-C4NP-82VH-KDTQ", tokens: 41750000, sessions: 44, peakTpm: 188000 },
-    { meterId: "TM-XW2M-QJ5B-77RC", tokens: 33400000, sessions: 52, peakTpm: 240000 },
-    { meterId: "TM-5RDF-HH8K-2MPX", tokens: 27900000, sessions: 38, peakTpm: 129000 },
-    { meterId: "TM-9TGB-WM4E-XR6N", tokens: 21300000, sessions: 47, peakTpm: 96000, you: true },
-    { meterId: "TM-JD63-P2QW-BB5H", tokens: 18800000, sessions: 25, peakTpm: 154000 },
-    { meterId: "TM-2VXC-N9RT-QQ4J", tokens: 14100000, sessions: 33, peakTpm: 88000 },
-    { meterId: "TM-PH8S-64KD-WMVR", tokens: 11600000, sessions: 19, peakTpm: 71000 },
-    { meterId: "TM-6ENM-RJ2X-H5PB", tokens: 8400000, sessions: 22, peakTpm: 65000 },
-    { meterId: "TM-QK5W-B7DC-3NTF", tokens: 6900000, sessions: 15, peakTpm: 58000 },
-    { meterId: "TM-M3JH-XV9P-D8RW", tokens: 4200000, sessions: 11, peakTpm: 43000 },
-    { meterId: "TM-8BRT-2FQN-KWX6", tokens: 1700000, sessions: 6, peakTpm: 31000 },
-  ];
-
   const fmt = (n) =>
     n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M"
     : n >= 1e3 ? (n / 1e3).toFixed(0) + "K"
     : String(n);
 
   const tooltip = document.getElementById("tooltip");
+  const viewerCard = document.getElementById("viewer-card");
+  const viewerTitle = document.getElementById("viewer-title");
+  const viewerCopy = document.getElementById("viewer-copy");
+  const disconnectButton = document.getElementById("disconnect-browser");
 
-  function renderBoard(entries) {
+  function renderViewer(viewer, error = null) {
+    if (error) {
+      viewerCard.dataset.state = "error";
+      viewerTitle.textContent = "Pairing did not complete";
+      viewerCopy.textContent = error;
+      disconnectButton.hidden = true;
+      return;
+    }
+    if (!viewer) {
+      viewerCard.dataset.state = "anonymous";
+      viewerTitle.textContent = "Open “Check your ranking” from Token Widget";
+      viewerCopy.textContent =
+        "The app will pair this browser once using your local Ed25519 identity — no password or email.";
+      disconnectButton.hidden = true;
+      return;
+    }
+    viewerCard.dataset.state = "authenticated";
+    disconnectButton.hidden = false;
+    if (viewer.rank == null) {
+      viewerTitle.textContent = "Browser connected";
+      viewerCopy.textContent =
+        `${viewer.name} · Turn on “Share with community” in Token Widget to join the ranking.`;
+      return;
+    }
+    viewerTitle.textContent = `You’re #${viewer.rank} this week`;
+    viewerCopy.textContent =
+      `${viewer.name} · ${fmt(viewer.tokens)} tokens · ${viewer.sessions} sessions · ${viewer.totalMeters} meters`;
+  }
+
+  function renderBoard(entries, viewer) {
     const rowsHost = document.getElementById("rows");
     rowsHost.textContent = "";
     const sorted = [...entries].sort((a, b) => b.tokens - a.tokens);
@@ -205,13 +254,21 @@
     document.getElementById("tile-median").textContent =
       sorted.length ? fmt(sorted[Math.floor(sorted.length / 2)].tokens) : "—";
     const max = Math.max(1, sorted[0]?.tokens ?? 0);
+    if (sorted.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "No meters are sharing yet.";
+      rowsHost.append(empty);
+      return;
+    }
     sorted.forEach((entry, index) => {
+      const you = entry.rowId === viewer?.rowId;
       const row = document.createElement(entry.href ? "a" : "div");
       if (entry.href) { row.href = entry.href; row.style.textDecoration = "none"; row.style.color = "inherit"; }
-      row.className = "row" + (entry.you ? " you" : "");
+      row.className = "row" + (you ? " you" : "");
       row.innerHTML = `
         <span class="rank ${index < 3 ? "top" : ""}">${index + 1}</span>
-        <span class="meter-id">${entry.display}${entry.you ? '<span class="you-badge">this meter</span>' : ""}<span class="signed" title="signature verified">✓</span></span>
+        <span class="meter-id">${entry.display}${you ? '<span class="you-badge">you</span>' : ""}<span class="signed" title="signature verified">✓</span></span>
         <span class="bar-cell bar-track"><span class="bar" style="width:${Math.max(1, (entry.tokens / max) * 100)}%"></span></span>
         <span class="tokens">${fmt(entry.tokens)}<small>${entry.sessions} sessions</small></span>`;
       row.addEventListener("mousemove", (event) => {
@@ -229,32 +286,80 @@
     });
   }
 
-  renderBoard(SAMPLE.map((entry) => ({
-    display: entry.meterId.slice(0, 10) + "…",
-    full: entry.meterId,
-    tokens: entry.tokens,
-    sessions: entry.sessions,
-    peakTpm: entry.peakTpm,
-    you: entry.you,
-  })));
+  async function exchangePairing(code) {
+    const response = await fetch("/api/v1/browser-sessions", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || "pairing failed");
+    return body.viewer;
+  }
 
-  // Live community data when served by the registry; sample stays as preview.
-  (async () => {
+  async function currentViewer() {
+    const response = await fetch("/api/v1/me", { credentials: "same-origin" });
+    if (response.status === 401) return null;
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || "could not read browser session");
+    return body.viewer;
+  }
+
+  disconnectButton.addEventListener("click", async () => {
+    disconnectButton.disabled = true;
     try {
-      const response = await fetch("/api/v1/leaderboard");
-      if (!response.ok) return;
-      const { rows } = await response.json();
-      renderBoard(rows.map((row) => ({
+      await fetch("/api/v1/browser-sessions/current", {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+    } finally {
+      location.reload();
+    }
+  });
+
+  (async () => {
+    let viewer = null;
+    let pairingError = null;
+    const fragment = new URLSearchParams(location.hash.replace(/^#/, ""));
+    const pairingCode = fragment.get("pair");
+    if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+    if (pairingCode) {
+      viewerCard.dataset.state = "pairing";
+      viewerTitle.textContent = "Pairing this browser…";
+      viewerCopy.textContent = "The one-time code will be invalidated immediately.";
+      try {
+        if (!/^[A-Za-z0-9_-]{32}$/.test(pairingCode)) throw new Error("The pairing code is invalid.");
+        viewer = await exchangePairing(pairingCode);
+      } catch (error) {
+        pairingError = String(error.message || error);
+      }
+    } else {
+      try {
+        viewer = await currentViewer();
+      } catch (error) {
+        pairingError = String(error.message || error);
+      }
+    }
+    renderViewer(viewer, pairingError);
+    try {
+      const response = await fetch("/api/v1/leaderboard", { credentials: "same-origin" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "leaderboard unavailable");
+      renderBoard(body.rows.map((row) => ({
+        rowId: row.rowId,
         display: row.name,
         full: row.handle ? `@${row.handle}` : row.name,
         tokens: row.tokens,
         sessions: row.sessions,
         href: row.handle ? `/u/${row.handle}` : null,
-      })));
-      document.querySelector("footer").textContent =
-        "Live community data — signed usage reports from real meters. Sharing is opt-in; ✓ = signature verified on the server.";
+      })), viewer);
       document.querySelector(".period").textContent = "Past 7 days · live";
-    } catch { /* not served by the registry */ }
+    } catch (error) {
+      renderBoard([], viewer);
+      document.querySelector(".period").textContent = "Leaderboard unavailable";
+      if (!pairingError) viewerCopy.textContent = String(error.message || error);
+    }
   })();
 </script>
 </body>

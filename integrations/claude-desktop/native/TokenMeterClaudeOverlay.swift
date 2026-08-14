@@ -817,8 +817,8 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         }
     }
 
-    // Only fixed pages under the installed root may be opened; the web layer
-    // never supplies a URL or path.
+    // The web layer sends action names only. The bridge creates all URLs from
+    // trusted local configuration and a signed one-time pairing request.
     private func handleAction(type: String, body: [String: Any]) {
         switch type {
         case "open-dashboard":
@@ -834,7 +834,18 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
                 DispatchQueue.main.async { NSWorkspace.shared.open(url) }
             }
         case "open-leaderboard":
-            openInstalledPage("web/leaderboard.html")
+            snapshotBridge.command(["command": "leaderboard-url"]) { result in
+                guard case .success(let payload) = result,
+                      payload["ok"] as? Bool == true,
+                      let urlString = payload["url"] as? String,
+                      let url = URL(string: urlString),
+                      url.scheme == "https",
+                      url.host == "www.tokenwidget.app",
+                      url.path == "/leaderboard",
+                      url.query == nil,
+                      url.fragment?.hasPrefix("pair=") == true else { return }
+                DispatchQueue.main.async { NSWorkspace.shared.open(url) }
+            }
         case "copy-text":
             guard let text = body["text"] as? String, text.count <= 500 else { return }
             NSPasteboard.general.clearContents()
@@ -901,12 +912,6 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
             DispatchQueue.main.async { NSWorkspace.shared.open(destination) }
         }
         task.resume()
-    }
-
-    private func openInstalledPage(_ relativePath: String) {
-        let url = configuration.rootURL.appendingPathComponent(relativePath)
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
-        NSWorkspace.shared.open(url)
     }
 
     private func beginDrag() {

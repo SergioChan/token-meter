@@ -12,6 +12,7 @@ import {
   registryEnabled,
   uploadUsage,
   claimHandle,
+  createLeaderboardUrl,
   fetchLatestRelease,
   isNewerVersion,
 } from "../../../src/core/registry-client.mjs";
@@ -146,6 +147,13 @@ for await (const line of input) {
         await dashboardServer.start();
       }
       await writeLine({ requestId, ok: true, url: dashboardServer.url() });
+      continue;
+    }
+    if (request?.command === "leaderboard-url") {
+      const identity = loadOrCreateIdentity();
+      if (identity.sharing?.enabled === true) await syncCommunity("leaderboard");
+      const url = await createLeaderboardUrl(identity);
+      await writeLine({ requestId, ok: true, url });
       continue;
     }
     if (request?.command === "set-sharing") {

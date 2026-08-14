@@ -78,8 +78,8 @@ export function setSharingEnabled(enabled, dirPath = defaultIdentityDir()) {
   return saveIdentity(identity, dirPath);
 }
 
-// Handles are local aliases until a registry backend exists to claim them;
-// `claimed` stays false so the UI can distinguish verified handles later.
+// Save a requested handle locally first. `claimed` stays false until the
+// registry acknowledges the signed, globally unique claim.
 export function isValidHandle(value) {
   return typeof value === "string" && /^[a-z0-9][a-z0-9-]{1,29}$/.test(value);
 }

@@ -58,3 +58,20 @@ Accessibility permission allows the companion to inspect UI elements exposed by 
 Source builds are ad-hoc signed by default. Their code identity can change after rebuilding, which may require renewed Accessibility approval. They also record the selected external Node.js path; if that runtime is later removed, rerun the installer with a compatible runtime.
 
 Deleting the application does not automatically delete its macOS TCC decision. Revoke **Token Meter for Claude** in System Settings, or uninstall with `./scripts/uninstall-claude-meter-macos.sh --purge-state --reset-accessibility`.
+
+### Community identity and browser sessions
+
+The optional community registry uses a local Ed25519 identity rather than a password account. The private key is stored only in the user's Application Support identity file with user-only permissions. The registry accepts handle claims, usage reports, and browser-pairing requests only when their signatures match the Meter ID derived from the submitted public key.
+
+Usage sharing is disabled by default and remains independent of browser pairing. Reports contain aggregate daily totals and headline statistics only. They do not contain prompts, responses, tool calls, transcript paths, Session IDs, or private keys.
+
+Browser pairing has these boundaries:
+
+- Pairing codes contain 192 bits of randomness, expire after five minutes, and may be exchanged once.
+- Pairing and browser-session secrets are stored server-side only as SHA-256 hashes.
+- The pairing code is placed in the URL fragment and removed before the page contacts the registry, so it is not sent in the initial HTTP request or retained in normal navigation history.
+- Browser sessions use 256-bit random tokens in `__Host-` cookies with `Secure`, `HttpOnly`, `SameSite=Lax`, and no `Domain` attribute. Sessions expire after 30 days and may be explicitly revoked from the Leaderboard.
+- Browser session responses expose an opaque, truncated hash for row matching; the public Leaderboard does not expose full Meter IDs.
+- Session exchange and revocation reject untrusted browser origins. Loopback HTTP is accepted only for local development.
+
+Possession of an unexpired, unused pairing URL is sufficient to connect a browser to that Meter. Treat it as a short-lived secret and do not post or forward it. A malicious process running as the same macOS user could read the local private key or control the browser; Token Widget does not claim to defend against a fully compromised user account.

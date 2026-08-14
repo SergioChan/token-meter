@@ -4,6 +4,15 @@ The top entry is the current source version. Binary release metadata appears at
 `/api/v1/latest` only after a signed and notarized DMG has actually been
 published.
 
+## Unreleased
+
+- Passwordless browser pairing: the local Ed25519 Meter identity creates a
+  five-minute, single-use pairing link and a revocable secure browser session.
+- The live community Leaderboard now highlights the authenticated Meter as
+  **you**, reports its weekly rank, and contains no sample rows.
+- Enabling community sharing performs an immediate signed aggregate upload;
+  local-only mode remains the default and pairing does not imply consent.
+
 ## 0.2.0 — 2026-08-13
 
 - Logo and app icon: coin-ring gauge mark on the site (nav + favicons), a
