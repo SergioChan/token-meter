@@ -74,11 +74,52 @@ test("aggregates daily buckets, platforms, and stats across all sources", () => 
   // Sidechain file counts tokens but not sessions.
   assert.equal(result.byPlatform.claudeCode.sessions, 1);
   assert.equal(result.stats.sessionCount, 3);
+  assert.equal(result.stats.sessionsLast7Days, 3);
   assert.equal(result.stats.daysActive, 3);
   assert.equal(result.stats.cacheReadShare > 0.5, true);
   assert.equal(result.stats.topDays[0].tokens >= result.stats.topDays.at(-1).tokens, true);
   const day13 = result.days.find((d) => d.date === "2026-08-13");
   assert.ok(day13.byPlatform.claudeCode > 0);
+});
+
+test("rolling session count includes sessions active within the past 7 days", () => {
+  const root = mkdtempSync(join(tmpdir(), "token-meter-week-sessions-"));
+  const codexDir = join(root, "codex");
+  mkdirSync(codexDir, { recursive: true });
+  const writeSession = (name, timestampMs) => {
+    writeFileSync(
+      join(codexDir, `${name}.jsonl`),
+      JSON.stringify({
+        timestamp: new Date(timestampMs).toISOString(),
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              input_tokens: 1,
+              cached_input_tokens: 0,
+              output_tokens: 1,
+              total_tokens: 2,
+            },
+          },
+        },
+      }),
+    );
+  };
+  writeSession("old", new Date(2026, 7, 5, 23).getTime());
+  writeSession("boundary", new Date(2026, 7, 6, 0).getTime());
+  writeSession("recent", NOW - 1_000);
+
+  const result = new UsageHistory({
+    claudeProjectsDir: join(root, "missing-claude"),
+    codexSessionsDir: codexDir,
+    clineTaskDirs: [],
+    cacheFile: join(root, "cache.json"),
+    now: () => NOW,
+  }).collect();
+
+  assert.equal(result.stats.sessionCount, 3);
+  assert.equal(result.stats.sessionsLast7Days, 2);
 });
 
 test("cache short-circuits unchanged files and invalidates on change", () => {

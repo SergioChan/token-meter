@@ -6,6 +6,9 @@ published.
 
 ## Unreleased
 
+- Leaderboard Session totals now use the same rolling seven-day window as the
+  ranked Token totals; lifetime Session counts remain profile statistics.
+
 - Passwordless browser pairing: the local Ed25519 Meter identity creates a
   five-minute, single-use pairing link and a revocable secure browser session.
 - The live community Leaderboard now highlights the authenticated Meter as

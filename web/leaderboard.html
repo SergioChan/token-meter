@@ -223,6 +223,10 @@
   const viewerTitle = document.getElementById("viewer-title");
   const viewerCopy = document.getElementById("viewer-copy");
   const disconnectButton = document.getElementById("disconnect-browser");
+  const fmtSessions = (value) =>
+    Number.isSafeInteger(value)
+      ? `${value} session${value === 1 ? "" : "s"}`
+      : "7-day sessions pending";
 
   function renderViewer(viewer, error = null) {
     if (error) {
@@ -248,9 +252,10 @@
         `${viewer.name} · Turn on “Share with community” in Token Widget to join the ranking.`;
       return;
     }
-    viewerTitle.textContent = `You’re #${viewer.rank} this week`;
+    viewerTitle.textContent = `You’re #${viewer.rank} in the past 7 days`;
+    const sessions = viewer.sessionWindowDays === 7 ? viewer.sessions : null;
     viewerCopy.textContent =
-      `${viewer.name} · ${fmt(viewer.tokens)} tokens · ${viewer.sessions} sessions · ${viewer.totalMeters} meters`;
+      `${viewer.name} · ${fmt(viewer.tokens)} tokens · ${fmtSessions(sessions)} · ${viewer.totalMeters} meters`;
   }
 
   function renderBoard(entries, viewer) {
@@ -279,12 +284,12 @@
         <span class="rank ${index < 3 ? "top" : ""}">${index + 1}</span>
         <span class="meter-id">${entry.display}${you ? '<span class="you-badge">you</span>' : ""}<span class="signed" title="signature verified">✓</span></span>
         <span class="bar-cell bar-track"><span class="bar" style="width:${Math.max(1, (entry.tokens / max) * 100)}%"></span></span>
-        <span class="tokens">${fmt(entry.tokens)}<small>${entry.sessions} sessions</small></span>`;
+        <span class="tokens">${fmt(entry.tokens)}<small>${fmtSessions(entry.sessions)}</small></span>`;
       row.addEventListener("mousemove", (event) => {
         tooltip.style.display = "block";
         tooltip.innerHTML = `<b>${entry.full ?? entry.display}</b><br>` +
           `Tokens: <b>${entry.tokens.toLocaleString()}</b>` +
-          (entry.sessions ? `<br>Sessions: <b>${entry.sessions}</b>` : "") +
+          (entry.sessions != null ? `<br>Sessions · past 7 days: <b>${entry.sessions}</b>` : "") +
           (entry.peakTpm ? ` · Peak rate: <b>${fmt(entry.peakTpm)}/min</b>` : "");
         const pad = 14;
         tooltip.style.left = Math.min(event.clientX + pad, window.innerWidth - tooltip.offsetWidth - pad) + "px";
@@ -360,7 +365,7 @@
         display: row.handle ? `@${row.handle}` : row.name,
         full: row.handle ? `@${row.handle}` : row.name,
         tokens: row.tokens,
-        sessions: row.sessions,
+        sessions: row.sessionWindowDays === 7 ? row.sessions : null,
         href: row.handle ? `/u/${row.handle}` : null,
       })), viewer);
       document.querySelector(".period").textContent = "Past 7 days · live";

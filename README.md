@@ -112,6 +112,8 @@ Choose **Check your ranking** in the widget, or **Open community leaderboard** i
 
 Browser pairing and community sharing are separate choices. Pairing identifies the browser but does not upload usage. **Data stays local** is the default; a Meter appears in the ranking only after **Share with community** is enabled. The registry receives signed aggregate totals and platform counts, never transcript content or the private key. Disconnecting the browser revokes that browser session without changing the local Meter identity.
 
+The Leaderboard ranks a rolling seven-day Token total. Its Session count uses the same window and counts each root Session with at least one Token event during those seven days. Lifetime Token and Session totals remain available in the private local dashboard and public profile; they are not used as the Leaderboard's weekly Session figure. Older clients can continue uploading, but the Leaderboard shows their seven-day Session count as pending until a compatible client reports it.
+
 ## Install with an Agent
 
 Attach [INSTALL_WITH_AGENT.md](INSTALL_WITH_AGENT.md) to Codex, Claude Code, or another capable local coding Agent. The file is an executable installation prompt that covers host detection, tests, restart approval boundaries, Accessibility, installation, and real runtime verification.

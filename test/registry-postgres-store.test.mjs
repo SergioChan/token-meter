@@ -51,7 +51,7 @@ test("Postgres store keeps the newest signed usage snapshot", async () => {
       ...alice,
       handle: "casey",
       days: [{ date: "2026-08-13", total: 5_000_000 }],
-      stats: { lifetimeTokens: 9_000_000, sessionCount: 4 },
+      stats: { lifetimeTokens: 9_000_000, sessionCount: 4, sessionsLast7Days: 2 },
       weekTokens: 5_000_000,
     };
     assert.deepEqual(
@@ -69,11 +69,25 @@ test("Postgres store keeps the newest signed usage snapshot", async () => {
       }),
       { accepted: true, ignored: true },
     );
+    assert.deepEqual(
+      await store.report({
+        ...base,
+        stats: { lifetimeTokens: 10_000_000, sessionCount: 5 },
+        weekTokens: 6_000_000,
+        generatedAtMs: 300,
+        nowMs: 301,
+      }),
+      { accepted: true, ignored: false },
+    );
 
     const profile = await store.profile("casey");
-    assert.equal(profile.weekTokens, 5_000_000);
-    assert.equal(profile.stats.lifetimeTokens, 9_000_000);
-    assert.equal((await store.leaderboard())[0].name, "@casey");
+    assert.equal(profile.weekTokens, 6_000_000);
+    assert.equal(profile.stats.lifetimeTokens, 10_000_000);
+    assert.equal(profile.stats.sessionsLast7Days, 2);
+    const row = (await store.leaderboard())[0];
+    assert.equal(row.name, "@casey");
+    assert.equal(row.sessions, 2);
+    assert.equal(row.sessionWindowDays, 7);
     assert.deepEqual(await store.health(), { meters: 1 });
   } finally {
     await store.close();
@@ -128,7 +142,7 @@ test("Postgres store hashes one-time pairings and resolves authenticated rank", 
     const base = {
       handle: null,
       days: [{ date: "2026-08-13", total: 1 }],
-      stats: { lifetimeTokens: 1, sessionCount: 1 },
+      stats: { lifetimeTokens: 1, sessionCount: 1, sessionsLast7Days: 1 },
       generatedAtMs: 500,
       nowMs: 501,
     };
@@ -141,6 +155,8 @@ test("Postgres store hashes one-time pairings and resolves authenticated rank", 
     assert.equal(viewer.rank, 2);
     assert.equal(viewer.totalMeters, 2);
     assert.equal(viewer.tokens, 10_000);
+    assert.equal(viewer.sessions, 1);
+    assert.equal(viewer.sessionWindowDays, 7);
     assert.equal(viewer.rowId, (await store.leaderboard())[1].rowId);
     assert.equal(await store.revokeBrowserSession(sessionTokenHash), true);
     assert.equal(

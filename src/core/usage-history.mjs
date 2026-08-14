@@ -18,6 +18,14 @@ const MS_PER_DAY = 86_400_000;
 const JSONL_CHUNK_BYTES = 1024 * 1024;
 const MAX_JSONL_LINE_CHARS = 8 * 1024 * 1024;
 
+export function dateFallsInTrailingWindow(date, nowMs, days = 7) {
+  const bucketMs = Date.parse(`${date}T12:00:00`);
+  return (
+    Number.isFinite(bucketMs) &&
+    bucketMs >= nowMs - days * MS_PER_DAY
+  );
+}
+
 export function defaultSourceRoots() {
   const home = homedir();
   return {
@@ -390,6 +398,8 @@ export class UsageHistory {
           tokens: summary.totalTokens,
           durationMs: summary.lastMs - summary.firstMs,
           startMs: summary.firstMs,
+          lastMs: summary.lastMs,
+          activeDates: Object.keys(summary.days),
         });
       }
       for (let hour = 0; hour < 24; hour += 1) hours[hour] += summary.hours[hour];
@@ -416,7 +426,14 @@ export class UsageHistory {
     }
 
     const sortedDays = [...days.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
-    const stats = this.#stats(sortedDays, hours, sessions, totals, byPlatform);
+    const stats = this.#stats(
+      sortedDays,
+      hours,
+      sessions,
+      totals,
+      byPlatform,
+      startMs,
+    );
     return {
       generatedAtMs: this.now(),
       scanMs: this.now() - startMs,
@@ -429,7 +446,7 @@ export class UsageHistory {
     };
   }
 
-  #stats(days, hours, sessions, totals, byPlatform) {
+  #stats(days, hours, sessions, totals, byPlatform, nowMs) {
     const active = days.filter((day) => day.total > 0);
     const peakDay = active.reduce((max, day) => (day.total > (max?.total ?? 0) ? day : max), null);
 
@@ -444,8 +461,8 @@ export class UsageHistory {
       previousMs = dayMs;
     }
     if (active.length > 0) {
-      const todayKey = localDateKey(this.now());
-      const yesterdayKey = localDateKey(this.now() - MS_PER_DAY);
+      const todayKey = localDateKey(nowMs);
+      const yesterdayKey = localDateKey(nowMs - MS_PER_DAY);
       const lastActive = active.at(-1).date;
       currentStreak = lastActive === todayKey || lastActive === yesterdayKey ? run : 0;
     }
@@ -480,6 +497,11 @@ export class UsageHistory {
       currentStreakDays: currentStreak,
       longestStreakDays: longestStreak,
       sessionCount: sessions.length,
+      sessionsLast7Days: sessions.filter(
+        (session) => session.activeDates.some((date) =>
+          dateFallsInTrailingWindow(date, nowMs),
+        ),
+      ).length,
       medianSessionTokens,
       largestSessionTokens: largestSession?.tokens ?? 0,
       longestSessionMs: longestSession?.durationMs ?? 0,

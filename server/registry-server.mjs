@@ -88,11 +88,14 @@ function normalizeUsagePayload(payload, nowMs) {
   }
   const stats = payload.stats;
   const peakDay = stats?.peakDay;
+  const sessionsLast7Days = stats?.sessionsLast7Days;
   if (
     stats == null ||
     typeof stats !== "object" ||
     !safeInteger(stats.lifetimeTokens) ||
     !safeInteger(stats.sessionCount) ||
+    (sessionsLast7Days != null &&
+      (!safeInteger(sessionsLast7Days) || sessionsLast7Days > stats.sessionCount)) ||
     !safeInteger(stats.currentStreakDays) ||
     !safeInteger(stats.longestStreakDays) ||
     stats.byPlatform == null ||
@@ -115,6 +118,7 @@ function normalizeUsagePayload(payload, nowMs) {
       currentStreakDays: stats.currentStreakDays,
       longestStreakDays: stats.longestStreakDays,
       sessionCount: stats.sessionCount,
+      sessionsLast7Days: sessionsLast7Days ?? null,
       peakDay:
         peakDay == null
           ? null

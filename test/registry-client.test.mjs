@@ -3,12 +3,54 @@ import test from "node:test";
 import {
   createLeaderboardUrl,
   isNewerVersion,
+  uploadUsage,
 } from "../src/core/registry-client.mjs";
 import {
   createIdentity,
   verifySignedPayload,
 } from "../src/core/identity.mjs";
 import { communityWebBase } from "../src/core/registry-config.mjs";
+
+test("usage uploads sign the rolling seven-day session count", async () => {
+  const previousRegistry = process.env.TOKEN_METER_REGISTRY_URL;
+  const previousFetch = globalThis.fetch;
+  const identity = createIdentity(1_000);
+  let signed = null;
+  try {
+    process.env.TOKEN_METER_REGISTRY_URL = "https://registry.example";
+    globalThis.fetch = async (_url, options) => {
+      signed = JSON.parse(options.body);
+      return new Response(JSON.stringify({ ok: true, ignored: false }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    await uploadUsage(identity, {
+      generatedAtMs: Date.now(),
+      days: [],
+      stats: {
+        lifetimeTokens: 100,
+        currentStreakDays: 2,
+        longestStreakDays: 3,
+        sessionCount: 9,
+        sessionsLast7Days: 4,
+        peakDay: null,
+        byPlatform: {
+          claudeCode: { tokens: 40 },
+          codex: { tokens: 60 },
+          cline: { tokens: 0 },
+        },
+      },
+    });
+    assert.equal(verifySignedPayload(signed), true);
+    assert.equal(signed.payload.stats.sessionCount, 9);
+    assert.equal(signed.payload.stats.sessionsLast7Days, 4);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousRegistry == null) delete process.env.TOKEN_METER_REGISTRY_URL;
+    else process.env.TOKEN_METER_REGISTRY_URL = previousRegistry;
+  }
+});
 
 test("isNewerVersion compares strict x.y.z", () => {
   assert.equal(isNewerVersion("0.2.0", "0.1.0"), true);

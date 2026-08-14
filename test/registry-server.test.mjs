@@ -34,6 +34,7 @@ function usageReport(identity, total) {
     stats: {
       lifetimeTokens: total,
       sessionCount: 1,
+      sessionsLast7Days: 1,
       currentStreakDays: 1,
       longestStreakDays: 1,
       peakDay: { date: "2026-08-13", tokens: total },
@@ -107,7 +108,7 @@ test("signed usage reports feed leaderboard and profile", async () => {
     const report = signPayload(identity, {
       kind: "usage", meterId: identity.meterId, publicKey: identity.publicKey, handle: "casey",
       generatedAtMs: nowMs, days: [{ date: "2026-08-13", total: 5_000_000 }],
-      stats: { lifetimeTokens: 9_000_000, sessionCount: 4, currentStreakDays: 2,
+      stats: { lifetimeTokens: 9_000_000, sessionCount: 4, sessionsLast7Days: 2, currentStreakDays: 2,
         longestStreakDays: 3, peakDay: { date: "2026-08-13", tokens: 5_000_000 },
         byPlatform: { claudeCode: 9_000_000, codex: 0, cline: 0 } },
       weekTokens: 5_000_000,
@@ -117,6 +118,8 @@ test("signed usage reports feed leaderboard and profile", async () => {
     const board = await (await fetch(`${base}/api/v1/leaderboard`)).json();
     assert.equal(board.rows[0].name, "@casey");
     assert.equal(board.rows[0].tokens, 5_000_000);
+    assert.equal(board.rows[0].sessions, 2);
+    assert.equal(board.rows[0].sessionWindowDays, 7);
 
     const profile = await (await fetch(`${base}/api/v1/profile/casey`)).json();
     assert.equal(profile.stats.lifetimeTokens, 9_000_000);
@@ -198,6 +201,8 @@ test("passwordless browser pairing is signed, one-time, and resolves the viewer 
     assert.equal(me.viewer.rank, 2);
     assert.equal(me.viewer.totalMeters, 2);
     assert.equal(me.viewer.tokens, 10_000);
+    assert.equal(me.viewer.sessions, 1);
+    assert.equal(me.viewer.sessionWindowDays, 7);
     assert.equal(me.viewer.sharingReported, true);
     const board = await (await fetch(`${base}/api/v1/leaderboard`)).json();
     assert.equal(board.rows[1].rowId, me.viewer.rowId);
@@ -282,6 +287,8 @@ test("stale reports are rejected and older snapshots cannot replace newer data",
 
     const board = await (await fetch(`${base}/api/v1/leaderboard`)).json();
     assert.equal(board.rows[0].tokens, 10_000);
+    assert.equal(board.rows[0].sessions, null);
+    assert.equal(board.rows[0].sessionWindowDays, 7);
   } finally {
     await server.stop();
   }

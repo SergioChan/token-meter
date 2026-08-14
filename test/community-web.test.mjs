@@ -16,7 +16,10 @@ test("community leaderboard uses live data and passwordless browser pairing", as
   assert.match(html, /\/api\/v1\/browser-sessions/);
   assert.match(html, /\/api\/v1\/me/);
   assert.match(html, /entry\.rowId === viewer\?\.rowId/);
-  assert.match(html, /You’re #\$\{viewer\.rank\} this week/);
+  assert.match(html, /You’re #\$\{viewer\.rank\} in the past 7 days/);
+  assert.match(html, /row\.sessionWindowDays === 7/);
+  assert.match(html, /viewer\.sessionWindowDays === 7/);
+  assert.match(html, /7-day sessions pending/);
   assert.match(html, /<span class="you-badge">you<\/span>/);
   assert.doesNotThrow(() => new Function(scripts[0]));
 });

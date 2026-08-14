@@ -83,7 +83,8 @@ function publicMeterRow(meterId, meter) {
     handle: meter.handle ?? null,
     tokens: meter.weekTokens ?? 0,
     lifetimeTokens: meter.stats?.lifetimeTokens ?? 0,
-    sessions: meter.stats?.sessionCount ?? 0,
+    sessions: meter.stats?.sessionsLast7Days ?? null,
+    sessionWindowDays: 7,
     updatedAtMs: meter.updatedAtMs,
   };
 }
@@ -194,7 +195,11 @@ export class FileRegistryStore {
     }
     meter.publicKey = publicKey;
     meter.days = days;
-    meter.stats = stats;
+    meter.stats = {
+      ...stats,
+      sessionsLast7Days:
+        stats.sessionsLast7Days ?? meter.stats?.sessionsLast7Days ?? null,
+    };
     meter.weekTokens = weekTokens;
     meter.generatedAtMs = generatedAtMs;
     if (handle && this.data.handles[handle]?.meterId === meterId) {
@@ -271,7 +276,8 @@ export class FileRegistryStore {
       rank: index >= 0 ? index + 1 : null,
       totalMeters: sorted.length,
       tokens: meter?.weekTokens ?? 0,
-      sessions: meter?.stats?.sessionCount ?? 0,
+      sessions: meter?.stats?.sessionsLast7Days ?? null,
+      sessionWindowDays: 7,
       sharingReported: meter != null,
       expiresAtMs: session.expiresAtMs,
     };
@@ -416,7 +422,7 @@ export class PostgresRegistryStore {
         [meterId, publicKey, nowMs],
       );
       const current = await client.query(
-        `SELECT public_key, generated_at_ms
+        `SELECT public_key, generated_at_ms, stats
          FROM registry_meters
          WHERE meter_id = $1
          FOR UPDATE`,
@@ -443,6 +449,11 @@ export class PostgresRegistryStore {
         );
         claimedHandle = claim.rows[0]?.handle ?? null;
       }
+      const normalizedStats = {
+        ...stats,
+        sessionsLast7Days:
+          stats.sessionsLast7Days ?? meter.stats?.sessionsLast7Days ?? null,
+      };
       await client.query(
         `UPDATE registry_meters
          SET public_key = $2,
@@ -458,7 +469,7 @@ export class PostgresRegistryStore {
           publicKey,
           claimedHandle,
           JSON.stringify(days),
-          JSON.stringify(stats),
+          JSON.stringify(normalizedStats),
           weekTokens,
           generatedAtMs,
           nowMs,
@@ -621,7 +632,8 @@ export class PostgresRegistryStore {
       rank,
       totalMeters: Number(totalResult.rows[0].total),
       tokens: asNumber(meter?.week_tokens) ?? 0,
-      sessions: meter?.stats?.sessionCount ?? 0,
+      sessions: meter?.stats?.sessionsLast7Days ?? null,
+      sessionWindowDays: 7,
       sharingReported: meter != null,
       expiresAtMs: Number(session.expires_at_ms),
     };
@@ -649,7 +661,8 @@ export class PostgresRegistryStore {
       handle: meter.handle ?? null,
       tokens: asNumber(meter.week_tokens) ?? 0,
       lifetimeTokens: meter.stats?.lifetimeTokens ?? 0,
-      sessions: meter.stats?.sessionCount ?? 0,
+      sessions: meter.stats?.sessionsLast7Days ?? null,
+      sessionWindowDays: 7,
       updatedAtMs: asNumber(meter.updated_at_ms),
     }));
   }

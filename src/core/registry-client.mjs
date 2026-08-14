@@ -1,6 +1,9 @@
 import { signPayload, markHandleClaimed } from "./identity.mjs";
 import { communityWebBase, registryBase } from "./registry-config.mjs";
-import { UsageHistory } from "./usage-history.mjs";
+import {
+  UsageHistory,
+  dateFallsInTrailingWindow,
+} from "./usage-history.mjs";
 
 const FETCH_TIMEOUT_MS = 10_000;
 
@@ -101,7 +104,6 @@ export async function uploadUsage(identity, usage = null) {
     date: day.date,
     total: day.total,
   }));
-  const cutoff = Date.now() - 7 * 86_400_000;
   const signed = signPayload(identity, {
     kind: "usage",
     meterId: identity.meterId,
@@ -114,6 +116,7 @@ export async function uploadUsage(identity, usage = null) {
       currentStreakDays: stats.currentStreakDays,
       longestStreakDays: stats.longestStreakDays,
       sessionCount: stats.sessionCount,
+      sessionsLast7Days: stats.sessionsLast7Days,
       peakDay: stats.peakDay,
       byPlatform: {
         claudeCode: stats.byPlatform.claudeCode.tokens,
@@ -122,7 +125,9 @@ export async function uploadUsage(identity, usage = null) {
       },
     },
     weekTokens: days
-      .filter((day) => Date.parse(`${day.date}T12:00:00`) >= cutoff)
+      .filter((day) =>
+        dateFallsInTrailingWindow(day.date, collected.generatedAtMs),
+      )
       .reduce((sum, day) => sum + day.total, 0),
   });
   return call("/api/v1/report", {
