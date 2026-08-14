@@ -505,8 +505,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Stats view: the bottom section swaps in place; total card height is fixed. */
-.stats-view:not(.collapsed) .stats-panel:not([hidden]) {
+/* Stats view: the bottom section swaps in place; total card height is fixed.
+   Never while settings are open — this rule is later in the file than the
+   settings-open hide-all rule and would otherwise out-cascade it. */
+.stats-view:not(.collapsed):not(.settings-open) .stats-panel:not([hidden]) {
   display: grid;
   box-sizing: border-box;
   align-content: center;

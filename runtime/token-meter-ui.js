@@ -575,6 +575,14 @@
       elements.settingsAnon.hidden = false;
     }
     elements.settingsClaim.hidden = Boolean(snapshot.meterHandle) || !snapshot.meterId;
+    versionLabel = snapshot.appVersion
+      ? `Token Widget v${snapshot.appVersion}` +
+        (snapshot.updateInfo?.version ? ` · v${snapshot.updateInfo.version} available` : "")
+      : "";
+    const tipText = elements.settingsTip.textContent;
+    if (!tipText || tipText.startsWith("Token Widget v")) {
+      elements.settingsTip.textContent = versionLabel;
+    }
     if (Date.now() - sharingToggledAtMs > 3000) {
       setPrivacyUI(Boolean(snapshot.sharingEnabled));
     }
@@ -682,6 +690,9 @@
   let sharingToggledAtMs = 0;
   const setSettingsOpen = (open) => {
     settingsOpen = open;
+    // The stats view shares the card's fixed height; leaving it up under the
+    // settings panel pushes content past the panel edge and truncates it.
+    if (open) setStatsView(false);
     card.classList.toggle("settings-open", open);
     elements.settingsPanel.hidden = !open;
   };
@@ -749,10 +760,13 @@
     postAction({ type: "dismiss-handle-prompt" });
   });
   let tipLockedUntilMs = 0;
+  // The tip line doubles as the version area: whenever no hover tip or
+  // transient message owns it, it shows the installed version.
+  let versionLabel = "";
   const showTip = (text, lockMs = 0) => {
     if (lockMs === 0 && Date.now() < tipLockedUntilMs) return;
     tipLockedUntilMs = Date.now() + lockMs;
-    elements.settingsTip.textContent = text;
+    elements.settingsTip.textContent = text || versionLabel;
   };
   const tips = [
     [elements.settingsShare, "Copy the install link to your clipboard and refer friends"],

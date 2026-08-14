@@ -223,6 +223,7 @@ for await (const line of input) {
       throw new TypeError("desktopSessionId must be a string");
     }
     const snapshot = await runtime.snapshot(request.desktopSessionId);
+    snapshot.appVersion = installedVersion;
     if (updateInfo) snapshot.updateInfo = { version: updateInfo.version };
     await writeLine({ requestId, snapshot });
   } catch (error) {

@@ -392,3 +392,89 @@ test("expanded hosts render Session skill status lights", async () => {
   reveal.click();
   assert.equal(panel.classList.contains("labels-visible"), true);
 });
+
+test("opening settings closes the stats view and shows the installed version", async () => {
+  const source = (
+    await readFile(new URL("../runtime/token-meter-ui.js", import.meta.url), "utf8")
+  ).replace("__TOKEN_METER_CSS_JSON__", JSON.stringify(""));
+  const created = [];
+  const documentElement = new FakeElement("html");
+  documentElement.isConnected = true;
+  const actions = [];
+  const window = {
+    innerWidth: 1_200,
+    innerHeight: 800,
+    addEventListener() {},
+    localStorage: { getItem() { return null; }, setItem() {} },
+    webkit: {
+      messageHandlers: {
+        tokenMeterAction: { postMessage(value) { actions.push(value); } },
+      },
+    },
+  };
+  const context = vm.createContext({
+    document: {
+      createElement(tagName) {
+        const element = new FakeElement(tagName);
+        created.push(element);
+        return element;
+      },
+      documentElement,
+    },
+    window,
+    MutationObserver: class {
+      observe() {}
+      disconnect() {}
+    },
+    performance: { now: () => 0 },
+    requestAnimationFrame() {},
+    clearTimeout() {},
+    setTimeout() {},
+  });
+
+  vm.runInContext(source, context);
+  const card = created.find((element) => element.tagName === "section");
+  const statsPanel = card.querySelector(".stats-panel");
+  const settingsPanel = card.querySelector(".meter-settings");
+  const settingsToggle = card.querySelector(".settings-toggle");
+  const settingsTip = card.querySelector(".settings-tip");
+
+  const snapshot = (extra = {}) => ({
+    status: "bound",
+    binding: { exact: true },
+    sessionId: "session-settings",
+    session: { totalTokens: 10, lastHourTokens: 10 },
+    turn: { tokens: 10 },
+    context: { tokens: 10, windowTokens: 100, percent: 10, compactionCount: 0 },
+    account: { lastHourTokens: 10 },
+    rate: { tokensPerMinute: 1, intensity: 0, band: "green" },
+    anomaly: { level: "learning", baseline: { medianTokensPerMinute: 0 } },
+    appVersion: "9.9.9",
+    ...extra,
+  });
+  window.__tokenMeter.update(snapshot());
+
+  // The tip line idles on the installed version.
+  assert.equal(settingsTip.textContent, "Token Widget v9.9.9");
+
+  // Open the in-place stats view via the bottom toggle.
+  card.dispatch("click", {
+    target: { closest: (selector) => (selector === ".bottom-toggle" ? card : null) },
+  });
+  assert.equal(card.classList.contains("stats-view"), true);
+  assert.equal(statsPanel.hidden, false);
+
+  // Opening settings must retire the stats view, not stack on top of it.
+  settingsToggle.click();
+  assert.equal(card.classList.contains("settings-open"), true);
+  assert.equal(settingsPanel.hidden, false);
+  assert.equal(card.classList.contains("stats-view"), false);
+  assert.equal(statsPanel.hidden, true);
+
+  // An available update joins the version line.
+  window.__tokenMeter.update(snapshot({ updateInfo: { version: "9.9.10" } }));
+  assert.equal(
+    settingsTip.textContent,
+    "Token Widget v9.9.9 · v9.9.10 available",
+  );
+});
