@@ -15,6 +15,18 @@
       "destination": "https://api.tokenwidget.app/download/:path*"
     },
     {
+      "source": "/dashboard",
+      "destination": "/dashboard.html"
+    },
+    {
+      "source": "/leaderboard",
+      "destination": "/leaderboard.html"
+    },
+    {
+      "source": "/profile",
+      "destination": "/profile.html"
+    },
+    {
       "source": "/u/:handle",
       "destination": "/profile.html"
     }
