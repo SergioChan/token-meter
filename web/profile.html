@@ -60,6 +60,9 @@
   .cal-head .when { color: var(--graphite); font-size: 12.5px; }
   .calendar-wrap { overflow-x: auto; padding-bottom: 4px; }
   .calendar { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 11px); gap: 3px; width: max-content; margin: 0 auto; }
+  .months { display: flex; width: max-content; margin: 6px auto 0; color: var(--graphite); font-size: 11px; }
+  .months span { width: 14px; flex: 0 0 14px; }
+  .months span.label { overflow: visible; }
   .cell { width: 11px; height: 11px; border-radius: 2.5px; background: var(--fog); }
   .cell[data-l="1"] { background: var(--cell-1); }
   .cell[data-l="2"] { background: var(--olive); }
@@ -121,7 +124,7 @@
 
     <section class="panel">
       <div class="cal-head"><h2>Token activity</h2><span class="when" id="updated"></span></div>
-      <div class="calendar-wrap"><div class="calendar" id="calendar"></div></div>
+      <div class="calendar-wrap"><div class="calendar" id="calendar"></div><div class="months" id="months"></div></div>
       <div class="cal-legend">Less
         <span class="cell" data-l="0"></span><span class="cell" data-l="1"></span><span class="cell" data-l="2"></span><span class="cell" data-l="3"></span><span class="cell" data-l="4"></span>
       More</div>
@@ -294,26 +297,46 @@
     const q = (p) => (nonzero.length ? nonzero[Math.min(nonzero.length - 1, Math.floor(nonzero.length * p))] : Infinity);
     const t1 = q(0.25), t2 = q(0.5), t3 = q(0.75);
     const level = (t) => (t <= 0 ? 0 : t >= t3 ? 4 : t >= t2 ? 3 : t >= t1 ? 2 : 1);
+    // Full-year strip, same window as the local dashboard: weeks before the
+    // uploaded history simply render empty.
     const calendar = el("calendar");
     const now = new Date();
-    const WINDOW = 119;
+    const WINDOW = 371;
     const first = new Date(now);
     first.setDate(first.getDate() - (WINDOW - 1));
-    for (let pad = 0; pad < first.getDay(); pad += 1) {
+    const leading = first.getDay();
+    for (let pad = 0; pad < leading; pad += 1) {
       const cell = document.createElement("span");
       cell.className = "cell";
       cell.style.visibility = "hidden";
       calendar.append(cell);
     }
+    const cellDates = [];
     for (let i = WINDOW - 1; i >= 0; i -= 1) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
+      cellDates.push(d);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       const cell = document.createElement("span");
       cell.className = "cell";
       cell.dataset.l = String(level(totals[key] || 0));
       cell.title = `${key} — ${(totals[key] || 0).toLocaleString()} tokens`;
       calendar.append(cell);
+    }
+    const monthsHost = el("months");
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let lastMonth = -1;
+    const weeks = Math.ceil((leading + WINDOW) / 7);
+    for (let week = 0; week < weeks; week += 1) {
+      const index = Math.min(cellDates.length - 1, Math.max(0, week * 7 - leading));
+      const month = cellDates[index].getMonth();
+      const label = document.createElement("span");
+      if (month !== lastMonth) {
+        label.textContent = monthNames[month];
+        label.className = "label";
+        lastMonth = month;
+      }
+      monthsHost.append(label);
     }
 
     /* by platform — tokens plus sessions when the newer payload has them */
