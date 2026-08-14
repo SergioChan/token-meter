@@ -105,6 +105,13 @@ export async function uploadUsage(identity, usage = null) {
     total: day.total,
   }));
   const share = (value) => Math.round((value ?? 0) * 10_000) / 10_000;
+  // Optional fields are null, never undefined: canonicalize() must produce
+  // the same bytes before signing and after the JSON round-trip.
+  const platformSessions = [
+    stats.byPlatform.claudeCode.sessions,
+    stats.byPlatform.codex.sessions,
+    stats.byPlatform.cline.sessions,
+  ];
   const signed = signPayload(identity, {
     kind: "usage",
     meterId: identity.meterId,
@@ -117,8 +124,8 @@ export async function uploadUsage(identity, usage = null) {
       currentStreakDays: stats.currentStreakDays,
       longestStreakDays: stats.longestStreakDays,
       sessionCount: stats.sessionCount,
-      sessionsLast7Days: stats.sessionsLast7Days,
-      peakDay: stats.peakDay,
+      sessionsLast7Days: stats.sessionsLast7Days ?? null,
+      peakDay: stats.peakDay ?? null,
       byPlatform: {
         claudeCode: stats.byPlatform.claudeCode.tokens,
         codex: stats.byPlatform.codex.tokens,
@@ -126,24 +133,26 @@ export async function uploadUsage(identity, usage = null) {
       },
       // Aggregate-only extras so the community profile can mirror the local
       // dashboard. Servers before v0.3 drop unknown fields on validation.
-      daysActive: stats.daysActive,
-      daysObserved: stats.daysObserved,
-      avgPerActiveDay: stats.avgPerActiveDay,
-      firstActivityDate: stats.firstActivityDate,
-      medianSessionTokens: stats.medianSessionTokens,
-      largestSessionTokens: stats.largestSessionTokens,
-      longestSessionMs: stats.longestSessionMs,
+      daysActive: stats.daysActive ?? null,
+      daysObserved: stats.daysObserved ?? null,
+      avgPerActiveDay: stats.avgPerActiveDay ?? null,
+      firstActivityDate: stats.firstActivityDate ?? null,
+      medianSessionTokens: stats.medianSessionTokens ?? null,
+      largestSessionTokens: stats.largestSessionTokens ?? null,
+      longestSessionMs: stats.longestSessionMs ?? null,
       cacheReadShare: share(stats.cacheReadShare),
       outputShare: share(stats.outputShare),
-      peakHour: stats.peakHour,
-      busiestWeekday: stats.busiestWeekday,
-      hours: collected.hours,
-      topDays: stats.topDays,
-      byPlatformSessions: {
-        claudeCode: stats.byPlatform.claudeCode.sessions,
-        codex: stats.byPlatform.codex.sessions,
-        cline: stats.byPlatform.cline.sessions,
-      },
+      peakHour: stats.peakHour ?? null,
+      busiestWeekday: stats.busiestWeekday ?? null,
+      hours: collected.hours ?? null,
+      topDays: stats.topDays ?? null,
+      byPlatformSessions: platformSessions.every((value) => value != null)
+        ? {
+            claudeCode: platformSessions[0],
+            codex: platformSessions[1],
+            cline: platformSessions[2],
+          }
+        : null,
     },
     weekTokens: days
       .filter((day) =>

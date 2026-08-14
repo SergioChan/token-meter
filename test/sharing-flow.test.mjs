@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { RegistryServer } from "../server/registry-server.mjs";
 import { DashboardServer, handleCandidates } from "../src/core/dashboard-server.mjs";
 import { createIdentity, isValidHandle, loadOrCreateIdentity, signPayload } from "../src/core/identity.mjs";
+import { dateFallsInTrailingWindow } from "../src/core/usage-history.mjs";
 
 const DAY_MS = 86_400_000;
 
@@ -40,6 +41,7 @@ function usageFixture(daysBack, perDay = 1_000) {
       currentStreakDays: daysBack,
       longestStreakDays: daysBack,
       sessionCount: daysBack * 2,
+      sessionsLast7Days: Math.min(daysBack, 7) * 2,
       medianSessionTokens: Math.round(perDay / 2),
       largestSessionTokens: perDay,
       longestSessionMs: 3_600_000,
@@ -144,7 +146,11 @@ test("long-time local user shares later: months of history upload in one publish
     assert.equal(profile.days.length, 119); // capped upload window
     assert.equal(profile.stats.lifetimeTokens, 300_000);
     assert.equal(profile.stats.firstActivityDate, usageFixture(150).stats.firstActivityDate);
-    assert.equal(profile.weekTokens, 7 * 2_000);
+    const expectedWeek = usageFixture(150, 2_000)
+      .days.slice(-119)
+      .filter((day) => dateFallsInTrailingWindow(day.date, Date.now()))
+      .reduce((sum, day) => sum + day.total, 0);
+    assert.equal(profile.weekTokens, expectedWeek);
   } finally {
     await world.stop();
   }
