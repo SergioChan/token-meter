@@ -13,7 +13,7 @@ LABEL="com.sergiochan.token-meter.claude-desktop"
 PLIST="$LAUNCH_AGENTS_DIR/$LABEL.plist"
 DOMAIN="gui/$(/usr/bin/id -u)"
 LAUNCHCTL="${TOKEN_METER_LAUNCHCTL:-/bin/launchctl}"
-EXECUTABLE="$INSTALL_ROOT/Token Meter for Claude.app/Contents/MacOS/TokenMeterClaudeOverlay"
+EXECUTABLE="$INSTALL_ROOT/Token Widget for Claude.app/Contents/MacOS/TokenMeterClaudeOverlay"
 HEALTH_FILE="$STATE_DIR/health.json"
 JSON=false
 

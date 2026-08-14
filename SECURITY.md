@@ -44,7 +44,7 @@ The Claude integration is designed to defend against accidental Session confusio
 
 - Verifies the canonical Claude.app path, bundle ID, signature, Anthropic Team ID, executable, and packaged model catalog before installation.
 - Builds a separate background application with its own bundle ID; it does not patch, inject into, replace, or re-sign Claude.app.
-- Requires Accessibility permission for `Token Meter for Claude.app` itself.
+- Requires Accessibility permission for `Token Widget for Claude.app` itself.
 - Requires exactly one eligible `AXWebArea` in the frontmost Claude focused window; links, extra route components, and multiple candidates fail closed.
 - Reads Accessibility roles and the exact WebArea URL for identity, then only button titles inside that same web area for an optional strict Context-window ratio. It does not read static text, values, descriptions, or message bodies.
 - Hides when Claude is not frontmost or when exact Session identity is missing or ambiguous.
@@ -57,7 +57,7 @@ Accessibility permission allows the companion to inspect UI elements exposed by 
 
 Source builds are ad-hoc signed by default. Their code identity can change after rebuilding, which may require renewed Accessibility approval. They also record the selected external Node.js path; if that runtime is later removed, rerun the installer with a compatible runtime.
 
-Deleting the application does not automatically delete its macOS TCC decision. Revoke **Token Meter for Claude** in System Settings, or uninstall with `./scripts/uninstall-claude-meter-macos.sh --purge-state --reset-accessibility`.
+Deleting the application does not automatically delete its macOS TCC decision. Revoke **Token Widget for Claude** in System Settings, or uninstall with `./scripts/uninstall-claude-meter-macos.sh --purge-state --reset-accessibility`.
 
 ### Community identity and browser sessions
 

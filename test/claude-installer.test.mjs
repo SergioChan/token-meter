@@ -68,7 +68,7 @@ test(
     );
     assert.doesNotMatch(installResult.stderr, /grep:/i);
 
-    const app = path.join(installRoot, "Token Meter for Claude.app");
+    const app = path.join(installRoot, "Token Widget for Claude.app");
     await Promise.all([
       access(path.join(app, "Contents", "MacOS", "TokenMeterClaudeOverlay")),
       access(path.join(installRoot, "src", "cli.mjs")),
@@ -89,7 +89,7 @@ test(
       ),
       "utf8",
     );
-    assert.match(plist, /Token Meter for Claude\.app/);
+    assert.match(plist, /Token Widget for Claude\.app/);
     assert.match(plist, new RegExp(nodePath.replaceAll("/", "\\/")));
     assert.equal(existsSync(stateDirectory), true);
 

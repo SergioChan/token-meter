@@ -1,4 +1,4 @@
-# Install Token Meter for Claude Code in Claude Desktop
+# Install Token Widget for Claude Code in Claude Desktop
 
 Token Meter supports the Code surface inside Claude Desktop on macOS through an independent native overlay. The companion follows the focused Claude window, reads the exact selected `local_<uuid>` through macOS Accessibility, maps it to local Claude Code usage, and hides when that identity cannot be proven.
 
@@ -13,7 +13,7 @@ The Claude integration is source-distributed. Each developer compiles and ad-hoc
 - Git.
 - Node.js 22.12 or newer.
 - Xcode Command Line Tools with Swift.
-- Permission to enable **Token Meter for Claude** in System Settings > Privacy & Security > Accessibility.
+- Permission to enable **Token Widget for Claude** in System Settings > Privacy & Security > Accessibility.
 
 Check all local build prerequisites:
 
@@ -40,7 +40,7 @@ Or select Node.js explicitly:
 The installer performs these operations:
 
 1. Verifies the canonical Claude.app path, bundle identifier, Anthropic Team ID, code signature, executable, and packaged model catalog.
-2. Builds and signs `Token Meter for Claude.app` as a separate background application. Source builds use ad-hoc signing unless a stable identity is supplied.
+2. Builds and signs `Token Widget for Claude.app` as a separate background application. Source builds use ad-hoc signing unless a stable identity is supplied.
 3. Copies the numerical collector, shared metrics core, and shared meter runtime into an isolated install root.
 4. Writes and loads `com.sergiochan.token-meter.claude-desktop` as a per-user LaunchAgent.
 5. Requests Accessibility permission for the companion application itself.
@@ -49,7 +49,7 @@ To build only the local app bundle for inspection:
 
 ```bash
 ./integrations/claude-desktop/scripts/build-app.sh \
-  --output "$PWD/local-artifacts/Token Meter for Claude.app"
+  --output "$PWD/local-artifacts/Token Widget for Claude.app"
 ```
 
 That bundle still expects the repository runtime and a compatible local Node.js path. Run the installer for the complete runtime copy and LaunchAgent configuration.
@@ -69,13 +69,13 @@ If installation reports `Accessibility permission: required`:
 
 1. Open System Settings.
 2. Go to **Privacy & Security > Accessibility**.
-3. Enable **Token Meter for Claude**.
+3. Enable **Token Widget for Claude**.
 4. Wait up to two seconds for the already-running companion to observe the new permission.
 
 If the application is not listed, request the system prompt again:
 
 ```bash
-open -n -a "$HOME/Library/Application Support/Token Meter/Claude Desktop/Token Meter for Claude.app" \
+open -n -a "$HOME/Library/Application Support/Token Meter/Claude Desktop/Token Widget for Claude.app" \
   --args --prompt-accessibility
 ```
 

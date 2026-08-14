@@ -62,7 +62,7 @@ Finish only when each selected host is installed and its real runtime status has
    ./scripts/status-claude-meter-macos.sh --json
    ```
 
-   - If `accessibilityGranted` is `false`, open System Settings > Privacy & Security > Accessibility and ask the user to enable **Token Meter for Claude**.
+   - If `accessibilityGranted` is `false`, open System Settings > Privacy & Security > Accessibility and ask the user to enable **Token Widget for Claude**.
    - After approval, wait up to 60 seconds, polling no faster than every five seconds, until `running`, `accessibilityGranted`, and `overlayReady` are all `true`.
    - Treat `bridgeHealthy` and `sessionBound` as foreground Session checks. They may correctly remain `false` while Claude is hidden or not showing Code.
    - Do not restart Claude while waiting.

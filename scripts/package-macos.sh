@@ -50,7 +50,7 @@ npm run claude:install
 echo
 bold "Installed!"
 echo "Final step (one time): System Settings > Privacy & Security > Accessibility"
-echo "  -> enable 'Token Meter for Claude' (add it with + from"
+echo "  -> enable 'Token Widget for Claude' (add it with + from"
 echo "     ~/Library/Application Support/Token Meter/Claude Desktop/ if missing)."
 echo
 echo "Then focus a Claude Code session in Claude Desktop and the meter appears."

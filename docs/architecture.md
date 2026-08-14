@@ -145,7 +145,7 @@ The controller remains alive across later Codex launches and sleep/wake. `RunAtL
 
 ## Claude macOS companion lifecycle
 
-The Claude installer builds and signs an independent `Token Meter for Claude.app`, copies the minimum runtime into the user's Application Support directory, and loads a per-user LaunchAgent. Source builds use ad-hoc signing unless a stable identity is supplied. The executable owns a non-activating `NSPanel`; it never executes code inside Claude's renderer.
+The Claude installer builds and signs an independent `Token Widget for Claude.app`, copies the minimum runtime into the user's Application Support directory, and loads a per-user LaunchAgent. Source builds use ad-hoc signing unless a stable identity is supplied. The executable owns a non-activating `NSPanel`; it never executes code inside Claude's renderer.
 
 macOS Accessibility permission is granted to the companion, not to the repository shell and not to Claude.app. The process writes atomic `health.json` state from startup onward. Status validates its PID against the exact executable, checks Accessibility live, and reports UI readiness, bridge health, and exact Session binding independently. A permission-blocked companion remains alive and reports a waiting process without falsely reporting trust. It detects both grant and revocation quietly; it neither repeats the system prompt nor quits or relaunches Claude.
 

@@ -16,7 +16,7 @@ test(
       path.join(os.tmpdir(), "token-meter-claude-app-"),
     );
     context.after(() => rm(directory, { recursive: true, force: true }));
-    const output = path.join(directory, "Token Meter for Claude.app");
+    const output = path.join(directory, "Token Widget for Claude.app");
     const builder = "integrations/claude-desktop/scripts/build-app.sh";
     await chmod(builder, 0o755);
     await execFileAsync(builder, ["--output", output]);

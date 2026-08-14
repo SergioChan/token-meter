@@ -166,13 +166,13 @@ The installer skips incompatible Node.js versions in common Homebrew, PATH, and 
 ./scripts/install-claude-meter-macos.sh --node /opt/homebrew/bin/node
 ```
 
-The app is built locally and ad-hoc signed by default. macOS may therefore ask for Accessibility approval again after a rebuild. Enable **Token Meter for Claude** when prompted; Claude remains running throughout installation.
+The app is built locally and ad-hoc signed by default. macOS may therefore ask for Accessibility approval again after a rebuild. Enable **Token Widget for Claude** when prompted; Claude remains running throughout installation.
 
 To build only the local `.app` bundle for inspection instead of installing it:
 
 ```bash
 ./integrations/claude-desktop/scripts/build-app.sh \
-  --output "$PWD/local-artifacts/Token Meter for Claude.app"
+  --output "$PWD/local-artifacts/Token Widget for Claude.app"
 ```
 
 The standalone build output still expects the repository runtime and a compatible local Node.js path; use the installer for the complete LaunchAgent configuration.
