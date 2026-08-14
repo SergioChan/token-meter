@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27 fill=%27none%27><path d=%27M20.5 51.92A23 23 0 1 1 43.5 51.92%27 stroke=%27%235b6f00%27 stroke-width=%277%27 stroke-linecap=%27round%27/><path d=%27M32 9A23 23 0 0 1 48.26 15.74%27 stroke=%27%23b2c248%27 stroke-width=%277%27 stroke-linecap=%27round%27/><line x1=%2732%27 y1=%2732%27 x2=%2742.6%27 y2=%2721.4%27 stroke=%27%235b6f00%27 stroke-width=%276%27 stroke-linecap=%27round%27/><circle cx=%2732%27 cy=%2732%27 r=%275%27 fill=%27%235b6f00%27/><circle cx=%2732%27 cy=%2755%27 r=%273.5%27 fill=%27%23b2c248%27/></svg>">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Widget — Profile</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --canvas: #f7f7f2; --card: #ffffff; --ink: #0e0f0c; --charcoal: #292929;
+    --slate: #72726e; --graphite: #818179; --ash: #e3e3e3; --stone: #d5d5d2;
+    --olive: #b2c248; --forest: #5b6f00; --fern: #788c15; --sprout: #e5eacd;
+    --serif: "Playfair Display", Georgia, serif;
+    --sans: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--canvas); color: var(--ink); font: 400 15px/1.5 var(--sans); letter-spacing: 0.01em; }
+  nav { position: sticky; top: 0; background: var(--card); border-bottom: 0.5px solid var(--stone); box-shadow: rgba(0,0,0,0.03) 0 0 36px; }
+  .nav-inner { display: flex; align-items: center; gap: 16px; max-width: 1200px; margin: 0 auto; padding: 12px 24px; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; color: var(--ink); text-decoration: none; }
+  .brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--olive); border: 1px solid var(--fern); }
+  .nav-links { display: flex; gap: 16px; margin-left: 24px; }
+  .nav-links a { color: var(--charcoal); font-size: 15px; text-decoration: none; }
+  .nav-links a:hover { color: var(--forest); }
+
+  main { max-width: 680px; margin: 0 auto; padding: 56px 24px 80px; text-align: center; }
+  .avatar { display: grid; place-items: center; width: 72px; height: 72px; margin: 0 auto 14px; background: var(--card); border: 1px solid var(--stone); border-radius: 50%; font: 700 14px ui-monospace, Menlo, monospace; color: var(--forest); }
+  h1 { margin: 0; font: 400 clamp(30px, 5vw, 44px)/1.1 var(--serif); letter-spacing: -0.5px; }
+  .badge { display: inline-block; margin-top: 12px; padding: 5px 14px; background: var(--sprout); border: 1px solid var(--stone); border-radius: 9999px; font-size: 13px; }
+
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 30px 0; }
+  .tile { background: var(--card); border: 1px solid var(--ash); border-radius: 8px; padding: 14px 8px; }
+  .tile strong { display: block; font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tile small { color: var(--slate); font-size: 12px; }
+
+  .cal-wrap { overflow-x: auto; padding: 20px; background: var(--card); border: 1px solid var(--ash); border-radius: 12px; }
+  .calendar { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 10px); gap: 3px; width: max-content; margin: 0 auto; }
+  .cell { width: 10px; height: 10px; border-radius: 2px; background: var(--canvas); border: 0.5px solid var(--ash); }
+  .cell[data-l="1"] { background: #dde5b8; border-color: transparent; }
+  .cell[data-l="2"] { background: var(--olive); border-color: transparent; }
+  .cell[data-l="3"] { background: var(--fern); border-color: transparent; }
+  .cell[data-l="4"] { background: var(--forest); border-color: transparent; }
+
+  .plats { margin-top: 24px; text-align: left; }
+  .plat { display: flex; justify-content: space-between; padding: 8px 2px; border-bottom: 0.5px solid var(--ash); font-size: 14px; }
+  .plat b { font-variant-numeric: tabular-nums; }
+  .empty { margin-top: 40px; color: var(--slate); }
+  footer { margin-top: 40px; color: var(--graphite); font-size: 13px; }
+</style>
+</head>
+<body>
+<nav>
+  <div class="nav-inner">
+    <a class="brand" href="/"><svg width="18" height="18" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M20.5 51.92A23 23 0 1 1 43.5 51.92" stroke="#5b6f00" stroke-width="7" stroke-linecap="round"/><path d="M32 9A23 23 0 0 1 48.26 15.74" stroke="#b2c248" stroke-width="7" stroke-linecap="round"/><line x1="32" y1="32" x2="42.6" y2="21.4" stroke="#5b6f00" stroke-width="6" stroke-linecap="round"/><circle cx="32" cy="32" r="5" fill="#5b6f00"/><circle cx="32" cy="55" r="3.5" fill="#b2c248"/></svg>Token Widget</a>
+    <div class="nav-links"><a href="/leaderboard">Leaderboard</a></div>
+  </div>
+</nav>
+<main>
+  <div class="avatar">TM</div>
+  <h1 id="handle">@—</h1>
+  <span class="badge" id="badge">Community member</span>
+  <section class="tiles">
+    <div class="tile"><strong id="s-week">—</strong><small>Past 7 days</small></div>
+    <div class="tile"><strong id="s-life">—</strong><small>Lifetime</small></div>
+    <div class="tile"><strong id="s-streak">—</strong><small>Streak</small></div>
+    <div class="tile"><strong id="s-sessions">—</strong><small>Sessions</small></div>
+  </section>
+  <div class="cal-wrap"><div class="calendar" id="calendar"></div></div>
+  <div class="plats" id="plats"></div>
+  <p class="empty" id="empty" hidden>No usage uploaded yet — data appears after the meter's next sync.</p>
+  <footer>Signed aggregate data, uploaded with the member's consent. Session content never leaves their machine.</footer>
+</main>
+<script>
+  const fmt = (n) => n >= 1e9 ? (n / 1e9).toFixed(2) + "B" : n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M" : n >= 1e3 ? (n / 1e3).toFixed(0) + "K" : String(Math.round(n || 0));
+  (async () => {
+    const handle = decodeURIComponent(location.pathname.split("/").pop() || "").replace(/^@/, "");
+    document.getElementById("handle").textContent = "@" + (handle || "unknown");
+    document.title = "Token Widget — @" + handle;
+    let profile;
+    try {
+      const response = await fetch(`/api/v1/profile/${encodeURIComponent(handle)}`);
+      if (!response.ok) throw 0;
+      profile = await response.json();
+    } catch {
+      document.getElementById("empty").hidden = false;
+      document.getElementById("empty").textContent = "This handle has no community profile yet.";
+      return;
+    }
+    const s = profile.stats || {};
+    document.getElementById("s-week").textContent = fmt(profile.weekTokens);
+    document.getElementById("s-life").textContent = fmt(s.lifetimeTokens);
+    document.getElementById("s-streak").textContent = (s.currentStreakDays ?? 0) + "d";
+    document.getElementById("s-sessions").textContent = s.sessionCount ?? "—";
+    const days = profile.days || [];
+    if (!days.length) document.getElementById("empty").hidden = false;
+    const totals = {};
+    for (const day of days) totals[day.date] = day.total;
+    const nonzero = days.map((d) => d.total).filter((t) => t > 0).sort((a, b) => a - b);
+    const q = (p) => nonzero.length ? nonzero[Math.min(nonzero.length - 1, Math.floor(nonzero.length * p))] : Infinity;
+    const t1 = q(0.25), t2 = q(0.5), t3 = q(0.75);
+    const level = (t) => t <= 0 ? 0 : t >= t3 ? 4 : t >= t2 ? 3 : t >= t1 ? 2 : 1;
+    const calendar = document.getElementById("calendar");
+    const now = new Date();
+    for (let i = 118; i >= 0; i -= 1) {
+      const d = new Date(now); d.setDate(d.getDate() - i);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const cell = document.createElement("span");
+      cell.className = "cell";
+      cell.dataset.l = String(level(totals[key] || 0));
+      cell.title = `${key} — ${(totals[key] || 0).toLocaleString()} tokens`;
+      calendar.append(cell);
+    }
+    const platHost = document.getElementById("plats");
+    const names = { claudeCode: "Claude Code", codex: "Codex", cline: "Cline" };
+    for (const [key, label] of Object.entries(names)) {
+      const tokens = s.byPlatform?.[key] ?? 0;
+      if (tokens <= 0) continue;
+      const row = document.createElement("div");
+      row.className = "plat";
+      row.innerHTML = `<span>${label}</span><b>${fmt(tokens)}</b>`;
+      platHost.append(row);
+    }
+  })();
+</script>
+</body>
+</html>

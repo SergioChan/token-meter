@@ -65,8 +65,15 @@ test("Claude snapshot runtime follows one exact Desktop Session", async (context
     sessionsDirectory,
     projectsDirectory,
     now: () => 3_000,
+    identity: { meterId: "TM-TEST-FAKE-9WFD" },
+    usageHistory: {
+      collect: () => ({ stats: { lifetimeTokens: 42, currentStreakDays: 3 } }),
+    },
   });
   const snapshot = await runtime.snapshot(desktopSessionId);
+  assert.equal(snapshot.meterId, "TM-TEST-FAKE-9WFD");
+  assert.deepEqual(snapshot.meterStats, { lifetimeTokens: 42, currentStreakDays: 3 });
+  assert.equal(typeof snapshot.account.last24hTokens, "number");
 
   assert.equal(snapshot.status, "bound");
   assert.equal(snapshot.sessionId, desktopSessionId);

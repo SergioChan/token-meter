@@ -5,3 +5,4 @@ dist/
 *.log
 .token-meter/
 local-artifacts/
+.commons/

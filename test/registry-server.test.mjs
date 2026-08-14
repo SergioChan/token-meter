@@ -1,0 +1,111 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { RegistryServer } from "../server/registry-server.mjs";
+import { createIdentity, signPayload } from "../src/core/identity.mjs";
+
+async function startRegistry() {
+  const dir = mkdtempSync(join(tmpdir(), "token-meter-registry-"));
+  writeFileSync(join(dir, "index.html"), "<!doctype html><title>home</title>");
+  const server = new RegistryServer({ dataFile: join(dir, "data.json"), webDir: dir });
+  await server.start(0);
+  return { server, base: `http://127.0.0.1:${server.port}` };
+}
+
+test("claims are signed, first-come-first-served, and idempotent", async () => {
+  const { server, base } = await startRegistry();
+  try {
+    const alice = { ...createIdentity(), handle: "alex" };
+    const mallory = { ...createIdentity(), handle: "alex" };
+    const claim = (identity) =>
+      fetch(`${base}/api/v1/claim`, {
+        method: "POST",
+        body: JSON.stringify(
+          signPayload(identity, {
+            kind: "claim", meterId: identity.meterId, publicKey: identity.publicKey, handle: identity.handle,
+          }),
+        ),
+      });
+
+    const available = await (await fetch(`${base}/api/v1/handle/alex/available`)).json();
+    assert.equal(available.available, true);
+    assert.equal((await claim(alice)).status, 200);
+    assert.equal((await claim(alice)).status, 200);
+    assert.equal((await claim(mallory)).status, 409);
+    const taken = await (await fetch(`${base}/api/v1/handle/alex/available`)).json();
+    assert.equal(taken.available, false);
+
+    const forged = signPayload(mallory, {
+      kind: "claim", meterId: alice.meterId, publicKey: alice.publicKey, handle: "stolen",
+    });
+    const forgedResponse = await fetch(`${base}/api/v1/claim`, { method: "POST", body: JSON.stringify(forged) });
+    assert.equal(forgedResponse.status, 401);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("signed usage reports feed leaderboard and profile", async () => {
+  const { server, base } = await startRegistry();
+  try {
+    const identity = { ...createIdentity(), handle: "casey" };
+    await fetch(`${base}/api/v1/claim`, {
+      method: "POST",
+      body: JSON.stringify(signPayload(identity, {
+        kind: "claim", meterId: identity.meterId, publicKey: identity.publicKey, handle: "casey",
+      })),
+    });
+    const report = signPayload(identity, {
+      kind: "usage", meterId: identity.meterId, publicKey: identity.publicKey, handle: "casey",
+      generatedAtMs: 1, days: [{ date: "2026-08-13", total: 5_000_000 }],
+      stats: { lifetimeTokens: 9_000_000, sessionCount: 4, currentStreakDays: 2, byPlatform: { claudeCode: 9_000_000, codex: 0, cline: 0 } },
+      weekTokens: 5_000_000,
+    });
+    assert.equal((await fetch(`${base}/api/v1/report`, { method: "POST", body: JSON.stringify(report) })).status, 200);
+
+    const board = await (await fetch(`${base}/api/v1/leaderboard`)).json();
+    assert.equal(board.rows[0].name, "@casey");
+    assert.equal(board.rows[0].tokens, 5_000_000);
+
+    const profile = await (await fetch(`${base}/api/v1/profile/casey`)).json();
+    assert.equal(profile.stats.lifetimeTokens, 9_000_000);
+    assert.equal(profile.days.length, 1);
+    assert.equal((await fetch(`${base}/api/v1/profile/nobody`)).status, 404);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("latest release endpoint reports version and dmg digest", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "token-meter-registry-"));
+  writeFileSync(join(dir, "index.html"), "<!doctype html><title>home</title>");
+  writeFileSync(join(dir, "app.dmg"), "fake-dmg-bytes");
+  const server = new RegistryServer({
+    dataFile: join(dir, "data.json"),
+    webDir: dir,
+    dmgFile: join(dir, "app.dmg"),
+    latestVersion: "0.2.0",
+  });
+  await server.start(0);
+  const base = `http://127.0.0.1:${server.port}`;
+  try {
+    const latest = await (await fetch(`${base}/api/v1/latest`)).json();
+    assert.equal(latest.version, "0.2.0");
+    assert.equal(latest.path, "/download/token-widget.dmg");
+    assert.match(latest.sha256, /^[0-9a-f]{64}$/);
+    assert.equal(latest.size, "fake-dmg-bytes".length);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("latest release endpoint 404s without a published dmg", async () => {
+  const { server, base } = await startRegistry();
+  try {
+    assert.equal((await fetch(`${base}/api/v1/latest`)).status, 404);
+  } finally {
+    await server.stop();
+  }
+});

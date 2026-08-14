@@ -76,13 +76,21 @@ trap cleanup EXIT
 /usr/bin/install -m 600 \
   "$ROOT/integrations/claude-desktop/native/Info.plist" \
   "$STAGING/Contents/Info.plist"
+/bin/mkdir -p "$STAGING/Contents/Resources"
+/usr/bin/install -m 644 \
+  "$ROOT/integrations/claude-desktop/native/AppIcon.icns" \
+  "$STAGING/Contents/Resources/AppIcon.icns"
+PACKAGE_VERSION="$(/usr/bin/plutil -extract version raw -o - "$ROOT/package.json" 2>/dev/null || true)"
+if [ -n "$PACKAGE_VERSION" ]; then
+  /usr/bin/plutil -replace CFBundleShortVersionString -string "$PACKAGE_VERSION" "$STAGING/Contents/Info.plist"
+fi
 /usr/bin/plutil -lint "$STAGING/Contents/Info.plist" >/dev/null
-/usr/bin/codesign \
-  --force \
-  --sign "$SIGN_IDENTITY" \
-  --timestamp=none \
-  --identifier com.sergiochan.token-meter.claude-overlay \
-  "$STAGING"
+CODESIGN_FLAGS=(--force --sign "$SIGN_IDENTITY" --identifier com.sergiochan.token-meter.claude-overlay)
+case "$SIGN_IDENTITY" in
+  "Developer ID"*) CODESIGN_FLAGS+=(--timestamp --options runtime) ;;
+  *) CODESIGN_FLAGS+=(--timestamp=none) ;;
+esac
+/usr/bin/codesign "${CODESIGN_FLAGS[@]}" "$STAGING"
 /usr/bin/codesign --verify --deep --strict "$STAGING"
 /bin/mv "$STAGING" "$OUTPUT"
 trap - EXIT

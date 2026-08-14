@@ -22,9 +22,12 @@
   card.innerHTML = `
     <header class="meter-header">
       <span class="live-dot" aria-hidden="true"></span>
-      <span class="meter-title">TOKEN METER</span>
+      <span class="meter-title">TOKEN WIDGET</span>
       <span class="session-id">UNBOUND</span>
-      <button class="collapse-toggle" type="button" aria-label="Collapse Token Meter" title="Collapse Token Meter" hidden>
+      <button class="settings-toggle" type="button" aria-label="Token Widget settings" title="Settings" hidden>
+        <span aria-hidden="true">⚙</span>
+      </button>
+      <button class="collapse-toggle" type="button" aria-label="Collapse Token Widget" title="Collapse Token Widget" hidden>
         <span aria-hidden="true">−</span>
       </button>
     </header>
@@ -59,18 +62,20 @@
         </span>
       </div>
     </div>
-    <div class="metric-row">
-      <span><small>1H SESSION</small><b class="hour-total">0</b></span>
-      <span><small>CURRENT TURN</small><b class="turn-total">0</b></span>
+    <div class="metric-row bottom-toggle" title="Click for session details">
+      <span><small>24H TOTAL</small><b class="day-total">—</b></span>
+      <span><small>CURRENT STREAK</small><b class="streak">—</b></span>
     </div>
-    <div class="context-row">
+    <div class="context-row bottom-toggle" title="Click for session details">
       <span>
-        <small>ACTIVE CONTEXT</small>
-        <b><span class="context-total">0</span><i> / <span class="context-window">0</span></i></b>
+        <small>LIFETIME TOKENS</small>
+        <b class="lifetime">—</b>
       </span>
-      <em class="context-percent">0%</em>
+      <em class="stats-hint" aria-hidden="true">···</em>
     </div>
-    <div class="details-row">
+    <div class="details-row stats-panel bottom-toggle" title="Click to go back" hidden>
+      <span>Current turn</span><b class="turn-total">0</b>
+      <span>Active context</span><b><span class="context-total">0</span><i class="context-extra"></i></b>
       <span>All sessions · 1H</span><b class="account-hour">0</b>
       <span>Historical baseline</span><b class="baseline">Learning</b>
       <span>Context compactions</span><b class="compaction-count">0</b>
@@ -92,9 +97,40 @@
       <strong>Unusually high token rate</strong>
       <span>Context pollution or a retry loop may be present. Consider a new session.</span>
     </div>
+    <div class="update-banner" hidden role="button" tabindex="0" title="Download the update">
+      <strong class="update-title">Update ready</strong>
+      <span class="update-sub">Click to download the new version.</span>
+      <button class="update-dismiss" type="button" aria-label="Dismiss update notice">&times;</button>
+    </div>
     <div class="unbound" hidden>
       <strong>SESSION UNKNOWN</strong>
       <span>The meter will not guess which session is active.</span>
+    </div>
+    <div class="meter-settings" hidden>
+      <div class="settings-identity">
+        <button class="settings-power" type="button" aria-label="Turn off Token Widget">&#9211;</button>
+        <small>IDENTITY</small>
+        <button class="settings-identity-link" type="button" hidden>@—</button>
+        <span class="settings-anon">Anonymous meter</span>
+      </div>
+      <button class="settings-claim" type="button" hidden>Claim your @handle</button>
+      <button class="settings-action-row settings-share" type="button">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        <span>Refer friends</span>
+      </button>
+      <button class="settings-action-row settings-dashboard" type="button">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="8"/><line x1="18" y1="20" x2="18" y2="4"/></svg>
+        <span>Your dashboard</span>
+      </button>
+      <button class="settings-action-row settings-leaderboard" type="button">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v6a5 5 0 0 1-10 0z"/><path d="M17 5h3a2 2 0 0 1-2 4"/><path d="M7 5H4a2 2 0 0 0 2 4"/></svg>
+        <span>Check your ranking</span>
+      </button>
+      <div class="settings-privacy" role="radiogroup" aria-label="Data sharing">
+        <button type="button" class="privacy-opt privacy-local active" aria-pressed="true">Data stays local</button>
+        <button type="button" class="privacy-opt privacy-share" aria-pressed="false">Share with community</button>
+      </div>
+      <p class="settings-tip" aria-live="polite"></p>
     </div>
   `;
   shadow.append(card);
@@ -104,11 +140,13 @@
     gauge: card.querySelector(".gauge"),
     sessionId: card.querySelector(".session-id"),
     sessionTotal: card.querySelector(".session-total"),
-    hourTotal: card.querySelector(".hour-total"),
+    dayTotal: card.querySelector(".day-total"),
+    streak: card.querySelector(".streak"),
+    lifetime: card.querySelector(".lifetime"),
+    statsPanel: card.querySelector(".stats-panel"),
     turnTotal: card.querySelector(".turn-total"),
     contextTotal: card.querySelector(".context-total"),
-    contextWindow: card.querySelector(".context-window"),
-    contextPercent: card.querySelector(".context-percent"),
+    contextExtra: card.querySelector(".context-extra"),
     compactionCount: card.querySelector(".compaction-count"),
     accountHour: card.querySelector(".account-hour"),
     rate: card.querySelector(".rate"),
@@ -116,6 +154,19 @@
     agentCount: card.querySelector(".agent-count"),
     usageDelta: card.querySelector(".usage-delta"),
     collapseToggle: card.querySelector(".collapse-toggle"),
+    settingsToggle: card.querySelector(".settings-toggle"),
+    settingsPanel: card.querySelector(".meter-settings"),
+    settingsIdentityLink: card.querySelector(".settings-identity-link"),
+    settingsAnon: card.querySelector(".settings-anon"),
+    settingsShare: card.querySelector(".settings-share"),
+    settingsDashboard: card.querySelector(".settings-dashboard"),
+    settingsLeaderboard: card.querySelector(".settings-leaderboard"),
+    settingsPrivacy: card.querySelector(".settings-privacy"),
+    settingsClaim: card.querySelector(".settings-claim"),
+    settingsPower: card.querySelector(".settings-power"),
+    settingsTip: card.querySelector(".settings-tip"),
+    privacyLocal: card.querySelector(".privacy-local"),
+    privacyShare: card.querySelector(".privacy-share"),
     needle: card.querySelector(".needle"),
     progress: card.querySelector(".gauge-progress"),
     warning: card.querySelector(".warning"),
@@ -124,6 +175,10 @@
     skillsSummary: card.querySelector(".skills-summary"),
     skillsReveal: card.querySelector(".skills-reveal"),
     skillLights: card.querySelector(".skill-lights"),
+    updateBanner: card.querySelector(".update-banner"),
+    updateTitle: card.querySelector(".update-title"),
+    updateSub: card.querySelector(".update-sub"),
+    updateDismiss: card.querySelector(".update-dismiss"),
   };
   const displayed = new Map();
   const animations = new Map();
@@ -133,6 +188,9 @@
   let deltaTimer = null;
   let collapsible = false;
   let collapsed = false;
+  // Reassigned by the settings block below; collapsing must always close settings
+  // so the two exclusive body views can never both be hidden.
+  let closeSettings = () => {};
   let draggable = false;
   let storageKey = null;
   let position = null;
@@ -324,6 +382,7 @@
 
   const setCollapsed = (value) => {
     collapsed = collapsible && value === true;
+    if (collapsed) closeSettings();
     card.classList.toggle("collapsed", collapsed);
     elements.collapseToggle.querySelector("span").textContent = collapsed ? "+" : "−";
     const action = collapsed ? "Expand" : "Collapse";
@@ -409,6 +468,20 @@
     event.stopPropagation();
   };
 
+  // Update banner: shown when the bridge reports a newer release. The anomaly
+  // warning owns the bottom slot when both want it; a dismiss lasts the session.
+  let updateDismissed = false;
+  let updateDownloadStarted = false;
+  const renderUpdateBanner = (snapshot) => {
+    const version = snapshot?.updateInfo?.version;
+    const available = typeof version === "string" && nativeActions() != null;
+    if (available && !updateDownloadStarted) {
+      elements.updateTitle.textContent = `Version ${version} is ready`;
+      elements.updateSub.textContent = "Click to download the update.";
+    }
+    elements.updateBanner.hidden = !available || updateDismissed || !elements.warning.hidden;
+  };
+
   const update = (snapshot) => {
     ensureMounted();
     const bound = snapshot?.status === "bound" && snapshot?.binding?.exact;
@@ -416,13 +489,15 @@
     elements.unbound.hidden = bound;
     if (!bound) {
       elements.warning.hidden = true;
+      renderUpdateBanner(snapshot);
       elements.sessionId.textContent = "UNBOUND";
       elements.sessionTotal.textContent = "—";
-      elements.hourTotal.textContent = "—";
+      elements.dayTotal.textContent = "—";
+      elements.streak.textContent = "—";
+      elements.lifetime.textContent = "—";
       elements.turnTotal.textContent = "—";
       elements.contextTotal.textContent = "—";
-      elements.contextWindow.textContent = "—";
-      elements.contextPercent.textContent = "—";
+      elements.contextExtra.textContent = "";
       elements.compactionCount.textContent = "—";
       elements.accountHour.textContent = "—";
       elements.rate.textContent = "Awaiting session";
@@ -451,7 +526,28 @@
       displayed.clear();
       lastSessionTotal = snapshot.session.totalTokens;
     }
-    elements.sessionId.textContent = snapshot.sessionId.slice(-8).toUpperCase();
+    const identityLabel = snapshot.meterHandle
+      ? `@${snapshot.meterHandle}`
+      : snapshot.meterId;
+    elements.sessionId.textContent =
+      identityLabel ?? snapshot.sessionId.slice(-8).toUpperCase();
+    elements.sessionId.title =
+      (snapshot.meterId
+        ? `Meter ${snapshot.meterId} · Session ${snapshot.sessionId}`
+        : `Session ${snapshot.sessionId}`) +
+      (nativeActions() ? " · Click to open your dashboard" : "");
+    if (snapshot.meterHandle) {
+      elements.settingsIdentityLink.hidden = false;
+      elements.settingsIdentityLink.textContent = `@${snapshot.meterHandle}`;
+      elements.settingsAnon.hidden = true;
+    } else {
+      elements.settingsIdentityLink.hidden = true;
+      elements.settingsAnon.hidden = false;
+    }
+    elements.settingsClaim.hidden = Boolean(snapshot.meterHandle) || !snapshot.meterId;
+    if (Date.now() - sharingToggledAtMs > 3000) {
+      setPrivacyUI(Boolean(snapshot.sharingEnabled));
+    }
     const delta = Math.max(0, snapshot.session.totalTokens - lastSessionTotal);
     lastSessionTotal = snapshot.session.totalTokens;
     if (delta > 0 && !sessionChanged) {
@@ -470,13 +566,23 @@
     }
 
     animateNumber("session", elements.sessionTotal, snapshot.session.totalTokens, sessionChanged);
-    animateNumber("hour", elements.hourTotal, snapshot.session.lastHourTokens, sessionChanged);
     animateNumber("turn", elements.turnTotal, snapshot.turn.tokens, sessionChanged);
     animateNumber("account", elements.accountHour, snapshot.account.lastHourTokens, sessionChanged);
+    if (snapshot.account?.last24hTokens == null) {
+      elements.dayTotal.textContent = "—";
+    } else {
+      animateNumber("day", elements.dayTotal, snapshot.account.last24hTokens, sessionChanged);
+    }
+    const stats = snapshot.meterStats;
+    elements.streak.textContent =
+      stats?.currentStreakDays == null
+        ? "—"
+        : `${stats.currentStreakDays} day${stats.currentStreakDays === 1 ? "" : "s"}`;
+    elements.lifetime.textContent =
+      stats?.lifetimeTokens == null ? "—" : format(stats.lifetimeTokens);
     if (snapshot.context?.tokens == null) {
       elements.contextTotal.textContent = "—";
-      elements.contextWindow.textContent = "—";
-      elements.contextPercent.textContent = "—";
+      elements.contextExtra.textContent = "";
     } else {
       animateNumber(
         "context",
@@ -484,10 +590,10 @@
         snapshot.context.tokens,
         sessionChanged,
       );
-      elements.contextWindow.textContent =
-        snapshot.context.windowTokens == null ? "—" : format(snapshot.context.windowTokens);
-      elements.contextPercent.textContent =
-        snapshot.context.percent == null ? "—" : `${snapshot.context.percent.toFixed(1)}%`;
+      elements.contextExtra.textContent =
+        snapshot.context.percent == null
+          ? ""
+          : ` · ${snapshot.context.percent.toFixed(0)}%`;
     }
     elements.compactionCount.textContent = String(snapshot.context?.compactionCount ?? 0);
     renderSkills(snapshot.skills);
@@ -508,6 +614,7 @@
     card.dataset.rateBand = snapshot.rate.band ?? "green";
     card.dataset.level = snapshot.anomaly.level;
     elements.warning.hidden = !["warning", "critical"].includes(snapshot.anomaly.level);
+    renderUpdateBanner(snapshot);
   };
 
   const destroy = () => {
@@ -531,12 +638,152 @@
   elements.skillsPanel.addEventListener("click", (event) => {
     event.stopPropagation();
   });
-  card.addEventListener("click", () => {
-    if (!collapsed) {
-      const wasExpanded = card.classList.contains("expanded");
-      card.classList.toggle("expanded");
-      if (wasExpanded) setSkillLabelsVisible(false);
-    }
+
+  const INSTALL_URL = "https://github.com/SergioChan/token-meter";
+  const nativeActions = () =>
+    window.webkit?.messageHandlers?.tokenMeterAction ?? null;
+  const postAction = (payload) => nativeActions()?.postMessage(payload);
+  let settingsOpen = false;
+  let sharingToggledAtMs = 0;
+  const setSettingsOpen = (open) => {
+    settingsOpen = open;
+    card.classList.toggle("settings-open", open);
+    elements.settingsPanel.hidden = !open;
+  };
+  closeSettings = () => setSettingsOpen(false);
+  // Settings need the native action bridge; the injected Codex meter hides them.
+  if (nativeActions()) {
+    elements.settingsToggle.hidden = false;
+    elements.sessionId.classList.add("clickable");
+    elements.sessionId.setAttribute("role", "button");
+    elements.sessionId.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      postAction({ type: "open-dashboard" });
+    });
+  }
+  elements.settingsToggle.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSettingsOpen(!settingsOpen);
+  });
+  const startUpdateDownload = () => {
+    if (updateDownloadStarted) return;
+    updateDownloadStarted = true;
+    elements.updateTitle.textContent = "Downloading update…";
+    elements.updateSub.textContent = "The installer opens by itself: drag to Applications, then reopen.";
+    postAction({ type: "open-update" });
+    // Allow a retry if the download quietly fails (lost network, dead tunnel).
+    setTimeout(() => {
+      updateDownloadStarted = false;
+    }, 90_000);
+  };
+  elements.updateBanner.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.target === elements.updateDismiss) return;
+    startUpdateDownload();
+  });
+  elements.updateBanner.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    event.stopPropagation();
+    startUpdateDownload();
+  });
+  elements.updateDismiss.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    updateDismissed = true;
+    elements.updateBanner.hidden = true;
+  });
+  let tipLockedUntilMs = 0;
+  const showTip = (text, lockMs = 0) => {
+    if (lockMs === 0 && Date.now() < tipLockedUntilMs) return;
+    tipLockedUntilMs = Date.now() + lockMs;
+    elements.settingsTip.textContent = text;
+  };
+  const tips = [
+    [elements.settingsShare, "Copy the install link to your clipboard and refer friends"],
+    [elements.settingsDashboard, "Open your private usage dashboard in the browser"],
+    [elements.settingsLeaderboard, "See where you stand on the community leaderboard"],
+    [elements.settingsIdentityLink, "Open your identity page"],
+    [
+      elements.settingsPower,
+      "Turn off Token Widget. Open it from Applications to turn it back on.",
+    ],
+    [elements.privacyLocal, "Nothing ever leaves this machine."],
+    [
+      elements.privacyShare,
+      "Upload signed usage totals to the community server and see your page on the public site.",
+    ],
+    [
+      elements.settingsClaim,
+      "Pick your unique @handle on the usage dashboard — first come, first served.",
+    ],
+  ];
+  for (const [element, tip] of tips) {
+    element.addEventListener("mouseenter", () => showTip(tip));
+    element.addEventListener("mouseleave", () => showTip(""));
+  }
+  elements.settingsShare.addEventListener("click", () => {
+    postAction({
+      type: "copy-text",
+      text: `See how hard your Agent is working — Token Meter: ${INSTALL_URL}`,
+    });
+    showTip("Copied install link ✓", 1400);
+  });
+  elements.settingsDashboard.addEventListener("click", () => {
+    postAction({ type: "open-dashboard" });
+  });
+  elements.settingsClaim.addEventListener("click", () => {
+    postAction({ type: "open-dashboard" });
+    showTip("Opening the dashboard to claim your handle…", 2000);
+  });
+  elements.settingsPower.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    postAction({ type: "quit-widget" });
+  });
+  if (!nativeActions()) elements.settingsPower.hidden = true;
+  elements.settingsIdentityLink.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    postAction({ type: "open-dashboard" });
+  });
+  elements.settingsLeaderboard.addEventListener("click", () => {
+    postAction({ type: "open-leaderboard" });
+  });
+  const setPrivacyUI = (sharingOn) => {
+    elements.privacyLocal.classList.toggle("active", !sharingOn);
+    elements.privacyLocal.setAttribute("aria-pressed", String(!sharingOn));
+    elements.privacyShare.classList.toggle("active", sharingOn);
+    elements.privacyShare.setAttribute("aria-pressed", String(sharingOn));
+  };
+  const chooseSharing = (enabled) => {
+    sharingToggledAtMs = Date.now();
+    setPrivacyUI(enabled);
+    postAction({ type: "set-sharing", enabled });
+    showTip(
+      enabled
+        ? "Sharing with the community — signed totals only."
+        : "Everything stays on this machine.",
+      1400,
+    );
+  };
+  elements.privacyLocal.addEventListener("click", () => chooseSharing(false));
+  elements.privacyShare.addEventListener("click", () => chooseSharing(true));
+  // The bottom section flips between the primary rows and the compact stats
+  // view in place; the card never changes size (the native panel is fixed).
+  let statsView = false;
+  const setStatsView = (open) => {
+    statsView = open;
+    card.classList.toggle("stats-view", open);
+    elements.statsPanel.hidden = !open;
+  };
+  card.addEventListener("click", (event) => {
+    if (collapsed) return;
+    if (!event.target.closest?.(".bottom-toggle")) return;
+    setStatsView(!statsView);
   });
   for (const [element, source] of [
     [elements.header, "header"],

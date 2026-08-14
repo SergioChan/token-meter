@@ -20,6 +20,12 @@ function parseArguments(argv) {
       options.claudeProjectsDirectory = rest[++index];
     } else if (value === "--cdp-port") {
       options.cdpPort = Number(rest[++index]);
+    } else if (value === "--set-handle") {
+      options.setHandle = rest[++index];
+    } else if (value === "--clear-handle") {
+      options.clearHandle = true;
+    } else if (value === "--sharing") {
+      options.sharing = rest[++index];
     }
     else throw new Error(`Unknown argument: ${value}`);
   }
@@ -86,9 +92,22 @@ if (options.command === "snapshot") {
   const { removeCodexMeter } = await import(modulePath);
   const result = await removeCodexMeter({ cdpPort: options.cdpPort || 9334 });
   process.stdout.write(`${JSON.stringify(result)}\n`);
+} else if (options.command === "identity") {
+  const { loadOrCreateIdentity, setHandle, setSharingEnabled } = await import(
+    "./core/identity.mjs"
+  );
+  let identity;
+  if (options.setHandle != null) identity = setHandle(options.setHandle);
+  else if (options.clearHandle) identity = setHandle(null);
+  else identity = loadOrCreateIdentity();
+  if (options.sharing != null) {
+    identity = setSharingEnabled(options.sharing === "on" || options.sharing === "true");
+  }
+  const { privateKeyPem, ...publicFields } = identity;
+  process.stdout.write(`${JSON.stringify(publicFields, null, 2)}\n`);
 } else {
   const script = fileURLToPath(import.meta.url);
   throw new Error(
-    `Unknown command \"${options.command}\". Run ${script} snapshot, claude-snapshot, inject, or remove.`,
+    `Unknown command \"${options.command}\". Run ${script} snapshot, claude-snapshot, identity, inject, or remove.`,
   );
 }
