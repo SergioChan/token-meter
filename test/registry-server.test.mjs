@@ -6,10 +6,16 @@ import { join } from "node:path";
 import { RegistryServer } from "../server/registry-server.mjs";
 import { createIdentity, signPayload } from "../src/core/identity.mjs";
 
+const nowMs = Date.parse("2026-08-13T12:00:00Z");
+
 async function startRegistry() {
   const dir = mkdtempSync(join(tmpdir(), "token-meter-registry-"));
   writeFileSync(join(dir, "index.html"), "<!doctype html><title>home</title>");
-  const server = new RegistryServer({ dataFile: join(dir, "data.json"), webDir: dir });
+  const server = new RegistryServer({
+    dataFile: join(dir, "data.json"),
+    webDir: dir,
+    now: () => nowMs,
+  });
   await server.start(0);
   return { server, base: `http://127.0.0.1:${server.port}` };
 }
@@ -24,7 +30,8 @@ test("claims are signed, first-come-first-served, and idempotent", async () => {
         method: "POST",
         body: JSON.stringify(
           signPayload(identity, {
-            kind: "claim", meterId: identity.meterId, publicKey: identity.publicKey, handle: identity.handle,
+            kind: "claim", meterId: identity.meterId, publicKey: identity.publicKey,
+            handle: identity.handle, generatedAtMs: nowMs,
           }),
         ),
       });
@@ -38,7 +45,8 @@ test("claims are signed, first-come-first-served, and idempotent", async () => {
     assert.equal(taken.available, false);
 
     const forged = signPayload(mallory, {
-      kind: "claim", meterId: alice.meterId, publicKey: alice.publicKey, handle: "stolen",
+      kind: "claim", meterId: alice.meterId, publicKey: alice.publicKey,
+      handle: "stolen", generatedAtMs: nowMs,
     });
     const forgedResponse = await fetch(`${base}/api/v1/claim`, { method: "POST", body: JSON.stringify(forged) });
     assert.equal(forgedResponse.status, 401);
@@ -54,13 +62,16 @@ test("signed usage reports feed leaderboard and profile", async () => {
     await fetch(`${base}/api/v1/claim`, {
       method: "POST",
       body: JSON.stringify(signPayload(identity, {
-        kind: "claim", meterId: identity.meterId, publicKey: identity.publicKey, handle: "casey",
+        kind: "claim", meterId: identity.meterId, publicKey: identity.publicKey,
+        handle: "casey", generatedAtMs: nowMs,
       })),
     });
     const report = signPayload(identity, {
       kind: "usage", meterId: identity.meterId, publicKey: identity.publicKey, handle: "casey",
-      generatedAtMs: 1, days: [{ date: "2026-08-13", total: 5_000_000 }],
-      stats: { lifetimeTokens: 9_000_000, sessionCount: 4, currentStreakDays: 2, byPlatform: { claudeCode: 9_000_000, codex: 0, cline: 0 } },
+      generatedAtMs: nowMs, days: [{ date: "2026-08-13", total: 5_000_000 }],
+      stats: { lifetimeTokens: 9_000_000, sessionCount: 4, currentStreakDays: 2,
+        longestStreakDays: 3, peakDay: { date: "2026-08-13", tokens: 5_000_000 },
+        byPlatform: { claudeCode: 9_000_000, codex: 0, cline: 0 } },
       weekTokens: 5_000_000,
     });
     assert.equal((await fetch(`${base}/api/v1/report`, { method: "POST", body: JSON.stringify(report) })).status, 200);
@@ -73,6 +84,45 @@ test("signed usage reports feed leaderboard and profile", async () => {
     assert.equal(profile.stats.lifetimeTokens, 9_000_000);
     assert.equal(profile.days.length, 1);
     assert.equal((await fetch(`${base}/api/v1/profile/nobody`)).status, 404);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("stale reports are rejected and older snapshots cannot replace newer data", async () => {
+  const { server, base } = await startRegistry();
+  try {
+    const identity = createIdentity();
+    const usage = (generatedAtMs, total) => signPayload(identity, {
+      kind: "usage",
+      meterId: identity.meterId,
+      publicKey: identity.publicKey,
+      handle: null,
+      generatedAtMs,
+      days: [{ date: "2026-08-13", total }],
+      stats: {
+        lifetimeTokens: total,
+        sessionCount: 1,
+        currentStreakDays: 1,
+        longestStreakDays: 1,
+        peakDay: { date: "2026-08-13", tokens: total },
+        byPlatform: { claudeCode: total, codex: 0, cline: 0 },
+      },
+      weekTokens: total,
+    });
+    const report = (body) => fetch(`${base}/api/v1/report`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+
+    assert.equal((await report(usage(nowMs - 16 * 60_000, 1))).status, 422);
+    assert.equal((await report(usage(nowMs, 10_000))).status, 200);
+    const older = await report(usage(nowMs - 1, 1));
+    assert.equal(older.status, 200);
+    assert.equal((await older.json()).ignored, true);
+
+    const board = await (await fetch(`${base}/api/v1/leaderboard`)).json();
+    assert.equal(board.rows[0].tokens, 10_000);
   } finally {
     await server.stop();
   }

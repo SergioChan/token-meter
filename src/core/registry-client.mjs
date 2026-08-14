@@ -52,6 +52,7 @@ export async function claimHandle(identity, identityDir = undefined) {
     meterId: identity.meterId,
     publicKey: identity.publicKey,
     handle: identity.handle,
+    generatedAtMs: Date.now(),
   });
   const result = await call("/api/v1/claim", {
     method: "POST",

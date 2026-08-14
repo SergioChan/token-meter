@@ -1,41 +1,108 @@
 import { createServer } from "node:http";
-import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { verifySignedPayload, isValidHandle } from "../src/core/identity.mjs";
+import { FileRegistryStore } from "./registry-store.mjs";
 
 const MAX_BODY_BYTES = 512 * 1024;
+const MAX_REPORT_AGE_MS = 15 * 60 * 1_000;
+const MAX_REPORT_FUTURE_MS = 5 * 60 * 1_000;
 
-// Community registry: verified handle claims (first come, first served) and
-// signed aggregate usage reports. Storage is a JSON file — plenty for an
-// internal test fleet; swap for a real database with the real domain.
+function safeInteger(value, { minimum = 0, maximum = Number.MAX_SAFE_INTEGER } = {}) {
+  return Number.isSafeInteger(value) && value >= minimum && value <= maximum;
+}
+
+function normalizeUsagePayload(payload, nowMs) {
+  if (
+    !safeInteger(payload.generatedAtMs) ||
+    payload.generatedAtMs < nowMs - MAX_REPORT_AGE_MS ||
+    payload.generatedAtMs > nowMs + MAX_REPORT_FUTURE_MS
+  ) {
+    return null;
+  }
+  if (!Array.isArray(payload.days) || payload.days.length > 120) return null;
+  const days = [];
+  for (const day of payload.days) {
+    if (
+      day == null ||
+      typeof day !== "object" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(day.date) ||
+      !safeInteger(day.total)
+    ) {
+      return null;
+    }
+    days.push({ date: day.date, total: day.total });
+  }
+  const stats = payload.stats;
+  const peakDay = stats?.peakDay;
+  if (
+    stats == null ||
+    typeof stats !== "object" ||
+    !safeInteger(stats.lifetimeTokens) ||
+    !safeInteger(stats.sessionCount) ||
+    !safeInteger(stats.currentStreakDays) ||
+    !safeInteger(stats.longestStreakDays) ||
+    stats.byPlatform == null ||
+    typeof stats.byPlatform !== "object" ||
+    !safeInteger(stats.byPlatform.claudeCode) ||
+    !safeInteger(stats.byPlatform.codex) ||
+    !safeInteger(stats.byPlatform.cline) ||
+    (peakDay != null &&
+      (typeof peakDay !== "object" ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(peakDay.date) ||
+        !safeInteger(peakDay.tokens))) ||
+    !safeInteger(payload.weekTokens)
+  ) {
+    return null;
+  }
+  return {
+    days,
+    stats: {
+      lifetimeTokens: stats.lifetimeTokens,
+      currentStreakDays: stats.currentStreakDays,
+      longestStreakDays: stats.longestStreakDays,
+      sessionCount: stats.sessionCount,
+      peakDay:
+        peakDay == null
+          ? null
+          : { date: peakDay.date, tokens: peakDay.tokens },
+      byPlatform: {
+        claudeCode: stats.byPlatform.claudeCode,
+        codex: stats.byPlatform.codex,
+        cline: stats.byPlatform.cline,
+      },
+    },
+    weekTokens: payload.weekTokens,
+    generatedAtMs: payload.generatedAtMs,
+  };
+}
+
 export class RegistryServer {
-  constructor({ dataFile, webDir, downloadFile = null, dmgFile = null, latestVersion = null }) {
-    if (!dataFile || !webDir) throw new TypeError("dataFile and webDir are required");
-    this.dataFile = dataFile;
+  constructor({
+    store = null,
+    dataFile = null,
+    webDir,
+    downloadFile = null,
+    dmgFile = null,
+    latestVersion = null,
+    latestRelease = null,
+    host = "127.0.0.1",
+    now = Date.now,
+  }) {
+    if (!store && !dataFile) throw new TypeError("store or dataFile is required");
+    if (!webDir) throw new TypeError("webDir is required");
+    this.store = store ?? new FileRegistryStore({ dataFile });
     this.webDir = webDir;
     this.downloadFile = downloadFile;
     this.dmgFile = dmgFile;
     this.latestVersion = latestVersion;
+    this.latestRelease = latestRelease;
+    this.host = host;
+    this.now = now;
     this.dmgDigestMemo = null;
     this.server = null;
     this.port = null;
-    try {
-      this.data = JSON.parse(readFileSync(dataFile, "utf8"));
-    } catch {
-      this.data = { handles: {}, meters: {} };
-    }
-  }
-
-  #save() {
-    mkdirSync(dirname(this.dataFile), { recursive: true });
-    writeFileSync(this.dataFile, JSON.stringify(this.data), { mode: 0o600 });
-  }
-
-  #display(meterId) {
-    const meter = this.data.meters[meterId];
-    const handle = meter?.handle;
-    return handle ? `@${handle}` : `${meterId.slice(0, 10)}…`;
   }
 
   // sha256 of the served DMG, recomputed only when the file changes on disk.
@@ -76,8 +143,14 @@ export class RegistryServer {
 
     const path = url.pathname;
     if (request.method === "GET") {
-      if (path === "/api/v1/health") return json(200, { ok: true, meters: Object.keys(this.data.meters).length });
+      if (path === "/api/v1/health") {
+        const health = await this.store.health();
+        return json(200, { ok: true, ...health });
+      }
       if (path === "/api/v1/latest") {
+        if (this.latestRelease) {
+          return json(200, this.latestRelease);
+        }
         const version = process.env.TOKEN_METER_LATEST_VERSION || this.latestVersion;
         if (!version || !this.dmgFile || !existsSync(this.dmgFile)) {
           return json(404, { error: "no release published" });
@@ -94,29 +167,18 @@ export class RegistryServer {
       if (available) {
         const handle = decodeURIComponent(available[1]).toLowerCase();
         if (!isValidHandle(handle)) return json(200, { available: false, reason: "invalid" });
-        return json(200, { available: this.data.handles[handle] == null });
+        return json(200, { available: await this.store.handleAvailable(handle) });
       }
       if (path === "/api/v1/leaderboard") {
-        const rows = Object.entries(this.data.meters)
-          .map(([meterId, meter]) => ({
-            name: this.#display(meterId),
-            handle: meter.handle ?? null,
-            tokens: meter.weekTokens ?? 0,
-            lifetimeTokens: meter.stats?.lifetimeTokens ?? 0,
-            sessions: meter.stats?.sessionCount ?? 0,
-            updatedAtMs: meter.updatedAtMs,
-          }))
-          .sort((a, b) => b.tokens - a.tokens)
-          .slice(0, 100);
-        return json(200, { rows, generatedAtMs: Date.now() });
+        const rows = await this.store.leaderboard(100);
+        return json(200, { rows, generatedAtMs: this.now() });
       }
       const profile = path.match(/^\/api\/v1\/profile\/([^/]+)$/);
       if (profile) {
         const handle = decodeURIComponent(profile[1]).replace(/^@/, "").toLowerCase();
-        const meterId = this.data.handles[handle]?.meterId;
-        const meter = meterId ? this.data.meters[meterId] : null;
-        if (!meter) return json(404, { error: "unknown handle" });
-        return json(200, { handle, days: meter.days ?? [], stats: meter.stats ?? {}, weekTokens: meter.weekTokens ?? 0, updatedAtMs: meter.updatedAtMs });
+        const profileValue = await this.store.profile(handle);
+        if (!profileValue) return json(404, { error: "unknown handle" });
+        return json(200, profileValue);
       }
       if (path === "/" || path === "/index.html") return page("index.html");
       if (path === "/install.sh") {
@@ -166,44 +228,56 @@ export class RegistryServer {
       if (!verifySignedPayload(signed)) return json(401, { error: "invalid signature" });
       const payload = signed.payload;
       const meterId = payload.meterId;
+      const nowMs = this.now();
 
       if (path === "/api/v1/claim") {
-        if (payload.kind !== "claim" || !isValidHandle(payload.handle ?? "")) {
+        if (
+          payload.kind !== "claim" ||
+          !isValidHandle(payload.handle ?? "") ||
+          !safeInteger(payload.generatedAtMs) ||
+          payload.generatedAtMs < nowMs - MAX_REPORT_AGE_MS ||
+          payload.generatedAtMs > nowMs + MAX_REPORT_FUTURE_MS
+        ) {
           return json(422, { error: "invalid claim" });
         }
         const handle = payload.handle.toLowerCase();
-        const existing = this.data.handles[handle];
-        if (existing && existing.meterId !== meterId) {
+        const result = await this.store.claim({
+          handle,
+          meterId,
+          publicKey: payload.publicKey,
+          nowMs,
+        });
+        if (!result.claimed) {
           return json(409, { error: "handle already claimed", claimed: false });
         }
-        this.data.handles[handle] = existing ?? { meterId, publicKey: payload.publicKey, claimedAtMs: Date.now() };
-        const meter = (this.data.meters[meterId] ??= {});
-        meter.handle = handle;
-        meter.publicKey = payload.publicKey;
-        meter.updatedAtMs = Date.now();
-        this.#save();
         return json(200, { ok: true, claimed: true, handle });
       }
 
       if (payload.kind !== "usage") return json(422, { error: "invalid report" });
-      const meter = (this.data.meters[meterId] ??= {});
-      meter.publicKey = payload.publicKey;
-      meter.days = Array.isArray(payload.days) ? payload.days.slice(-120) : [];
-      meter.stats = payload.stats ?? {};
-      meter.weekTokens = payload.weekTokens ?? 0;
-      if (payload.handle && this.data.handles[payload.handle.toLowerCase()]?.meterId === meterId) {
-        meter.handle = payload.handle.toLowerCase();
+      const usage = normalizeUsagePayload(payload, nowMs);
+      if (!usage) return json(422, { error: "invalid report" });
+      const result = await this.store.report({
+        meterId,
+        publicKey: payload.publicKey,
+        handle: isValidHandle(payload.handle ?? "")
+          ? payload.handle.toLowerCase()
+          : null,
+        ...usage,
+        nowMs,
+      });
+      if (!result.accepted) {
+        return json(409, { error: "identity collision" });
       }
-      meter.updatedAtMs = Date.now();
-      this.#save();
-      return json(200, { ok: true });
+      return json(200, { ok: true, ignored: result.ignored });
     }
     return json(405, { error: "method not allowed" });
   }
 
   async start(port = 0) {
+    await this.store.init();
     this.server = createServer((request, response) => {
-      this.#handle(request, response).catch(() => {
+      this.#handle(request, response).catch((error) => {
+        console.error("registry request failed", error);
         try {
           response.writeHead(500).end();
         } catch { /* closed */ }
@@ -211,7 +285,7 @@ export class RegistryServer {
     });
     await new Promise((resolve, reject) => {
       this.server.once("error", reject);
-      this.server.listen(port, "127.0.0.1", resolve);
+      this.server.listen(port, this.host, resolve);
     });
     this.port = this.server.address().port;
     return this;
@@ -220,5 +294,6 @@ export class RegistryServer {
   async stop() {
     if (this.server) await new Promise((resolve) => this.server.close(resolve));
     this.server = null;
+    await this.store.close();
   }
 }
