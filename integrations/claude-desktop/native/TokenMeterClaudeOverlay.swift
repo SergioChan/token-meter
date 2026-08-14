@@ -63,6 +63,41 @@ private func absoluteURL(_ value: String, option: String) throws -> URL {
     return URL(fileURLWithPath: value).standardizedFileURL
 }
 
+// Writes the LaunchAgent for a self-contained bundle launch and loads it.
+// The freshly bootstrapped agent instance takes over; callers keep running
+// only for this session (KeepAlive restarts us on quit or next login).
+private func selfInstallLaunchAgent(rootPath: String, nodePath: String, statePath: String) throws {
+    let label = "com.sergiochan.token-meter.claude-desktop"
+    let executable = Bundle.main.executablePath ?? CommandLine.arguments[0]
+    let logDir = fileManager.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Logs/Token Meter/Claude Desktop").path
+    try fileManager.createDirectory(atPath: logDir, withIntermediateDirectories: true)
+    try fileManager.createDirectory(atPath: statePath, withIntermediateDirectories: true)
+    let agentsDir = fileManager.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/LaunchAgents")
+    try fileManager.createDirectory(at: agentsDir, withIntermediateDirectories: true)
+    let plistURL = agentsDir.appendingPathComponent("\(label).plist")
+    let plist: [String: Any] = [
+        "Label": label,
+        "ProgramArguments": [executable, "--root", rootPath, "--node", nodePath],
+        "RunAtLoad": true,
+        "KeepAlive": true,
+        "StandardOutPath": "\(logDir)/overlay.log",
+        "StandardErrorPath": "\(logDir)/overlay-error.log",
+    ]
+    let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+    try data.write(to: plistURL, options: .atomic)
+    let domain = "gui/\(getuid())"
+    let boot = Process()
+    boot.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    boot.arguments = ["bootout", "\(domain)/\(label)"]
+    try? boot.run(); boot.waitUntilExit()
+    let load = Process()
+    load.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    load.arguments = ["bootstrap", domain, plistURL.path]
+    try? load.run(); load.waitUntilExit()
+}
+
 private func parseCommand(_ arguments: [String]) throws -> AppCommand {
     var rootPath: String?
     var nodePath: String?
@@ -115,6 +150,23 @@ private func parseCommand(_ arguments: [String]) throws -> AppCommand {
     }
 
     if let mode { return mode }
+    // Self-contained bundle: launched with no arguments (double-click from
+    // /Applications), resolve payload and Node from our own Resources and
+    // register the LaunchAgent so the meter survives login.
+    if rootPath == nil, nodePath == nil,
+       let resources = Bundle.main.resourceURL {
+        let bundledRoot = resources.appendingPathComponent("root")
+        let bundledNode = resources.appendingPathComponent("node/bin/node")
+        if fileManager.fileExists(atPath: bundledRoot.appendingPathComponent("src/cli.mjs").path),
+           fileManager.isExecutableFile(atPath: bundledNode.path) {
+            rootPath = bundledRoot.path
+            nodePath = bundledNode.path
+            try selfInstallLaunchAgent(rootPath: bundledRoot.path, nodePath: bundledNode.path, statePath: statePath)
+            // The LaunchAgent instance owns the overlay from here; this
+            // double-clicked process exits so two meters never run at once.
+            exit(0)
+        }
+    }
     guard let rootPath else {
         throw CommandError(description: "--root is required")
     }
@@ -262,6 +314,40 @@ private final class SnapshotBridge {
         }
     }
 
+    func command(_ body: [String: Any], completion: @escaping Completion) {
+        do {
+            try ensureStarted()
+        } catch {
+            completion(.failure(error))
+            restart()
+            return
+        }
+        let requestID = nextRequestID
+        nextRequestID += 1
+        do {
+            var payload = body
+            payload["requestId"] = requestID
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            pending[requestID] = completion
+            var line = data
+            line.append(0x0A)
+            try inputHandle?.write(contentsOf: line)
+        } catch {
+            pending.removeValue(forKey: requestID)?(.failure(error))
+            restart()
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+            guard let self, let timedOut = self.pending.removeValue(forKey: requestID) else {
+                return
+            }
+            timedOut(.failure(SnapshotBridgeError(
+                description: "Snapshot bridge timed out"
+            )))
+            self.restart()
+        }
+    }
+
     func stop() {
         outputHandle?.readabilityHandler = nil
         try? inputHandle?.close()
@@ -333,6 +419,8 @@ private final class SnapshotBridge {
                     )))
                 } else if let snapshot = response["snapshot"] as? [String: Any] {
                     completion(.success(snapshot))
+                } else if response["ok"] as? Bool == true {
+                    completion(.success(response))
                 } else {
                     completion(.failure(SnapshotBridgeError(
                         description: "Snapshot bridge returned an invalid response"
@@ -421,6 +509,7 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         webView.navigationDelegate = self
         webView.configuration.userContentController.add(self, name: "tokenMeterDrag")
         webView.configuration.userContentController.add(self, name: "tokenMeterLayout")
+        webView.configuration.userContentController.add(self, name: "tokenMeterAction")
         webView.setValue(false, forKey: "drawsBackground")
         if #available(macOS 12.0, *) { webView.underPageBackgroundColor = .clear }
         webView.loadHTMLString(
@@ -652,13 +741,13 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
                 target.dataset.nativeDrag = 'true';
                 target.style.cursor = 'grab';
                 target.addEventListener('mousedown', (event) => {
-                  if (event.button !== 0 || event.target.closest('.collapse-toggle')) return;
+                  if (event.button !== 0 || event.target.closest('.collapse-toggle, .settings-toggle, .session-id')) return;
                   event.preventDefault();
                   event.stopPropagation();
                   window.webkit.messageHandlers.tokenMeterDrag.postMessage('start');
                 });
                 target.addEventListener('click', (event) => {
-                  if (!event.target.closest('.collapse-toggle')) event.stopPropagation();
+                  if (!event.target.closest('.collapse-toggle, .settings-toggle, .session-id')) event.stopPropagation();
                 });
               }
             })();
@@ -721,7 +810,103 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
                   let body = message.body as? [String: Any],
                   let value = body["collapsed"] as? Bool {
             applyCollapsed(value)
+        } else if message.name == "tokenMeterAction",
+                  let body = message.body as? [String: Any],
+                  let type = body["type"] as? String {
+            handleAction(type: type, body: body)
         }
+    }
+
+    // Only fixed pages under the installed root may be opened; the web layer
+    // never supplies a URL or path.
+    private func handleAction(type: String, body: [String: Any]) {
+        switch type {
+        case "open-dashboard":
+            // The dashboard is served by the bridge's loopback server so the
+            // page can read the profile and claim a handle. Only a loopback
+            // URL returned by our own bridge is ever opened.
+            snapshotBridge.command(["command": "dashboard-url"]) { result in
+                guard case .success(let payload) = result,
+                      let urlString = payload["url"] as? String,
+                      let url = URL(string: urlString),
+                      url.scheme == "http",
+                      url.host == "127.0.0.1" else { return }
+                DispatchQueue.main.async { NSWorkspace.shared.open(url) }
+            }
+        case "open-leaderboard":
+            openInstalledPage("web/leaderboard.html")
+        case "copy-text":
+            guard let text = body["text"] as? String, text.count <= 500 else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        case "quit-widget":
+            let bootout = Process()
+            bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            bootout.arguments = ["bootout", "gui/\(getuid())/com.sergiochan.token-meter.claude-desktop"]
+            try? bootout.run()
+            bootout.waitUntilExit()
+            exit(0)
+        case "set-sharing":
+            let enabled = body["enabled"] as? Bool ?? false
+            snapshotBridge.command(["command": "set-sharing", "enabled": enabled]) { _ in }
+        case "open-update":
+            // The web layer never supplies the URL; the bridge derives it from
+            // its baked-in registry endpoint.
+            snapshotBridge.command(["command": "update-info"]) { result in
+                guard case .success(let payload) = result,
+                      payload["ok"] as? Bool == true,
+                      let urlString = payload["url"] as? String,
+                      let url = URL(string: urlString),
+                      url.scheme == "https" || (url.scheme == "http" && url.host == "127.0.0.1"),
+                      let version = payload["version"] as? String,
+                      version.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+$"#, options: .regularExpression) != nil
+                else { return }
+                self.downloadAndOpenUpdate(url: url, version: version)
+            }
+        default:
+            break
+        }
+    }
+
+    // Downloads the release DMG into ~/Downloads and opens it once Gatekeeper's
+    // assessment passes, landing the user directly on the drag-to-install window.
+    private func downloadAndOpenUpdate(url: URL, version: String) {
+        let task = URLSession.shared.downloadTask(with: url) { temporary, _, error in
+            guard error == nil, let temporary else { return }
+            let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+            let destination = downloads.appendingPathComponent("TokenWidget-\(version).dmg")
+            do {
+                try? FileManager.default.removeItem(at: destination)
+                try FileManager.default.moveItem(at: temporary, to: destination)
+            } catch {
+                return
+            }
+            // Refuse to open anything that is not a notarized Developer ID disk
+            // image; a compromised download source must not reach the user.
+            let assess = Process()
+            assess.executableURL = URL(fileURLWithPath: "/usr/sbin/spctl")
+            assess.arguments = ["--assess", "--type", "install", destination.path]
+            assess.standardOutput = FileHandle.nullDevice
+            assess.standardError = FileHandle.nullDevice
+            do {
+                try assess.run()
+                assess.waitUntilExit()
+            } catch {
+                return
+            }
+            guard assess.terminationStatus == 0 else {
+                try? FileManager.default.removeItem(at: destination)
+                return
+            }
+            DispatchQueue.main.async { NSWorkspace.shared.open(destination) }
+        }
+        task.resume()
+    }
+
+    private func openInstalledPage(_ relativePath: String) {
+        let url = configuration.rootURL.appendingPathComponent(relativePath)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func beginDrag() {

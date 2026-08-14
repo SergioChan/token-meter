@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27 fill=%27none%27><path d=%27M20.5 51.92A23 23 0 1 1 43.5 51.92%27 stroke=%27%235b6f00%27 stroke-width=%277%27 stroke-linecap=%27round%27/><path d=%27M32 9A23 23 0 0 1 48.26 15.74%27 stroke=%27%23b2c248%27 stroke-width=%277%27 stroke-linecap=%27round%27/><line x1=%2732%27 y1=%2732%27 x2=%2742.6%27 y2=%2721.4%27 stroke=%27%235b6f00%27 stroke-width=%276%27 stroke-linecap=%27round%27/><circle cx=%2732%27 cy=%2732%27 r=%275%27 fill=%27%235b6f00%27/><circle cx=%2732%27 cy=%2755%27 r=%273.5%27 fill=%27%23b2c248%27/></svg>">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Widget — Usage Dashboard</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --surface-2: #f2f1ee;
+    --border: #e3e2dd;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #8b8a84;
+    --cell-0: #eceae5;
+    --cell-1: #bcd7f4;
+    --cell-2: #7fb0e8;
+    --cell-3: #3f83d9;
+    --cell-4: #1c5aa8;
+    --accent: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --surface-2: #242422;
+      --border: #33322f;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #8a897f;
+      --cell-0: #2b2b29;
+      --cell-1: #1e3a5c;
+      --cell-2: #2a5c94;
+      --cell-3: #3987e5;
+      --cell-4: #7db4f2;
+      --accent: #3987e5;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --surface-2: #242422;
+    --border: #33322f;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8a897f;
+    --cell-0: #2b2b29;
+    --cell-1: #1e3a5c;
+    --cell-2: #2a5c94;
+    --cell-3: #3987e5;
+    --cell-4: #7db4f2;
+    --accent: #3987e5;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--surface-1);
+    color: var(--text-primary);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 820px; margin: 0 auto; padding: 48px 24px 64px; }
+
+  .identity { text-align: center; }
+  .avatar {
+    display: grid; place-items: center;
+    width: 76px; height: 76px; margin: 0 auto 14px;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 50%;
+    font: 700 15px/1 ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--accent);
+  }
+  .identity h1 {
+    margin: 0; font-size: 1.35rem; letter-spacing: 0.01em;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .identity .sub { margin-top: 6px; color: var(--text-secondary); font-size: 0.9rem; }
+  .identity .sub .badge {
+    margin-left: 6px; padding: 2px 8px; font-size: 0.72rem;
+    border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2);
+    color: var(--text-muted);
+  }
+
+  .claim-card {
+    max-width: 460px; margin: 26px auto 0; padding: 18px 20px;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px;
+  }
+  .claim-card h2 { margin: 0 0 6px; font-size: 1rem; }
+  .claim-card p { margin: 0 0 12px; color: var(--text-secondary); font-size: 0.85rem; }
+  .claim-row { display: flex; align-items: center; gap: 8px; }
+  .claim-row .at { color: var(--text-muted); font-weight: 600; }
+  .claim-row input {
+    flex: 1; padding: 8px 10px; font: inherit; color: var(--text-primary);
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .claim-row input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .claim-row button {
+    padding: 8px 16px; font-family: inherit; font-size: 0.9rem; font-weight: 600; color: #fff;
+    background: var(--accent); border: 0; border-radius: 8px; cursor: pointer;
+  }
+  .claim-row button:disabled { opacity: 0.5; cursor: default; }
+  .claim-msg { min-height: 1.2em; margin: 8px 0 0 !important; font-size: 0.8rem !important; }
+  .claim-msg.err { color: #c33; }
+  .claim-msg.ok { color: var(--accent); }
+
+  .stat-strip {
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    margin: 30px 0 36px; border: 1px solid var(--border); border-radius: 12px;
+    background: var(--surface-2); overflow: hidden;
+  }
+  .stat { padding: 16px 10px; text-align: center; }
+  .stat + .stat { border-left: 1px solid var(--border); }
+  .stat strong { display: block; font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+  .stat small { color: var(--text-muted); font-size: 0.76rem; }
+
+  .cal-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+  .cal-head h2 { margin: 0; font-size: 1rem; }
+  .tabs { display: flex; gap: 14px; font-size: 0.85rem; }
+  .tabs span { color: var(--text-muted); cursor: default; }
+  .tabs .active { color: var(--text-primary); font-weight: 600; }
+
+  .calendar-wrap { overflow-x: auto; padding-bottom: 6px; }
+  .calendar { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 11px); gap: 3px; width: max-content; }
+  .cell { width: 11px; height: 11px; border-radius: 2.5px; background: var(--cell-0); }
+  .cell[data-l="1"] { background: var(--cell-1); }
+  .cell[data-l="2"] { background: var(--cell-2); }
+  .cell[data-l="3"] { background: var(--cell-3); }
+  .cell[data-l="4"] { background: var(--cell-4); }
+  .months { display: flex; width: max-content; margin-top: 6px; color: var(--text-muted); font-size: 0.74rem; }
+  .cal-legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; color: var(--text-muted); font-size: 0.74rem; }
+  .cal-legend .cell { display: inline-block; }
+
+  .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-top: 40px; }
+  .columns h3 { margin: 0 0 14px; font-size: 0.95rem; }
+  .columns h3.sub-section { margin-top: 28px; }
+
+  .plat-row { margin-bottom: 12px; }
+  .plat-head { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 4px; }
+  .plat-head .name { color: var(--text-primary); font-weight: 600; }
+  .plat-head .val { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .plat-track { height: 8px; background: var(--cell-0); border-radius: 4px; overflow: hidden; }
+  .plat-fill { height: 100%; background: var(--accent); border-radius: 0 4px 4px 0; min-width: 2px; }
+  .plat-row.empty .plat-fill { display: none; }
+  .plat-row.empty .plat-head { opacity: 0.55; }
+
+  .hours-chart { display: flex; align-items: flex-end; gap: 2px; height: 56px; }
+  .hours-chart span { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 1px; opacity: 0.85; }
+  .hours-labels { display: flex; justify-content: space-between; margin-top: 4px; color: var(--text-muted); font-size: 0.7rem; }
+  .kv { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+  .kv:last-child { border-bottom: none; }
+  .kv .k { color: var(--text-secondary); }
+  .kv .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .kv .v small { color: var(--text-muted); font-weight: 400; }
+
+  .modal-back {
+    position: fixed; inset: 0; z-index: 20;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, 0.35); backdrop-filter: blur(3px);
+  }
+  .modal-back[hidden] { display: none; }
+  .modal {
+    max-width: 440px; margin: 20px; padding: 26px 28px;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.3);
+  }
+  .modal h3 { margin: 0 0 10px; font-size: 1.1rem; }
+  .modal p { margin: 0 0 18px; color: var(--text-secondary); font-size: 0.92rem; line-height: 1.55; }
+  .modal-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .modal-row button {
+    padding: 9px 18px; font-family: inherit; font-size: 0.9rem; font-weight: 600;
+    border-radius: 9px; cursor: pointer; border: 1px solid transparent;
+    background: var(--accent); color: #fff;
+  }
+  .modal-row button.ghost {
+    background: transparent; color: var(--text-secondary); border-color: var(--border);
+  }
+  .modal-row button:disabled { opacity: 0.5; cursor: default; }
+  .modal-note { min-height: 1.2em; margin: 12px 0 0 !important; font-size: 0.8rem !important; color: var(--accent) !important; }
+
+  .tooltip {
+    position: fixed; z-index: 10; pointer-events: none; display: none;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 10px; font-size: 0.78rem; color: var(--text-secondary);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  }
+  .tooltip b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+  footer { margin-top: 44px; text-align: center; color: var(--text-muted); font-size: 0.78rem; }
+
+  @media (max-width: 640px) {
+    .stat-strip { grid-template-columns: 1fr 1fr; }
+    .stat + .stat { border-left: none; }
+    .columns { grid-template-columns: 1fr; gap: 28px; }
+  }
+</style>
+</head>
+<body>
+<script>
+  // Surface any script failure on the page itself — a silent crash renders as
+  // confusing em-dashes everywhere.
+  window.addEventListener("error", (event) => {
+    const el = document.createElement("div");
+    el.style.cssText = "max-width:820px;margin:12px auto;padding:10px 14px;background:#fdecec;border:1px solid #e59;border-radius:8px;color:#a00;font:12px/1.5 ui-monospace,monospace;";
+    el.textContent = `Dashboard error: ${event.message} (${event.filename ? "" : "inline "}line ${event.lineno}:${event.colno})`;
+    document.body.prepend(el);
+  });
+</script>
+<main>
+  <section class="identity">
+    <div class="avatar">TM</div>
+    <h1 id="meter-id">—</h1>
+    <p class="sub"><span id="handle"></span><span id="handle-sep" hidden> · </span><span class="badge" id="profile-badge">Local profile</span></p>
+  </section>
+
+  <section class="claim-card" id="claim-card" hidden>
+    <h2>Claim your handle</h2>
+    <p>Pick the name other meters will see — like an X handle, it's yours once claimed. Reserved on this device now; first-come-first-serve on the public registry when it launches.</p>
+    <div class="claim-row">
+      <span class="at">@</span>
+      <input id="claim-input" type="text" maxlength="30" placeholder="yourhandle" autocomplete="off" spellcheck="false">
+      <button id="claim-button" type="button">Claim</button>
+    </div>
+    <p class="claim-msg" id="claim-msg"></p>
+  </section>
+
+  <section class="stat-strip" aria-label="Lifetime stats">
+    <div class="stat"><strong id="s-lifetime">—</strong><small>Lifetime tokens</small></div>
+    <div class="stat"><strong id="s-peak">—</strong><small>Peak day</small></div>
+    <div class="stat"><strong id="s-longest">—</strong><small>Longest session</small></div>
+    <div class="stat"><strong id="s-streak">—</strong><small>Current streak</small></div>
+    <div class="stat"><strong id="s-best-streak">—</strong><small>Longest streak</small></div>
+  </section>
+
+  <section>
+    <div class="cal-head">
+      <h2>Token activity</h2>
+      <div class="tabs">
+        <span class="active">Daily</span>
+        <span title="Prototype — daily view only">Weekly</span>
+        <span title="Prototype — daily view only">Cumulative</span>
+      </div>
+    </div>
+    <div class="calendar-wrap">
+      <div class="calendar" id="calendar"></div>
+      <div class="months" id="months"></div>
+    </div>
+    <div class="cal-legend">
+      Less
+      <span class="cell" data-l="0"></span><span class="cell" data-l="1"></span><span class="cell" data-l="2"></span><span class="cell" data-l="3"></span><span class="cell" data-l="4"></span>
+      More
+    </div>
+  </section>
+
+  <section class="columns">
+    <div>
+      <h3>By platform</h3>
+      <div id="platforms"></div>
+      <h3 class="sub-section">Coding patterns</h3>
+      <div class="kv"><span class="k" title="Share of all input-side tokens served from prompt cache">Cache hit rate</span><span class="v" id="i-cache">—</span></div>
+      <div class="kv"><span class="k" title="Tokens the models read for every token they write">Read : write ratio</span><span class="v" id="i-ratio">—</span></div>
+      <div class="kv"><span class="k">Median session</span><span class="v" id="i-median">—</span></div>
+      <div class="kv"><span class="k">Largest session</span><span class="v" id="i-largest">—</span></div>
+      <div class="kv"><span class="k">Peak hour</span><span class="v" id="i-hour">—</span></div>
+      <div class="kv"><span class="k">Busiest weekday</span><span class="v" id="i-weekday">—</span></div>
+    </div>
+    <div>
+      <h3>Activity insights</h3>
+      <div class="kv"><span class="k">Days active</span><span class="v" id="i-days">—</span></div>
+      <div class="kv"><span class="k">Average per active day</span><span class="v" id="i-avg">—</span></div>
+      <div class="kv"><span class="k">Sessions tracked</span><span class="v" id="i-sessions">—</span></div>
+      <div class="kv"><span class="k">Tracking since</span><span class="v" id="i-since">—</span></div>
+      <h3 class="sub-section">Daily rhythm</h3>
+      <div class="hours-chart" id="hours-chart" aria-label="Tokens by hour of day"></div>
+      <div class="hours-labels"><span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>11pm</span></div>
+      <h3 class="sub-section">Top usage days</h3>
+      <div id="top-days"></div>
+    </div>
+  </section>
+
+  <footer>
+    Sample data — backend not yet live. All numbers are computed locally from your own transcripts;
+    nothing leaves this machine unless sharing is enabled in the meter's settings.
+  </footer>
+</main>
+
+<div class="tooltip" id="tooltip"></div>
+
+<div class="modal-back" id="share-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <h3 id="modal-title">Your data stays local</h3>
+    <p>All your data are stored locally, unless you feel comfortable to share your record with our server and bring your token patterns into the community.</p>
+    <div class="modal-row">
+      <button id="modal-share" type="button">Share my data</button>
+      <button id="modal-local" type="button" class="ghost">Keep everything local</button>
+    </div>
+    <p class="modal-note" id="modal-note"></p>
+  </div>
+</div>
+
+<script>
+  const fmt = (n) =>
+    n >= 1e9 ? (n / 1e9).toFixed(2) + "B"
+    : n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M"
+    : n >= 1e3 ? (n / 1e3).toFixed(0) + "K"
+    : String(Math.round(n));
+  const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const WINDOW_DAYS = 371;
+  const dateKey = (d) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const hourLabel = (h) => (h === 0 ? "12am" : h < 12 ? h + "am" : h === 12 ? "12pm" : h - 12 + "pm");
+  const fmtDuration = (ms) => {
+    const hours = ms / 3600000;
+    if (hours >= 48) return (hours / 24).toFixed(1) + "d";
+    if (hours >= 1) return Math.floor(hours) + "h " + Math.round((hours % 1) * 60) + "m";
+    return Math.round(ms / 60000) + "m";
+  };
+
+  function sampleData() {
+    let seed = 42;
+    const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const dayTotals = {};
+    const now = new Date();
+    let lifetime = 0, activeDays = 0, peak = 0, run = 0, best = 0, current = 0;
+    for (let i = WINDOW_DAYS - 1; i >= 0; i -= 1) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const weekend = d.getDay() === 0 || d.getDay() === 6 ? 0.35 : 1;
+      const ramp = Math.min(1, Math.max(0, (WINDOW_DAYS - i - 130) / 240));
+      const tokens = rand() < 0.78 * (0.25 + ramp)
+        ? Math.round((400000 + rand() * 11600000) * weekend * (0.4 + ramp))
+        : 0;
+      dayTotals[dateKey(d)] = tokens;
+      if (tokens > 0) {
+        activeDays += 1; lifetime += tokens; run += 1;
+        best = Math.max(best, run);
+        peak = Math.max(peak, tokens);
+      } else run = 0;
+      if (i === 0) current = run;
+    }
+    return {
+      live: false,
+      dayTotals,
+      stats: {
+        lifetime, peakDayTokens: peak, longestSessionLabel: "5h 42m",
+        currentStreak: current, longestStreak: best,
+        daysActive: activeDays, daysObserved: WINDOW_DAYS,
+        avg: Math.round(lifetime / Math.max(1, activeDays)),
+        sessions: 412, since: "sample data",
+        cacheLabel: "91.2%", ratioLabel: "154 : 1", medianLabel: "1.1M", largestLabel: "48.2M",
+        peakHour: 15, busiestWeekday: 3,
+        hours: Array.from({ length: 24 }, (_, h) =>
+          Math.max(0, Math.round((lifetime / 24) * Math.exp(-((h - 15) ** 2) / 18)))),
+        platforms: [
+          { name: "Claude Code", tokens: lifetime * 0.62, sessions: 250 },
+          { name: "Codex", tokens: lifetime * 0.31, sessions: 140 },
+          { name: "Cline", tokens: lifetime * 0.07, sessions: 22 },
+        ],
+        topDays: Object.entries(dayTotals)
+          .filter(([, t]) => t > 0)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([date, tokens]) => ({ date, tokens })),
+      },
+    };
+  }
+
+  function fromApi(usage) {
+    const s = usage.stats;
+    const dayTotals = {};
+    for (const day of usage.days) dayTotals[day.date] = day.total;
+    const readPerWrite = s.outputShare > 0 ? Math.round((1 - s.outputShare) / s.outputShare) : 0;
+    return {
+      live: true,
+      scanNote: `Computed locally from ${usage.totalFiles.toLocaleString()} transcript files in ${(usage.scanMs / 1000).toFixed(1)}s — nothing left this machine.`,
+      dayTotals,
+      stats: {
+        lifetime: s.lifetimeTokens,
+        peakDayTokens: s.peakDay ? s.peakDay.tokens : 0,
+        longestSessionLabel: s.longestSessionMs > 0 ? fmtDuration(s.longestSessionMs) : "—",
+        currentStreak: s.currentStreakDays, longestStreak: s.longestStreakDays,
+        daysActive: s.daysActive, daysObserved: s.daysObserved,
+        avg: s.avgPerActiveDay, sessions: s.sessionCount,
+        since: s.firstActivityDate || "—",
+        cacheLabel: (s.cacheReadShare * 100).toFixed(1) + "%",
+        ratioLabel: readPerWrite > 0 ? readPerWrite.toLocaleString() + " : 1" : "—",
+        medianLabel: fmt(s.medianSessionTokens), largestLabel: fmt(s.largestSessionTokens),
+        peakHour: s.peakHour, busiestWeekday: s.busiestWeekday, hours: usage.hours,
+        platforms: [
+          { name: "Claude Code", tokens: s.byPlatform.claudeCode.tokens, sessions: s.byPlatform.claudeCode.sessions },
+          { name: "Codex", tokens: s.byPlatform.codex.tokens, sessions: s.byPlatform.codex.sessions },
+          { name: "Cline", tokens: s.byPlatform.cline.tokens, sessions: s.byPlatform.cline.sessions },
+        ],
+        topDays: s.topDays,
+      },
+    };
+  }
+
+  const tooltip = document.getElementById("tooltip");
+
+  function renderCalendar(dayTotals) {
+    const calendar = document.getElementById("calendar");
+    const monthsHost = document.getElementById("months");
+    calendar.textContent = "";
+    monthsHost.textContent = "";
+    const now = new Date();
+    const cells = [];
+    for (let i = WINDOW_DAYS - 1; i >= 0; i -= 1) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      cells.push({ date: d, tokens: dayTotals[dateKey(d)] || 0 });
+    }
+    const nonzero = cells.map((c) => c.tokens).filter((t) => t > 0).sort((a, b) => a - b);
+    const q = (p) =>
+      nonzero.length === 0 ? Infinity : nonzero[Math.min(nonzero.length - 1, Math.floor(nonzero.length * p))];
+    const t1 = q(0.25), t2 = q(0.5), t3 = q(0.75);
+    const level = (t) => (t <= 0 ? 0 : t >= t3 ? 4 : t >= t2 ? 3 : t >= t1 ? 2 : 1);
+    const leading = cells[0].date.getDay();
+    for (let i = 0; i < leading; i += 1) {
+      const pad = document.createElement("span");
+      pad.className = "cell";
+      pad.style.visibility = "hidden";
+      calendar.append(pad);
+    }
+    for (const cell of cells) {
+      const el = document.createElement("span");
+      el.className = "cell";
+      el.dataset.l = String(level(cell.tokens));
+      el.addEventListener("mousemove", (event) => {
+        tooltip.style.display = "block";
+        tooltip.innerHTML = `<b>${cell.tokens.toLocaleString()}</b> tokens · ${cell.date.toDateString().slice(0, 10)}`;
+        tooltip.style.left = Math.min(event.clientX + 12, window.innerWidth - tooltip.offsetWidth - 12) + "px";
+        tooltip.style.top = (event.clientY - 36) + "px";
+      });
+      el.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+      calendar.append(el);
+    }
+    const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let lastMonth = -1;
+    const weeks = Math.ceil((leading + cells.length) / 7);
+    for (let w = 0; w < weeks; w += 1) {
+      const index = Math.min(cells.length - 1, Math.max(0, w * 7 - leading));
+      const month = cells[index].date.getMonth();
+      const label = document.createElement("span");
+      label.style.width = "14px";
+      label.style.flex = "0 0 14px";
+      if (month !== lastMonth) {
+        label.textContent = names[month];
+        label.style.overflow = "visible";
+        lastMonth = month;
+      }
+      monthsHost.append(label);
+    }
+  }
+
+  function renderAll(data) {
+    const s = data.stats;
+    const set = (id, value) => { document.getElementById(id).textContent = value; };
+    set("s-lifetime", fmt(s.lifetime));
+    set("s-peak", fmt(s.peakDayTokens));
+    set("s-longest", s.longestSessionLabel);
+    set("s-streak", s.currentStreak + (s.currentStreak === 1 ? " day" : " days"));
+    set("s-best-streak", s.longestStreak + (s.longestStreak === 1 ? " day" : " days"));
+    set("i-days", s.daysActive + " / " + s.daysObserved);
+    set("i-avg", fmt(s.avg));
+    set("i-sessions", String(s.sessions));
+    set("i-since", s.since);
+    set("i-cache", s.cacheLabel);
+    set("i-ratio", s.ratioLabel);
+    set("i-median", s.medianLabel);
+    set("i-largest", s.largestLabel);
+    set("i-hour", hourLabel(s.peakHour));
+    set("i-weekday", WEEKDAYS[s.busiestWeekday]);
+
+    const platHost = document.getElementById("platforms");
+    platHost.textContent = "";
+    const platMax = Math.max(1, ...s.platforms.map((p) => p.tokens));
+    const platTotal = Math.max(1, s.platforms.reduce((sum, p) => sum + p.tokens, 0));
+    for (const p of s.platforms) {
+      const row = document.createElement("div");
+      row.className = "plat-row" + (p.tokens > 0 ? "" : " empty");
+      const share = (p.tokens / platTotal) * 100;
+      const pct = share >= 10 || share === 0 ? Math.round(share) : share.toFixed(1);
+      row.innerHTML =
+        `<div class="plat-head"><span class="name">${p.name}</span>` +
+        `<span class="val">${p.tokens > 0
+          ? `${fmt(p.tokens)} · ${pct}%${p.sessions ? ` · ${p.sessions} sessions` : ""}`
+          : "no local data"}</span></div>` +
+        `<div class="plat-track"><span class="plat-fill" style="width:${(p.tokens / platMax) * 100}%"></span></div>`;
+      platHost.append(row);
+    }
+
+    const hoursHost = document.getElementById("hours-chart");
+    hoursHost.textContent = "";
+    const hourMax = Math.max(1, ...s.hours);
+    s.hours.forEach((tokens, hour) => {
+      const bar = document.createElement("span");
+      bar.style.height = Math.max(2, (tokens / hourMax) * 100) + "%";
+      bar.title = `${hourLabel(hour)} — ${fmt(tokens)} tokens`;
+      if (tokens === 0) bar.style.opacity = "0.18";
+      hoursHost.append(bar);
+    });
+
+    renderCalendar(data.dayTotals);
+
+    const topHost = document.getElementById("top-days");
+    topHost.textContent = "";
+    for (const day of s.topDays) {
+      const row = document.createElement("div");
+      row.className = "kv";
+      const label = new Date(day.date + "T12:00:00").toLocaleDateString("en-US", {
+        month: "short", day: "numeric", year: "numeric",
+      });
+      row.innerHTML = `<span class="k">${label}</span><span class="v">${fmt(day.tokens)} <small>tokens</small></span>`;
+      topHost.append(row);
+    }
+
+    if (data.live && data.scanNote) {
+      document.querySelector("footer").textContent = data.scanNote;
+    }
+  }
+
+  // Live profile + handle claim (served mode). Falls back to a static preview
+  // when opened as a file with no local profile server.
+  const TOKEN = new URLSearchParams(location.search).get("token");
+  const api = (path, options) => fetch(`${path}?token=${TOKEN}`, options);
+
+  function renderProfile(profile) {
+    const meterIdEl = document.getElementById("meter-id");
+    const handleEl = document.getElementById("handle");
+    const sep = document.getElementById("handle-sep");
+    const badge = document.getElementById("profile-badge");
+    const claimCard = document.getElementById("claim-card");
+    if (profile.handle) {
+      meterIdEl.textContent = "@" + profile.handle;
+      handleEl.textContent = profile.meterId;
+      sep.hidden = false;
+      badge.textContent =
+        (profile.handleClaimed ? "Claimed on registry" : "Reserved on this device") +
+        (profile.sharing && profile.sharing.enabled ? " · Sharing on" : "");
+      claimCard.hidden = true;
+    } else {
+      meterIdEl.textContent = profile.meterId;
+      handleEl.textContent = "";
+      sep.hidden = true;
+      badge.textContent = "Anonymous · local profile";
+      claimCard.hidden = false;
+    }
+  }
+
+  const shareModal = document.getElementById("share-modal");
+  const modalNote = document.getElementById("modal-note");
+
+  function maybeAskToShare(profile) {
+    // The popup is the same consent as the meter's "Share data" checkbox:
+    // shown only while sharing is off, and never twice in one visit.
+    if (profile.sharing && profile.sharing.enabled) return;
+    if (sessionStorage.getItem("tmShareAsked")) return;
+    sessionStorage.setItem("tmShareAsked", "1");
+    shareModal.hidden = false;
+  }
+
+  document.getElementById("modal-share").addEventListener("click", async (event) => {
+    event.target.disabled = true;
+    try {
+      const response = await api("/api/sharing", {
+        method: "POST",
+        body: JSON.stringify({ enabled: true }),
+      });
+      const profile = await response.json();
+      if (!response.ok) throw new Error(profile.error || "failed");
+      renderProfile(profile);
+      modalNote.textContent =
+        "Sharing is on — uploads begin when the community registry goes live.";
+      setTimeout(() => { shareModal.hidden = true; }, 1800);
+    } catch (error) {
+      modalNote.textContent = String(error.message || error);
+      event.target.disabled = false;
+    }
+  });
+  document.getElementById("modal-local").addEventListener("click", () => {
+    shareModal.hidden = true;
+  });
+
+  async function initProfile() {
+    if (!TOKEN) {
+      document.getElementById("meter-id").textContent = "TM-XXXX-XXXX-XXXX";
+      document.getElementById("profile-badge").textContent = "Static preview";
+      return;
+    }
+    try {
+      const profile = await (await api("/api/profile")).json();
+      renderProfile(profile);
+      maybeAskToShare(profile);
+    } catch {
+      document.getElementById("profile-badge").textContent = "Profile unavailable";
+    }
+  }
+
+  const claimInput = document.getElementById("claim-input");
+  const claimButton = document.getElementById("claim-button");
+  const claimMsg = document.getElementById("claim-msg");
+  claimInput.addEventListener("input", () => {
+    claimInput.value = claimInput.value.toLowerCase().replace(/[^a-z0-9-]/g, "");
+    claimMsg.textContent = "";
+    claimMsg.className = "claim-msg";
+  });
+  claimButton.addEventListener("click", async () => {
+    const handle = claimInput.value.trim();
+    if (handle.length < 2) {
+      claimMsg.textContent = "Handles need at least 2 characters.";
+      claimMsg.className = "claim-msg err";
+      return;
+    }
+    claimButton.disabled = true;
+    try {
+      const response = await api("/api/handle", {
+        method: "POST",
+        body: JSON.stringify({ handle }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "claim failed");
+      claimMsg.textContent = `@${handle} is yours on this device.`;
+      claimMsg.className = "claim-msg ok";
+      renderProfile(body);
+    } catch (error) {
+      claimMsg.textContent = String(error.message || error);
+      claimMsg.className = "claim-msg err";
+    } finally {
+      claimButton.disabled = false;
+    }
+  });
+
+  async function initData() {
+    if (TOKEN) {
+      try {
+        const response = await api("/api/usage");
+        if (response.ok) {
+          renderAll(fromApi(await response.json()));
+          return;
+        }
+      } catch {
+        /* fall through to sample data */
+      }
+    }
+    renderAll(sampleData());
+  }
+
+  initProfile();
+  initData();
+</script>
+</body>
+</html>

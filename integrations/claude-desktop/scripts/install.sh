@@ -164,6 +164,7 @@ trap cleanup EXIT
 /bin/cp -R "$ROOT/src" "$STAGING/src"
 /bin/cp -R "$ROOT/runtime" "$STAGING/runtime"
 /bin/cp -R "$ROOT/integrations" "$STAGING/integrations"
+/bin/cp -R "$ROOT/web" "$STAGING/web"
 /usr/bin/install -m 600 "$ROOT/package.json" "$STAGING/package.json"
 /usr/bin/install -m 600 "$ROOT/LICENSE" "$STAGING/LICENSE"
 token_meter_mark_installation_directory "$STAGING" "$LABEL"

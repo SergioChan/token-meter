@@ -156,9 +156,14 @@ function classifyAnomaly({
 }
 
 export class MetricsEngine {
-  constructor({ rateWindowMs = 60_000, hourWindowMs = 3_600_000 } = {}) {
+  constructor({
+    rateWindowMs = 60_000,
+    hourWindowMs = 3_600_000,
+    dayWindowMs = 86_400_000,
+  } = {}) {
     this.rateWindowMs = rateWindowMs;
     this.hourWindowMs = hourWindowMs;
+    this.dayWindowMs = dayWindowMs;
   }
 
   snapshot(
@@ -213,6 +218,10 @@ export class MetricsEngine {
       (sum, file) => sum + deltaBetween(file, nowMs - this.hourWindowMs, nowMs),
       0,
     );
+    const allDayTokens = files.reduce(
+      (sum, file) => sum + deltaBetween(file, nowMs - this.dayWindowMs, nowMs),
+      0,
+    );
     const recentTokens = sessionFiles.reduce(
       (sum, file) => sum + deltaBetween(file, nowMs - this.rateWindowMs, nowMs),
       0,
@@ -262,6 +271,7 @@ export class MetricsEngine {
       },
       account: {
         lastHourTokens: allHourTokens,
+        last24hTokens: allDayTokens,
       },
       skills,
       rate: {
