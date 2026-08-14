@@ -19,6 +19,10 @@ test("Codex payload enables persistent compact and draggable layout", () => {
   assert.match(payload, /collapsible:\s*true/);
   assert.match(payload, /draggable:\s*true/);
   assert.match(payload, /token-meter:codex-layout/);
+  assert.match(payload, /__tokenMeterActionBridge/);
+  assert.ok(
+    payload.indexOf("__tokenMeterActionBridge") < payload.indexOf("window.__tokenMeter = {}"),
+  );
 });
 
 test("an ineligible renderer never receives a persistent injection script", async () => {

@@ -641,6 +641,10 @@
 
   const INSTALL_URL = "https://github.com/SergioChan/token-meter";
   const nativeActions = () =>
+    window.webkit?.messageHandlers?.tokenMeterAction ??
+    window.__tokenMeterActionBridge ??
+    null;
+  const nativeQuitAction = () =>
     window.webkit?.messageHandlers?.tokenMeterAction ?? null;
   const postAction = (payload) => nativeActions()?.postMessage(payload);
   let settingsOpen = false;
@@ -744,7 +748,7 @@
     event.stopPropagation();
     postAction({ type: "quit-widget" });
   });
-  if (!nativeActions()) elements.settingsPower.hidden = true;
+  if (!nativeQuitAction()) elements.settingsPower.hidden = true;
   elements.settingsIdentityLink.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();

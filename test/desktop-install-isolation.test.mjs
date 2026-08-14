@@ -101,6 +101,7 @@ test(
       access(claudeSentinel),
       access(path.join(codexRoot, "src", "cli.mjs")),
       access(path.join(codexRoot, "runtime", "token-meter-ui.js")),
+      access(path.join(codexRoot, "web", "dashboard.html")),
     ]);
     assert.notEqual(codexRoot, claudeRoot);
 

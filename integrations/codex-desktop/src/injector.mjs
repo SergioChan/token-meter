@@ -8,6 +8,7 @@ import { MetricsEngine } from "../../../src/core/metrics-engine.mjs";
 import { RolloutStore } from "../../../src/core/rollout-store.mjs";
 import { CdpClient, isLoopbackWebSocketUrl } from "./cdp-client.mjs";
 import { buildSessionProbeExpression } from "./session-probe.mjs";
+import { CodexWidgetActions } from "./widget-actions.mjs";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(moduleDirectory, "../../..");
@@ -60,12 +61,26 @@ export function buildCodexMeterPayload(runtime, stylesheet) {
     "__TOKEN_METER_CSS_JSON__",
     JSON.stringify(stylesheet),
   );
-  return `${mounted}\nwindow.__tokenMeter?.configure({
+  return `window.__tokenMeterActionQueue = [];
+window.__tokenMeterActionBridge = {
+  postMessage(payload) {
+    if (window.__tokenMeterActionQueue.length < 50) {
+      window.__tokenMeterActionQueue.push(payload);
+    }
+  },
+};
+${mounted}\nwindow.__tokenMeter?.configure({
     collapsible: true,
     draggable: true,
     storageKey: "token-meter:codex-layout:v1",
   });`;
 }
+
+const drainActionQueueExpression = `(() => {
+  const queue = window.__tokenMeterActionQueue;
+  if (!Array.isArray(queue)) return [];
+  return queue.splice(0, 50);
+})()`;
 
 async function loadPayload() {
   const [runtime, stylesheet] = await Promise.all([
@@ -301,6 +316,7 @@ export async function runCodexInjector({
   const payload = await loadPayload();
   const store = new RolloutStore({ sessionsDirectory, historyFileLimit: 0 });
   const engine = new MetricsEngine();
+  const widgetActions = new CodexWidgetActions();
   const attached = new Map();
   const sessionWatcher = (() => {
     try {
@@ -377,9 +393,18 @@ export async function runCodexInjector({
           source: connection.probe.bindingSource,
           exact: Boolean(connection.probe.threadId),
         };
+        widgetActions.decorateSnapshot(snapshot);
         await connection.client.evaluate(updateExpression(snapshot)).catch(() => {
           connection.failed = true;
         });
+        const actions = await connection.client
+          .evaluate(drainActionQueueExpression)
+          .catch(() => []);
+        for (const action of Array.isArray(actions) ? actions : []) {
+          await widgetActions.handle(action).catch((error) => {
+            process.stderr.write(`Codex widget action failed: ${error.message}\n`);
+          });
+        }
       }
       warmedHistoryFileLimit = Math.min(
         historyFileLimit,
@@ -390,6 +415,7 @@ export async function runCodexInjector({
     }
   } finally {
     sessionWatcher?.close();
+    await widgetActions.stop();
     await stop();
   }
 }

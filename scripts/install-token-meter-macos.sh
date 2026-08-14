@@ -96,6 +96,7 @@ trap cleanup EXIT
 /bin/cp -R "$ROOT/src" "$STAGING/src"
 /bin/cp -R "$ROOT/integrations" "$STAGING/integrations"
 /bin/cp -R "$ROOT/runtime" "$STAGING/runtime"
+/bin/cp -R "$ROOT/web" "$STAGING/web"
 /usr/bin/install -m 700 "$ROOT/scripts/token-meter-service-macos.sh" \
   "$STAGING/scripts/token-meter-service-macos.sh"
 /usr/bin/install -m 700 "$ROOT/scripts/verify-codex-app-macos.sh" \
