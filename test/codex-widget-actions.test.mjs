@@ -35,6 +35,7 @@ function harness(overrides = {}) {
         "https://www.tokenwidget.app/leaderboard#pair=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       opener: async (url) => opened.push(url),
       clipboardWriter: async (text) => copied.push(text),
+      registryChecker: () => false,
       ...overrides,
     }),
   };
@@ -82,4 +83,49 @@ test("Codex widget actions reject URLs outside the trusted surfaces", async () =
     actions.handle({ type: "open-leaderboard" }),
     /unsafe URL/,
   );
+});
+
+test("Codex widget actions schedule independent community sync", async () => {
+  const timeouts = [];
+  const intervals = [];
+  const clearedTimeouts = [];
+  const clearedIntervals = [];
+  const syncReasons = [];
+  const logs = [];
+  const timer = (collection) => (callback, delay) => {
+    const value = { callback, delay, unref() {} };
+    collection.push(value);
+    return value;
+  };
+  const { actions } = harness({
+    registryChecker: () => true,
+    communitySyncRunner: async (reason) => {
+      syncReasons.push(reason);
+      return { ok: true };
+    },
+    timeoutScheduler: timer(timeouts),
+    intervalScheduler: timer(intervals),
+    timeoutClearer: (value) => clearedTimeouts.push(value),
+    intervalClearer: (value) => clearedIntervals.push(value),
+    logger: (message) => logs.push(message),
+  });
+
+  actions.start();
+  actions.start();
+  assert.equal(timeouts.length, 1);
+  assert.equal(timeouts[0].delay, 15_000);
+  assert.equal(intervals.length, 1);
+  assert.equal(intervals[0].delay, 3_600_000);
+
+  await timeouts[0].callback();
+  await actions.syncCommunity("manual");
+  assert.deepEqual(syncReasons, ["startup", "manual"]);
+  assert.deepEqual(logs, [
+    "community sync ok (startup)",
+    "community sync ok (manual)",
+  ]);
+
+  await actions.stop();
+  assert.deepEqual(clearedTimeouts, []);
+  assert.deepEqual(clearedIntervals, [intervals[0]]);
 });

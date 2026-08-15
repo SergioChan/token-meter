@@ -350,6 +350,7 @@ export async function runCodexInjector({
   signal?.addEventListener("abort", () => void stop(), { once: true });
 
   try {
+    widgetActions.start();
     await verifyMacListenerOwner(cdpPort, { appPath });
     while (!stopping) {
       const nowMs = Date.now();

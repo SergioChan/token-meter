@@ -2,13 +2,13 @@ import { parentPort, workerData } from "node:worker_threads";
 import {
   loadOrCreateIdentity,
   setPendingWithdraw,
-} from "../../../src/core/identity.mjs";
+} from "./identity.mjs";
 import {
   claimHandle,
   registryEnabled,
   uploadUsage,
   withdrawUsage,
-} from "../../../src/core/registry-client.mjs";
+} from "./registry-client.mjs";
 
 async function run() {
   if (!registryEnabled()) return { ok: true, skipped: "registry-disabled" };

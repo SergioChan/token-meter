@@ -89,13 +89,14 @@ test("Claude overlay bridge serves multiple snapshots in one process", async (co
 });
 
 test("Claude overlay bridge asks the registry for a signed browser pairing URL", async () => {
-  const source = await readFile(
-    "integrations/claude-desktop/src/overlay-bridge.mjs",
-    "utf8",
-  );
+  const [source, syncSource] = await Promise.all([
+    readFile("integrations/claude-desktop/src/overlay-bridge.mjs", "utf8"),
+    readFile("src/core/community-sync.mjs", "utf8"),
+  ]);
   assert.match(source, /request\?\.command === "leaderboard-url"/);
   assert.match(source, /void syncCommunity\("leaderboard"\)/);
-  assert.match(source, /new Worker\(/);
+  assert.match(source, /runCommunitySyncWorker/);
+  assert.match(syncSource, /new Worker\(/);
   assert.match(source, /cachedUsageHistory\.collectCached\(\)/);
   assert.match(source, /await createLeaderboardUrl\(identity\)/);
 });

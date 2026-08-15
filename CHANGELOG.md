@@ -4,6 +4,12 @@ The top entry is the current source version. Binary release metadata appears at
 `/api/v1/latest` only after a signed and notarized DMG has actually been
 published.
 
+## Unreleased
+
+- Codex now performs its own signed community sync 15 seconds after startup
+  and every hour, so public profile aggregates no longer depend on the Claude
+  companion being active.
+
 ## 0.2.5 — 2026-08-14
 
 - The widget updates itself. Clicking the update banner now downloads the

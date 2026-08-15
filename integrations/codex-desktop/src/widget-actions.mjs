@@ -7,12 +7,18 @@ import {
   loadOrCreateIdentity,
   setSharingEnabled,
 } from "../../../src/core/identity.mjs";
-import { createLeaderboardUrl } from "../../../src/core/registry-client.mjs";
+import { runCommunitySyncWorker } from "../../../src/core/community-sync.mjs";
+import {
+  createLeaderboardUrl,
+  registryEnabled,
+} from "../../../src/core/registry-client.mjs";
 import { UsageHistory } from "../../../src/core/usage-history.mjs";
 
 const execFileAsync = promisify(execFile);
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const defaultWebDir = path.resolve(moduleDirectory, "../../../web");
+const startupSyncDelayMs = 15_000;
+const communitySyncIntervalMs = 3_600_000;
 
 function validDashboardUrl(value) {
   try {
@@ -73,6 +79,13 @@ export class CodexWidgetActions {
     dashboardFactory = (options) => new DashboardServer(options),
     opener = openExternal,
     clipboardWriter = copyToClipboard,
+    registryChecker = registryEnabled,
+    communitySyncRunner = runCommunitySyncWorker,
+    timeoutScheduler = setTimeout,
+    intervalScheduler = setInterval,
+    timeoutClearer = clearTimeout,
+    intervalClearer = clearInterval,
+    logger = (message) => process.stderr.write(`${message}\n`),
     now = Date.now,
   } = {}) {
     this.webDir = webDir;
@@ -83,10 +96,53 @@ export class CodexWidgetActions {
     this.dashboardFactory = dashboardFactory;
     this.opener = opener;
     this.clipboardWriter = clipboardWriter;
+    this.registryChecker = registryChecker;
+    this.communitySyncRunner = communitySyncRunner;
+    this.timeoutScheduler = timeoutScheduler;
+    this.intervalScheduler = intervalScheduler;
+    this.timeoutClearer = timeoutClearer;
+    this.intervalClearer = intervalClearer;
+    this.logger = logger;
     this.now = now;
     this.dashboardServer = null;
     this.identityMemo = null;
     this.usageMemo = null;
+    this.communitySyncPromise = null;
+    this.startupSyncTimer = null;
+    this.communitySyncTimer = null;
+  }
+
+  start() {
+    if (this.startupSyncTimer != null || this.communitySyncTimer != null) return;
+    this.startupSyncTimer = this.timeoutScheduler(() => {
+      this.startupSyncTimer = null;
+      return this.syncCommunity("startup");
+    }, startupSyncDelayMs);
+    this.startupSyncTimer?.unref?.();
+    this.communitySyncTimer = this.intervalScheduler(() => {
+      return this.syncCommunity("interval");
+    }, communitySyncIntervalMs);
+    this.communitySyncTimer?.unref?.();
+  }
+
+  async syncCommunity(reason) {
+    if (!this.registryChecker()) return null;
+    const identity = this.#identity();
+    if (identity.sharing?.enabled !== true) return null;
+    if (this.communitySyncPromise != null) return this.communitySyncPromise;
+    this.communitySyncPromise = this.communitySyncRunner(reason)
+      .then((result) => {
+        this.logger(`community sync ok (${reason})`);
+        return result;
+      })
+      .catch((error) => {
+        this.logger(`community sync failed (${reason}): ${error.message}`);
+        return null;
+      })
+      .finally(() => {
+        this.communitySyncPromise = null;
+      });
+    return this.communitySyncPromise;
   }
 
   #identity() {
@@ -141,6 +197,7 @@ export class CodexWidgetActions {
       return true;
     }
     if (action.type === "open-leaderboard") {
+      void this.syncCommunity("leaderboard");
       const url = await this.leaderboardUrlFactory(this.#identity());
       if (!validLeaderboardUrl(url)) throw new Error("registry returned an unsafe URL");
       await this.opener(url);
@@ -152,6 +209,7 @@ export class CodexWidgetActions {
       }
       const identity = this.sharingSetter(action.enabled);
       this.identityMemo = { atMs: this.now(), value: identity };
+      if (identity.sharing.enabled) void this.syncCommunity("consent");
       return true;
     }
     if (action.type === "copy-text") {
@@ -165,9 +223,18 @@ export class CodexWidgetActions {
   }
 
   async stop() {
-    if (this.dashboardServer == null) return;
-    const server = this.dashboardServer;
-    this.dashboardServer = null;
-    await server.stop();
+    if (this.startupSyncTimer != null) {
+      this.timeoutClearer(this.startupSyncTimer);
+      this.startupSyncTimer = null;
+    }
+    if (this.communitySyncTimer != null) {
+      this.intervalClearer(this.communitySyncTimer);
+      this.communitySyncTimer = null;
+    }
+    if (this.dashboardServer != null) {
+      const server = this.dashboardServer;
+      this.dashboardServer = null;
+      await server.stop();
+    }
   }
 }

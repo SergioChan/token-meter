@@ -2,10 +2,10 @@
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
-import { Worker } from "node:worker_threads";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { ClaudeSnapshotRuntime } from "./snapshot-runtime.mjs";
+import { runCommunitySyncWorker } from "../../../src/core/community-sync.mjs";
 import {
   loadOrCreateIdentity,
   markHandlePrompted,
@@ -23,31 +23,6 @@ import { registryBase } from "../../../src/core/registry-config.mjs";
 import { UsageHistory } from "../../../src/core/usage-history.mjs";
 
 let communitySyncPromise = null;
-
-function runCommunitySyncWorker(reason) {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(
-      new URL("./community-sync-worker.mjs", import.meta.url),
-      { workerData: { reason } },
-    );
-    let settled = false;
-    const finish = (error, result = null) => {
-      if (settled) return;
-      settled = true;
-      if (error) reject(error);
-      else resolve(result);
-    };
-    worker.once("message", (message) => {
-      if (message?.ok === true) finish(null, message);
-      else finish(new Error(message?.error || "community sync failed"));
-    });
-    worker.once("error", (error) => finish(error));
-    worker.once("exit", (code) => {
-      if (code !== 0) finish(new Error(`community sync worker exited with ${code}`));
-      else finish(new Error("community sync worker exited without a result"));
-    });
-  });
-}
 
 // Community aggregation runs outside the snapshot event loop, so a first
 // scan of multi-gigabyte histories cannot freeze the live meter.
