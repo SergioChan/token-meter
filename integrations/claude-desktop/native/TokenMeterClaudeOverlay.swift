@@ -1058,7 +1058,7 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
             var swapped: NSURL?
             try FileManager.default.replaceItem(
                 at: installed, withItemAt: staging,
-                backupItemName: nil, options: [], resultingItemURL: &swapped,
+                backupItemName: nil, options: [], resultingItemURL: &swapped
             )
         } catch {
             try? FileManager.default.removeItem(at: staging)
