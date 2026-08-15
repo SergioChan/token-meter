@@ -1,5 +1,5 @@
 const DESKTOP_SESSION_ID_PATTERN =
-  /^local_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  /^(?:local_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|session_[0-9A-Za-z]{24})$/;
 
 export function isClaudeDesktopSessionId(value) {
   return (
@@ -10,7 +10,7 @@ export function isClaudeDesktopSessionId(value) {
 export function buildClaudeSessionProbeExpression() {
   const sessionIdSource = DESKTOP_SESSION_ID_PATTERN.source;
   return `(() => {
-    const sessionIdPattern = new RegExp(${JSON.stringify(sessionIdSource)}, 'i');
+    const sessionIdPattern = new RegExp(${JSON.stringify(sessionIdSource)});
     const normalizeSessionId = (value) =>
       typeof value === 'string' && sessionIdPattern.test(value) ? value : null;
     const sessionIdFromPath = (value) => {
@@ -18,7 +18,7 @@ export function buildClaudeSessionProbeExpression() {
       let decoded = value;
       try { decoded = decodeURIComponent(value); } catch {}
       const match = decoded.match(
-        /(?:^|\\/)(?:code|epitaxy)\\/(local_[0-9a-f-]{36})(?:[\\/?#]|$)/i
+        /(?:^|\\/)(?:code|epitaxy)\\/((?:local_[0-9a-f-]{36}|session_[0-9A-Za-z]{24}))(?:[\\/?#]|$)/
       );
       return normalizeSessionId(match?.[1] ?? null);
     };

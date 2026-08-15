@@ -4,7 +4,8 @@ import { runWithConcurrency, timestampToMs } from "./local-data-utils.mjs";
 
 const UUID_SOURCE =
   "[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}";
-const DESKTOP_SESSION_ID = new RegExp(`^local_${UUID_SOURCE}$`, "i");
+const LOCAL_DESKTOP_SESSION_ID = new RegExp(`^local_${UUID_SOURCE}$`, "i");
+const CLOUD_DESKTOP_SESSION_ID = /^session_[0-9A-Za-z]{24}$/;
 const CLI_SESSION_ID = new RegExp(`^${UUID_SOURCE}$`, "i");
 
 function safeString(value) {
@@ -14,7 +15,17 @@ function safeString(value) {
 }
 
 export function isClaudeDesktopSessionId(value) {
-  return typeof value === "string" && DESKTOP_SESSION_ID.test(value);
+  return (
+    isClaudeLocalDesktopSessionId(value) || isClaudeCloudSessionId(value)
+  );
+}
+
+export function isClaudeLocalDesktopSessionId(value) {
+  return typeof value === "string" && LOCAL_DESKTOP_SESSION_ID.test(value);
+}
+
+export function isClaudeCloudSessionId(value) {
+  return typeof value === "string" && CLOUD_DESKTOP_SESSION_ID.test(value);
 }
 
 export function isClaudeCliSessionId(value) {
@@ -37,7 +48,7 @@ export function parseClaudeDesktopSession(source) {
   const cliSessionId = safeString(value.cliSessionId);
   const cwd = safeString(value.cwd);
   if (
-    !isClaudeDesktopSessionId(desktopSessionId) ||
+    !isClaudeLocalDesktopSessionId(desktopSessionId) ||
     !isClaudeCliSessionId(cliSessionId) ||
     cwd == null ||
     !path.isAbsolute(cwd)
@@ -126,7 +137,7 @@ export class ClaudeDesktopSessionStore {
     }
     discovered.sort((left, right) => right.modifiedMs - left.modifiedMs);
     const selected = discovered.slice(0, this.metadataFileLimit);
-    if (isClaudeDesktopSessionId(preferredDesktopSessionId)) {
+    if (isClaudeLocalDesktopSessionId(preferredDesktopSessionId)) {
       const expectedName = `${preferredDesktopSessionId}.json`;
       for (const file of discovered) {
         if (path.basename(file.path) === expectedName && !selected.includes(file)) {

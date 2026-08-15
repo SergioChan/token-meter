@@ -9,6 +9,10 @@ published.
 - Codex now performs its own signed community sync 15 seconds after startup
   and every hour, so public profile aggregates no longer depend on the Claude
   companion being active.
+- Claude Desktop cloud Code Sessions using exact `session_<24 chars>` routes
+  are measured from their locally cached, paginated `/events` usage records.
+  The adapter validates a complete sequence before binding and retains no
+  message content; legacy `local_<uuid>` Sessions keep using local transcripts.
 
 ## 0.2.5 — 2026-08-14
 

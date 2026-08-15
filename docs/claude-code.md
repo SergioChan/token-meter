@@ -8,15 +8,24 @@ The supported UI is an independent native overlay. It follows the focused Claude
 
 ## Current status
 
-The native companion is implemented, tested, installable, and live-validated against Claude Desktop `1.24012.9` with bundled Claude Code `2.1.219`.
+The native companion is implemented, tested, installable, and live-validated
+against both legacy local Sessions and Claude Desktop `1.30096.1` cloud Code
+Sessions.
 
-Support is marked **Beta** because selected-Session Accessibility URLs, Desktop metadata, transcript records, and the packaged model catalog are private compatibility surfaces rather than documented Anthropic extension interfaces.
+Support is marked **Beta** because selected-Session Accessibility URLs, Desktop
+metadata, transcript records, local HTTP-cache records, and the packaged model
+catalog are private compatibility surfaces rather than documented Anthropic
+extension interfaces.
 
 Implemented modules include:
 
 - Official Claude.app path, bundle, Team ID, signature, executable, and model-catalog verification.
-- Exact focused Code Session discovery from an Accessibility URL containing `local_<uuid>`.
-- Exact Desktop `sessionId` to Claude Code `cliSessionId` resolution with fail-closed ambiguity handling.
+- Exact focused Code Session discovery from an Accessibility URL containing a
+  legacy `local_<uuid>` or current mixed-case `session_<24 chars>` identifier.
+- Exact local Desktop `sessionId` to Claude Code `cliSessionId` resolution with
+  fail-closed ambiguity handling.
+- Exact cloud Session event resolution through deterministic Chromium Simple
+  Cache keys, zstd decoding, pagination, and contiguous sequence validation.
 - Bounded incremental transcript collection with content discard and response-level de-duplication.
 - A persistent numerical snapshot bridge rather than one Node process per poll.
 - A native non-activating panel that follows Claude, hides outside the eligible Code surface, and supports drag/collapse persistence.
@@ -41,7 +50,15 @@ The companion performs a shallow role-only scan of the focused Claude Accessibil
 https://claude.ai/epitaxy/local_<uuid>
 ```
 
-Older `/code/local_<uuid>` routes remain accepted for compatibility. `AXLink` sidebar targets, extra route components, non-Claude hosts, and multiple eligible web areas all produce a hidden/unbound state.
+Current cloud Code Sessions use:
+
+```text
+https://claude.ai/epitaxy/session_<24 case-sensitive alphanumeric chars>
+```
+
+Older `/code/local_<uuid>` routes remain accepted for compatibility. `AXLink`
+sidebar targets, malformed identifiers, extra route components, non-Claude
+hosts, and multiple eligible web areas all produce a hidden/unbound state.
 
 The exact Desktop identity is then resolved through metadata under:
 
@@ -57,6 +74,13 @@ One `local_<uuid>` must map to one valid `cliSessionId` and absolute project dir
 - the most recent `lastFocusedAt` value;
 - the Session title or display name.
 
+A `session_<24 chars>` cloud Session takes a separate path. The adapter computes
+the exact Chromium Simple Cache file for Claude's stable latest-events URL,
+follows only validated pagination cursors, de-duplicates by `sequence_num`, and
+requires one contiguous sequence beginning at 1. A missing page, malformed
+cache key, unsupported compression format, sequence gap, or oversized response
+produces an unbound state. It never falls back to the newest local transcript.
+
 Read [the selected-Session signal research](research/claude-selected-session-signals.md) for the evidence and rejected fallbacks.
 
 ## Runtime architecture
@@ -65,13 +89,16 @@ Read [the selected-Session signal research](research/claude-selected-session-sig
 Focused Claude Accessibility window
               |
               v
-Exact Desktop local_<uuid>
+Exact local_<uuid> or cloud session_<24 chars>
               |
-              v
-Desktop metadata -> cliSessionId + project
-              |
-              v
-Bounded, content-discarding transcript collector
+       +------+------+
+       |             |
+       v             v
+Desktop metadata   Complete cached /events pages
+       |             |
+       v             v
+Local transcript   Content-discarding usage collector
+       +------v------+
               |
               v
 Persistent ClaudeSnapshotRuntime bridge
@@ -87,7 +114,9 @@ The complete snapshot switches atomically when the Accessibility Session ID chan
 
 ## Usage accounting
 
-The collector never sums transcript rows directly. It:
+Both collectors use the same accounting rules. The local collector reads the
+bound transcript; the cloud collector reads only the bound Session's locally
+cached event pages after proving that the sequence is complete. They:
 
 1. Reads the exact root transcript and child-Agent transcripts nested under that Session.
 2. Retains response IDs, timestamps, event types, turn boundaries, and numerical usage only.
@@ -130,7 +159,8 @@ It does not read static text or conversation content to find the ratio. The mode
 
 ## Native presentation behavior
 
-- The panel appears only while Claude is frontmost and the focused window exposes an exact local Code Session.
+- The panel appears only while Claude is frontmost and the focused window
+  exposes an exact supported Code Session with proven local telemetry.
 - The panel follows the host window across displays and macOS Spaces.
 - Expanded mode drags by the header.
 - Collapsed mode shows only the gauge, live rate, and expand button and drags by the gauge.
@@ -145,7 +175,7 @@ The installer and runtime enforce these constraints:
 2. Build a separate `Token Widget for Claude.app` with its own bundle identifier.
 3. Require Accessibility permission for that companion application itself.
 4. Inspect only roles and URLs during the shallow focused-window identity scan; read only exact Context-window button titles inside the selected web area for optional numerical enrichment.
-5. Keep local transcript parsing content-discarding.
+5. Keep local transcript and cloud event-cache parsing content-discarding.
 6. Never quit, relaunch, patch, inject into, or re-sign Claude.app.
 7. Fail closed on missing permission, identity, telemetry, model-window data, or unsupported surfaces.
 

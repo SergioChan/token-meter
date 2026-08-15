@@ -5,6 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import {
   ClaudeDesktopSessionStore,
+  isClaudeCloudSessionId,
+  isClaudeDesktopSessionId,
   parseClaudeDesktopSession,
 } from "../integrations/claude-desktop/src/desktop-session-store.mjs";
 
@@ -55,6 +57,21 @@ test("Claude Desktop metadata parser rejects unsafe identity fields", () => {
     null,
   );
   assert.equal(parseClaudeDesktopSession(metadata({ cwd: "relative" })), null);
+  assert.equal(
+    parseClaudeDesktopSession({
+      ...metadata(),
+      sessionId: "session_01HWYa9x7ncCBzndDSGPH4VM",
+    }),
+    null,
+  );
+});
+
+test("Claude Desktop identity distinguishes local and cloud Sessions", () => {
+  const cloud = "session_01HWYa9x7ncCBzndDSGPH4VM";
+  assert.equal(isClaudeDesktopSessionId(desktopSessionId), true);
+  assert.equal(isClaudeDesktopSessionId(cloud), true);
+  assert.equal(isClaudeCloudSessionId(cloud), true);
+  assert.equal(isClaudeCloudSessionId(`${cloud}x`), false);
 });
 
 test("session store resolves one exact Desktop session and never substitutes another", async (context) => {

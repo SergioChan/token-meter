@@ -6,6 +6,7 @@ import {
 } from "../integrations/claude-desktop/src/session-probe.mjs";
 
 const sessionId = "local_11111111-2222-4333-8444-555555555555";
+const cloudSessionId = "session_01HWYa9x7ncCBzndDSGPH4VM";
 
 function runProbe({
   pathname = `/code/${sessionId}`,
@@ -78,6 +79,17 @@ test("Claude probe accepts the current Epitaxy Desktop Session route", () => {
   assert.equal(result.desktopSessionId, sessionId);
 });
 
+test("Claude probe preserves the exact cloud Code Session identifier", () => {
+  const result = runProbe({
+    pathname: `/epitaxy/${cloudSessionId}`,
+    activeHref: `/epitaxy/${cloudSessionId}`,
+    protocol: "https:",
+    hostname: "claude.ai",
+  });
+  assert.equal(result.eligible, true);
+  assert.equal(result.desktopSessionId, cloudSessionId);
+});
+
 test("Claude probe fails closed when route and active Session disagree", () => {
   const result = runProbe({
     activeHref: "/code/local_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
@@ -96,8 +108,9 @@ test("Claude probe rejects auxiliary and incomplete renderer surfaces", () => {
   );
 });
 
-test("Claude Desktop identity accepts only local UUIDs", () => {
+test("Claude Desktop identity accepts exact local and cloud Session IDs", () => {
   assert.equal(isClaudeDesktopSessionId(sessionId), true);
-  assert.equal(isClaudeDesktopSessionId("session_11111111-2222-4333-8444-555555555555"), false);
+  assert.equal(isClaudeDesktopSessionId(cloudSessionId), true);
+  assert.equal(isClaudeDesktopSessionId(`${cloudSessionId}x`), false);
   assert.equal(isClaudeDesktopSessionId("My Session"), false);
 });

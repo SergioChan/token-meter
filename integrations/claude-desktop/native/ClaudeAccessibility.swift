@@ -4,6 +4,9 @@ import Foundation
 private let localSessionPattern = try! NSRegularExpression(
     pattern: #"^local_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"#
 )
+private let cloudSessionPattern = try! NSRegularExpression(
+    pattern: #"^session_[0-9A-Za-z]{24}$"#
+)
 private let exactContextRatioPattern = try! NSRegularExpression(
     pattern: #"(?i)^\s*(?:context\s+window\s*:?\s*)?([0-9]+(?:\.[0-9]+)?\s*[kKmMbB]?)\s*/\s*([0-9]+(?:\.[0-9]+)?\s*[kKmMbB])(?:\s*\(\s*[0-9]+(?:\.[0-9]+)?%\s*\))?\s*$"#
 )
@@ -93,10 +96,13 @@ private func exactClaudeCodeSessionID(in value: String) -> String? {
           components[0] == "epitaxy" || components[0] == "code" else { return nil }
     let identifier = String(components[1])
     let range = NSRange(identifier.startIndex..<identifier.endIndex, in: identifier)
-    guard localSessionPattern.firstMatch(in: identifier, range: range) != nil else {
-        return nil
+    if localSessionPattern.firstMatch(in: identifier, range: range) != nil {
+        return identifier.lowercased()
     }
-    return identifier.lowercased()
+    if cloudSessionPattern.firstMatch(in: identifier, range: range) != nil {
+        return identifier
+    }
+    return nil
 }
 
 func resolveUniqueClaudeCodeSessionID(

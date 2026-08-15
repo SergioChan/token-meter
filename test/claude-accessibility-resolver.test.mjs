@@ -8,6 +8,7 @@ import test from "node:test";
 
 const execFileAsync = promisify(execFile);
 const sessionId = "local_00000000-0000-4000-8000-000000000201";
+const cloudSessionId = "session_01HWYa9x7ncCBzndDSGPH4VM";
 
 test(
   "Claude Accessibility resolver accepts one exact Code web area only",
@@ -25,11 +26,18 @@ test(
 import Foundation
 
 let sessionID = ${JSON.stringify(sessionId)}
+let cloudSessionID = ${JSON.stringify(cloudSessionId)}
 let valid = ClaudeAXURLCandidate(
     role: "AXWebArea",
     url: "https://claude.ai/epitaxy/\\(sessionID)"
 )
 precondition(resolveUniqueClaudeCodeSessionID(from: [valid]) == sessionID)
+precondition(resolveUniqueClaudeCodeSessionID(from: [
+    ClaudeAXURLCandidate(
+        role: "AXWebArea",
+        url: "https://claude.ai/epitaxy/\\(cloudSessionID)"
+    )
+]) == cloudSessionID)
 precondition(resolveUniqueClaudeCodeSessionID(from: [
     ClaudeAXURLCandidate(role: "AXLink", url: valid.url)
 ]) == nil)
@@ -44,6 +52,12 @@ precondition(resolveUniqueClaudeCodeSessionID(from: [
     ClaudeAXURLCandidate(
         role: "AXWebArea",
         url: "https://example.com/epitaxy/\\(sessionID)"
+    )
+]) == nil)
+precondition(resolveUniqueClaudeCodeSessionID(from: [
+    ClaudeAXURLCandidate(
+        role: "AXWebArea",
+        url: "https://claude.ai/epitaxy/session_too_short"
     )
 ]) == nil)
 precondition(exactContextWindowTokens(

@@ -22,7 +22,11 @@ See [the complete installation guide](../../docs/install-claude-desktop.md).
 - `native/ClaudeAccessibility.swift` owns exact `AXWebArea` route resolution and the narrow Context-button probe.
 - `native/ClaudeModelCatalog.swift` owns model-to-window resolution and catalog cache invalidation.
 - `native/TokenMeterClaudeOverlay.swift` owns the non-activating panel, window following, persistent snapshot bridge, drag/collapse behavior, and permission lifecycle.
-- `src/desktop-session-store.mjs` maps one exact Desktop `local_<uuid>` to one Claude Code transcript identity.
+- `src/desktop-session-store.mjs` maps one exact legacy Desktop
+  `local_<uuid>` to one Claude Code transcript identity.
+- `src/cloud-session-store.mjs` resolves exact current `session_<24 chars>`
+  routes to deterministic Claude HTTP-cache entries and accepts only complete,
+  contiguous event sequences.
 - `src/transcript-store.mjs` incrementally reads numerical usage while discarding prompt, tool, reasoning, and response content.
 - `src/snapshot-runtime.mjs` is the deep measurement module used by both CLI inspection and the overlay.
 - `src/overlay-bridge.mjs` keeps one Node process alive and serves newline-delimited numerical snapshots to the native host.
@@ -31,7 +35,8 @@ See [the complete installation guide](../../docs/install-claude-desktop.md).
 
 ## Invariants
 
-- Bind only the exact `local_<uuid>` exposed by the focused Claude Code window.
+- Bind only the exact `local_<uuid>` or mixed-case `session_<24 chars>`
+  exposed by the focused Claude Code window.
 - Hide the overlay when Claude is not frontmost or the selected Session cannot be proven.
 - Never substitute the most recently active process, transcript, or metadata file.
 - Read local content only to extract identifiers, timestamps, event types, and numerical usage; do not retain message content.

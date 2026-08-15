@@ -7,6 +7,7 @@ import { ClaudeSnapshotRuntime } from "../integrations/claude-desktop/src/snapsh
 import { encodeClaudeProjectDirectory } from "../integrations/claude-desktop/src/transcript-store.mjs";
 
 const desktopSessionId = "local_00000000-0000-4000-8000-000000000101";
+const cloudSessionId = "session_01HWYa9x7ncCBzndDSGPH4VM";
 const cliSessionId = "00000000-0000-4000-8000-000000000102";
 const cwd = "/private/claude-runtime-fixture";
 
@@ -92,4 +93,71 @@ test("Claude snapshot runtime follows one exact Desktop Session", async (context
   const unbound = await runtime.snapshot("local_not-a-session");
   assert.equal(unbound.status, "unbound");
   assert.equal(unbound.reason, "invalid-desktop-session-id");
+});
+
+test("Claude snapshot runtime follows one exact cloud Code Session", async () => {
+  const file = {
+    path: `claude-cloud-cache:${cloudSessionId}`,
+    discoveredId: cloudSessionId,
+    modifiedMs: 2_000,
+    meta: {
+      id: cloudSessionId,
+      sessionId: cloudSessionId,
+      source: "claude-cloud-cache",
+      threadSource: "user",
+      originator: "claude-code",
+      cwd: null,
+      timestampMs: 1_000,
+    },
+    usage: [
+      {
+        kind: "usage",
+        timestampMs: 2_000,
+        total: {
+          totalTokens: 100,
+          inputTokens: 60,
+          cachedInputTokens: 30,
+          cacheCreationInputTokens: 20,
+          outputTokens: 40,
+          reasoningOutputTokens: 0,
+        },
+        last: null,
+        contextTokens: 60,
+        contextWindow: null,
+      },
+    ],
+    userMessages: [1_000],
+    turnCompletions: [2_000],
+    turnAborts: [],
+    contextCompactions: [],
+  };
+  const runtime = new ClaudeSnapshotRuntime({
+    sessionsDirectory: "/private/unused-sessions",
+    projectsDirectory: "/private/unused-projects",
+    sessionStore: { resolve: async () => assert.fail("local store was used") },
+    transcriptStore: { refresh: async () => assert.fail("transcript store was used") },
+    cloudSessionStore: {
+      refresh: async (requested) => ({
+        status: "resolved",
+        desktopSessionId: requested,
+        files: [file],
+      }),
+    },
+    now: () => 3_000,
+    identity: { meterId: "TM-TEST-FAKE-9WFD" },
+    usageHistory: null,
+  });
+
+  const snapshot = await runtime.snapshot(cloudSessionId);
+  assert.equal(snapshot.status, "bound");
+  assert.equal(snapshot.session.totalTokens, 100);
+  assert.equal(snapshot.context.tokens, 60);
+  assert.deepEqual(snapshot.binding, {
+    source: "claude-cloud-events-cache",
+    exact: true,
+    desktopSessionId: cloudSessionId,
+    cliSessionId: null,
+    model: null,
+  });
+  assert.equal(snapshot.usageMethod, "claude-cloud-events-cache");
 });

@@ -22,7 +22,7 @@ It is designed for the failure mode that percentages hide: a polluted context, r
 | Host | Status | UI integration | Exact Session source | Usage source |
 | --- | --- | --- | --- | --- |
 | Codex Desktop, macOS | Supported | Verified loopback CDP + injected Shadow DOM | Active semantic sidebar task UUID | Local rollout token events |
-| Claude Code in Claude Desktop, macOS | Beta | Independent native companion overlay | Focused Code window Accessibility URL | Exact Desktop metadata + local Claude Code transcripts |
+| Claude Code in Claude Desktop, macOS | Beta | Independent native companion overlay | Focused Code window Accessibility URL | Local transcripts or cached cloud usage events |
 | Windows and Linux | Not implemented | — | — | — |
 
 Claude's production app blocks public CDP debugging without an Anthropic-signed authorization value. Token Meter does not bypass that control. The Claude integration is therefore a native overlay: it does not inject into, patch, re-sign, modify, quit, or relaunch Claude.app.
@@ -77,7 +77,12 @@ This local workload does not strictly match Codex `/usage`. The backend account 
 
 ### Claude
 
-The collector resolves the exact Desktop `local_<uuid>` to its underlying Claude Code transcript, de-duplicates repeated response rows by `message.id`, and counts one latest confirmed contribution per response:
+For legacy local Sessions, the collector resolves the exact Desktop
+`local_<uuid>` to its underlying Claude Code transcript. For current cloud
+Code Sessions, it binds the exact mixed-case `session_<24 chars>` route and
+reads the locally cached, paginated `/events` responses only when their
+sequence is complete. Both paths de-duplicate repeated response rows by
+`message.id` and count one latest confirmed contribution per response:
 
 ```text
 raw tokens = input_tokens
@@ -212,7 +217,9 @@ See [SECURITY.md](SECURITY.md) for the threat model and vulnerability reporting 
 Token Meter never guesses the selected Session from process recency, transcript modification time, or the newest local file.
 
 - Codex reads the exact active semantic sidebar UUID.
-- Claude reads the exact `local_<uuid>` from the focused Code window's Accessibility URL and resolves one matching metadata record.
+- Claude reads an exact `local_<uuid>` or `session_<24 chars>` from the
+  focused Code window's Accessibility URL. Local Sessions require one matching
+  metadata record; cloud Sessions require one complete cached event sequence.
 
 If validation fails, the Meter becomes unbound or hides instead of carrying numbers from the previous Session.
 

@@ -1,6 +1,6 @@
 # Install Token Widget for Claude Code in Claude Desktop
 
-Token Meter supports the Code surface inside Claude Desktop on macOS through an independent native overlay. The companion follows the focused Claude window, reads the exact selected `local_<uuid>` through macOS Accessibility, maps it to local Claude Code usage, and hides when that identity cannot be proven.
+Token Meter supports the Code surface inside Claude Desktop on macOS through an independent native overlay. The companion follows the focused Claude window and reads an exact selected `local_<uuid>` or `session_<24 chars>` through macOS Accessibility. Legacy local Sessions map to local Claude Code transcripts; current cloud Code Sessions map to complete usage-event pages already present in Claude's local HTTP cache. The overlay hides when that identity or telemetry cannot be proven.
 
 The installer does not quit, relaunch, modify, patch, or re-sign Claude.app.
 
@@ -115,9 +115,9 @@ A ready installation returns:
 }
 ```
 
-`running`, `accessibilityGranted`, and `overlayReady` describe installation health independently. `bridgeHealthy` and `sessionBound` are expected to be `false` while Claude is in the background or is not showing a resolvable local Code Session.
+`running`, `accessibilityGranted`, and `overlayReady` describe installation health independently. `bridgeHealthy` and `sessionBound` are expected to be `false` while Claude is in the background or is not showing a resolvable Code Session.
 
-No Claude restart is required. Bring Claude Desktop to the foreground and select a local Code Session. The overlay appears only when it can prove the exact selected Session.
+No Claude restart is required. Bring Claude Desktop to the foreground and select a Code Session. The overlay appears only when it can prove the exact selected Session and its corresponding local telemetry source.
 
 ## Use the overlay
 

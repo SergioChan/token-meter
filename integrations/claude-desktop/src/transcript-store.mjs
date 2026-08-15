@@ -3,7 +3,7 @@ import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import {
   isClaudeCliSessionId,
-  isClaudeDesktopSessionId,
+  isClaudeLocalDesktopSessionId,
 } from "./desktop-session-store.mjs";
 import { runWithConcurrency, timestampToMs } from "./local-data-utils.mjs";
 
@@ -63,13 +63,8 @@ function isRootUserMessage(value) {
   );
 }
 
-export function parseClaudeTranscriptLine(line) {
-  let value;
-  try {
-    value = JSON.parse(line);
-  } catch {
-    return null;
-  }
+export function parseClaudeTranscriptValue(value) {
+  if (value == null || typeof value !== "object") return null;
   const timestampMs = timestampToMs(value.timestamp);
   if (timestampMs == null) return null;
 
@@ -111,6 +106,14 @@ export function parseClaudeTranscriptLine(line) {
     usage,
     terminal,
   };
+}
+
+export function parseClaudeTranscriptLine(line) {
+  try {
+    return parseClaudeTranscriptValue(JSON.parse(line));
+  } catch {
+    return null;
+  }
 }
 
 export function encodeClaudeProjectDirectory(cwd) {
@@ -255,7 +258,7 @@ export class ClaudeTranscriptStore {
   #bindSession(session) {
     if (
       session?.status !== "resolved" ||
-      !isClaudeDesktopSessionId(session.desktopSessionId) ||
+      !isClaudeLocalDesktopSessionId(session.desktopSessionId) ||
       !isClaudeCliSessionId(session.cliSessionId) ||
       typeof session.cwd !== "string" ||
       !path.isAbsolute(session.cwd)

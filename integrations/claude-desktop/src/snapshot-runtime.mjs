@@ -1,7 +1,11 @@
 import { MetricsEngine } from "../../../src/core/metrics-engine.mjs";
 import { loadOrCreateIdentity } from "../../../src/core/identity.mjs";
 import { UsageHistory } from "../../../src/core/usage-history.mjs";
-import { ClaudeDesktopSessionStore } from "./desktop-session-store.mjs";
+import {
+  ClaudeDesktopSessionStore,
+  isClaudeCloudSessionId,
+} from "./desktop-session-store.mjs";
+import { ClaudeCloudSessionStore } from "./cloud-session-store.mjs";
 import { ClaudeTranscriptStore } from "./transcript-store.mjs";
 
 export class ClaudeSnapshotRuntime {
@@ -11,6 +15,7 @@ export class ClaudeSnapshotRuntime {
     now = Date.now,
     sessionStore = null,
     transcriptStore = null,
+    cloudSessionStore = null,
     metricsEngine = null,
     identity = undefined,
     identityDir = undefined,
@@ -25,6 +30,7 @@ export class ClaudeSnapshotRuntime {
       sessionStore ?? new ClaudeDesktopSessionStore({ sessionsDirectory });
     this.transcriptStore =
       transcriptStore ?? new ClaudeTranscriptStore({ projectsDirectory });
+    this.cloudSessionStore = cloudSessionStore ?? new ClaudeCloudSessionStore();
     this.metricsEngine = metricsEngine ?? new MetricsEngine();
     this.identity = identity;
     this.identityDir = identityDir;
@@ -76,6 +82,26 @@ export class ClaudeSnapshotRuntime {
   }
 
   async snapshot(desktopSessionId) {
+    if (isClaudeCloudSessionId(desktopSessionId)) {
+      const cloud = await this.cloudSessionStore.refresh(desktopSessionId);
+      if (cloud.status !== "resolved") return cloud;
+      const snapshot = this.metricsEngine.snapshot(cloud.files, {
+        threadId: desktopSessionId,
+        hostName: "Claude Desktop",
+        nowMs: this.now(),
+      });
+      snapshot.binding = {
+        source: "claude-cloud-events-cache",
+        exact: snapshot.status === "bound",
+        desktopSessionId,
+        cliSessionId: null,
+        model: null,
+      };
+      snapshot.usageMethod = "claude-cloud-events-cache";
+      this.#decorate(snapshot);
+      return snapshot;
+    }
+
     const session = await this.sessionStore.resolve(desktopSessionId);
     if (session.status !== "resolved") return session;
 
@@ -93,12 +119,16 @@ export class ClaudeSnapshotRuntime {
       model: session.model,
     };
     snapshot.usageMethod = "claude-transcript-raw";
+    this.#decorate(snapshot);
+    return snapshot;
+  }
+
+  #decorate(snapshot) {
     const identity = this.#identity();
     snapshot.meterId = identity?.meterId ?? null;
     snapshot.meterHandle = identity?.handle ?? null;
     snapshot.sharingEnabled = identity?.sharing?.enabled ?? false;
     snapshot.handlePrompted = identity?.handlePromptedAtMs != null;
     snapshot.meterStats = this.#usageStats();
-    return snapshot;
   }
 }
