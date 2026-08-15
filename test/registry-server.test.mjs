@@ -326,6 +326,64 @@ test("latest release endpoint 404s without a published dmg", async () => {
   }
 });
 
+test("a hosted release serves metadata and redirects the download", async () => {
+  // Production: no DMG bytes in the container — /api/v1/latest comes from
+  // configured metadata and the download route bounces to the release asset.
+  const dir = mkdtempSync(join(tmpdir(), "token-meter-registry-"));
+  writeFileSync(join(dir, "index.html"), "<!doctype html><title>home</title>");
+  const digest = "a".repeat(64);
+  const assetUrl = "https://github.com/example/repo/releases/download/v0.2.5/TokenWidget-0.2.5.dmg";
+  const server = new RegistryServer({
+    dataFile: join(dir, "data.json"),
+    webDir: dir,
+    latestRelease: {
+      version: "0.2.5",
+      path: "/download/token-widget.dmg",
+      sha256: digest,
+      size: 12345,
+    },
+    dmgRedirectUrl: assetUrl,
+  });
+  await server.start(0);
+  const base = `http://127.0.0.1:${server.port}`;
+  try {
+    const latest = await (await fetch(`${base}/api/v1/latest`)).json();
+    assert.deepEqual(latest, {
+      version: "0.2.5",
+      path: "/download/token-widget.dmg",
+      sha256: digest,
+      size: 12345,
+    });
+    const download = await fetch(`${base}/download/token-widget.dmg`, { redirect: "manual" });
+    assert.equal(download.status, 302);
+    assert.equal(download.headers.get("location"), assetUrl);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("a local dmg file still wins over the redirect", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "token-meter-registry-"));
+  writeFileSync(join(dir, "index.html"), "<!doctype html><title>home</title>");
+  writeFileSync(join(dir, "app.dmg"), "fake-dmg-bytes");
+  const server = new RegistryServer({
+    dataFile: join(dir, "data.json"),
+    webDir: dir,
+    dmgFile: join(dir, "app.dmg"),
+    latestVersion: "0.2.5",
+    dmgRedirectUrl: "https://example.com/should-not-be-used.dmg",
+  });
+  await server.start(0);
+  const base = `http://127.0.0.1:${server.port}`;
+  try {
+    const download = await fetch(`${base}/download/token-widget.dmg`, { redirect: "manual" });
+    assert.equal(download.status, 200);
+    assert.equal(await download.text(), "fake-dmg-bytes");
+  } finally {
+    await server.stop();
+  }
+});
+
 test("extended aggregate stats round-trip; malformed extras reject the report", async () => {
   const { server, base } = await startRegistry();
   try {

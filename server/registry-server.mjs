@@ -227,6 +227,7 @@ export class RegistryServer {
     dmgFile = null,
     latestVersion = null,
     latestRelease = null,
+    dmgRedirectUrl = null,
     host = "127.0.0.1",
     now = Date.now,
   }) {
@@ -238,6 +239,7 @@ export class RegistryServer {
     this.dmgFile = dmgFile;
     this.latestVersion = latestVersion;
     this.latestRelease = latestRelease;
+    this.dmgRedirectUrl = dmgRedirectUrl;
     this.host = host;
     this.now = now;
     this.dmgDigestMemo = null;
@@ -361,6 +363,13 @@ export class RegistryServer {
         if (this.dmgFile && existsSync(this.dmgFile)) {
           return reply(200, "application/x-apple-diskimage", readFileSync(this.dmgFile), {
             "Content-Disposition": 'attachment; filename="TokenWidget.dmg"',
+          });
+        }
+        // Hosted release: the bytes live on the immutable GitHub release
+        // asset; clients verify them against the digest from /api/v1/latest.
+        if (this.dmgRedirectUrl) {
+          return reply(302, "text/plain", "redirecting", {
+            Location: this.dmgRedirectUrl,
           });
         }
         return json(404, { error: "dmg not published" });
