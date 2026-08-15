@@ -9,52 +9,12 @@ import { dirname } from "node:path";
 import pg from "pg";
 
 const { Pool } = pg;
+const FILE_PROFILE_SCHEMA_VERSION = 1;
 
-export const POSTGRES_SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS registry_meters (
-  meter_id TEXT PRIMARY KEY,
-  public_key TEXT NOT NULL,
-  handle TEXT UNIQUE,
-  days JSONB NOT NULL DEFAULT '[]'::jsonb,
-  stats JSONB NOT NULL DEFAULT '{}'::jsonb,
-  week_tokens BIGINT NOT NULL DEFAULT 0,
-  generated_at_ms BIGINT,
-  updated_at_ms BIGINT NOT NULL
+export const POSTGRES_SCHEMA_SQL = readFileSync(
+  new URL("./migrations/001_legacy_registry.sql", import.meta.url),
+  "utf8",
 );
-
-CREATE TABLE IF NOT EXISTS registry_handles (
-  handle VARCHAR(30) PRIMARY KEY,
-  meter_id TEXT NOT NULL UNIQUE REFERENCES registry_meters(meter_id) ON DELETE CASCADE,
-  public_key TEXT NOT NULL,
-  claimed_at_ms BIGINT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS registry_meters_week_tokens_idx
-  ON registry_meters (week_tokens DESC, updated_at_ms DESC);
-
-CREATE TABLE IF NOT EXISTS registry_browser_pairings (
-  code_hash CHAR(64) PRIMARY KEY,
-  meter_id TEXT NOT NULL,
-  public_key TEXT NOT NULL,
-  created_at_ms BIGINT NOT NULL,
-  expires_at_ms BIGINT NOT NULL,
-  consumed_at_ms BIGINT
-);
-
-CREATE INDEX IF NOT EXISTS registry_browser_pairings_expires_idx
-  ON registry_browser_pairings (expires_at_ms);
-
-CREATE TABLE IF NOT EXISTS registry_browser_sessions (
-  token_hash CHAR(64) PRIMARY KEY,
-  meter_id TEXT NOT NULL,
-  public_key TEXT NOT NULL,
-  created_at_ms BIGINT NOT NULL,
-  expires_at_ms BIGINT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS registry_browser_sessions_expires_idx
-  ON registry_browser_sessions (expires_at_ms);
-`;
 
 function displayName(meterId, handle) {
   return handle ? `@${handle}` : `${meterId.slice(0, 10)}…`;
@@ -96,22 +56,68 @@ export class FileRegistryStore {
     try {
       const loaded = JSON.parse(readFileSync(dataFile, "utf8"));
       this.data = {
+        schemaVersion: loaded.schemaVersion ?? 0,
         handles: loaded.handles ?? {},
         meters: loaded.meters ?? {},
         browserPairings: loaded.browserPairings ?? {},
         browserSessions: loaded.browserSessions ?? {},
+        profiles: loaded.profiles ?? {},
+        profileDevices: loaded.profileDevices ?? {},
+        deviceInvites: loaded.deviceInvites ?? {},
       };
     } catch {
       this.data = {
+        schemaVersion: FILE_PROFILE_SCHEMA_VERSION,
         handles: {},
         meters: {},
         browserPairings: {},
         browserSessions: {},
+        profiles: {},
+        profileDevices: {},
+        deviceInvites: {},
       };
     }
   }
 
-  async init() {}
+  async init() {
+    if (this.#migrateProfileData()) this.#save();
+  }
+
+  #migrateProfileData() {
+    if (this.data.schemaVersion >= FILE_PROFILE_SCHEMA_VERSION) return false;
+    for (const [meterId, meter] of Object.entries(this.data.meters)) {
+      const handleEntry = Object.entries(this.data.handles).find(
+        ([, value]) => value.meterId === meterId,
+      );
+      const handle = handleEntry?.[0] ?? null;
+      const claimedAtMs = handleEntry?.[1]?.claimedAtMs;
+      this.data.profiles[meterId] ??= {
+        ownerMeterId: meterId,
+        handle,
+        days: meter.days ?? [],
+        stats: meter.stats ?? {},
+        weekTokens: meter.weekTokens ?? 0,
+        generatedAtMs: meter.generatedAtMs ?? null,
+        updatedAtMs: meter.updatedAtMs ?? claimedAtMs ?? 0,
+        createdAtMs: claimedAtMs ?? meter.updatedAtMs ?? 0,
+        rollupVersion: 1,
+        timeZone: null,
+      };
+      this.data.profileDevices[meterId] ??= {
+        profileId: meterId,
+        role: "owner",
+        sharingEnabled: meter.generatedAtMs != null,
+        joinedAtMs: claimedAtMs ?? meter.updatedAtMs ?? 0,
+        lastReportedAtMs: meter.generatedAtMs == null ? null : meter.updatedAtMs,
+        revokedAtMs: null,
+        replacedByMeterId: null,
+        deviceLabel: null,
+      };
+      if (handleEntry) handleEntry[1].profileId = meterId;
+    }
+    this.data.schemaVersion = FILE_PROFILE_SCHEMA_VERSION;
+    return true;
+  }
 
   #save() {
     mkdirSync(dirname(this.dataFile), { recursive: true });

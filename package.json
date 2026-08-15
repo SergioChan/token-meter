@@ -47,6 +47,9 @@
     "claude:uninstall": "./scripts/uninstall-claude-meter-macos.sh",
     "codex:inject": "node src/cli.mjs inject",
     "codex:remove": "node src/cli.mjs remove",
+    "registry:migrate:status": "node server/migrate.mjs status",
+    "registry:migrate": "node server/migrate.mjs up",
+    "registry:migrate:verify": "node server/migrate.mjs verify",
     "test": "node --test"
   }
 }
