@@ -5,6 +5,11 @@
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27 fill=%27none%27><path d=%27M20.5 51.92A23 23 0 1 1 43.5 51.92%27 stroke=%27%235b6f00%27 stroke-width=%277%27 stroke-linecap=%27round%27/><path d=%27M32 9A23 23 0 0 1 48.26 15.74%27 stroke=%27%23b2c248%27 stroke-width=%277%27 stroke-linecap=%27round%27/><line x1=%2732%27 y1=%2732%27 x2=%2742.6%27 y2=%2721.4%27 stroke=%27%235b6f00%27 stroke-width=%276%27 stroke-linecap=%27round%27/><circle cx=%2732%27 cy=%2732%27 r=%275%27 fill=%27%235b6f00%27/><circle cx=%2732%27 cy=%2755%27 r=%273.5%27 fill=%27%23b2c248%27/></svg>">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Token Widget — Profile</title>
+<meta property="og:site_name" content="Token Widget">
+<meta property="og:title" content="Token Widget — Community profile">
+<meta property="og:description" content="Live AI coding stats: token activity, streaks, and platform split — computed locally, shared by choice. Get your own widget at tokenwidget.app.">
+<meta property="og:image" content="https://www.tokenwidget.app/assets/dashboard.png">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -43,6 +48,17 @@
     background: var(--sprout); border: 1px solid var(--stone); border-radius: 9999px; color: var(--ink);
   }
   .identity .badge.rank { background: var(--card); border-color: var(--fern); color: var(--forest); font-weight: 600; }
+
+  .share-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
+  .share-row button, .share-row a {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 15px; font: 500 13px var(--sans); color: var(--carbon);
+    background: var(--card); border: 1px solid var(--stone); border-radius: 9999px;
+    cursor: pointer; text-decoration: none;
+  }
+  .share-row button:hover, .share-row a:hover { border-color: var(--fern); color: var(--forest); }
+  .share-row .primary { background: var(--forest); border-color: var(--forest); color: #fcfcf8; }
+  .share-row .primary:hover { background: #4c5616; color: #fcfcf8; }
 
   .stat-strip {
     display: grid; grid-template-columns: repeat(5, 1fr);
@@ -117,6 +133,12 @@
     <div class="avatar"><svg width="40" height="40" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M20.5 51.92A23 23 0 1 1 43.5 51.92" stroke="#5b6f00" stroke-width="7" stroke-linecap="round"/><path d="M32 9A23 23 0 0 1 48.26 15.74" stroke="#b2c248" stroke-width="7" stroke-linecap="round"/><line x1="32" y1="32" x2="42.6" y2="21.4" stroke="#5b6f00" stroke-width="6" stroke-linecap="round"/><circle cx="32" cy="32" r="5" fill="#5b6f00"/><circle cx="32" cy="55" r="3.5" fill="#b2c248"/></svg></div>
     <h1 id="handle">@—</h1>
     <p class="sub" id="badges"></p>
+    <div class="share-row" id="share-row" hidden>
+      <button class="primary" id="share-png" type="button">⬇︎&nbsp;Save card as PNG</button>
+      <a id="share-x" target="_blank" rel="noopener">Share on X</a>
+      <a id="share-linkedin" target="_blank" rel="noopener">Share on LinkedIn</a>
+      <button id="share-copy" type="button">Copy link</button>
+    </div>
   </section>
 
   <div id="content" hidden>
@@ -191,6 +213,120 @@
   };
   const el = (id) => document.getElementById(id);
 
+  // Share targets for a public profile. The install link rides along in the
+  // post text so every share doubles as an invitation.
+  function buildShareLinks(handle, lifetimeLabel) {
+    const url = `https://www.tokenwidget.app/u/${encodeURIComponent(handle)}`;
+    const text = `My AI coding stats: ${lifetimeLabel} lifetime tokens, live on the Token Widget leaderboard. Get your own widget at tokenwidget.app`;
+    return {
+      url,
+      x: `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`,
+      linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`,
+    };
+  }
+
+  // A designed 1200x630 card drawn from scratch — no page screenshot, no
+  // external libraries. The install URL is part of the image itself.
+  async function drawShareCard(canvas, card) {
+    const W = 1200, H = 630;
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    try { await document.fonts.ready; } catch { /* draw with fallbacks */ }
+    const SERIF = '"Playfair Display", Georgia, serif';
+    const SANS = '"DM Sans", -apple-system, "Segoe UI", sans-serif';
+
+    ctx.fillStyle = "#f7f7f2"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#e3e3e3";
+    ctx.beginPath(); ctx.roundRect(36, 36, W - 72, H - 72, 22); ctx.fill(); ctx.stroke();
+
+    // coin-ring gauge mark
+    const cx = 108, cy = 106, r = 26;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#5b6f00"; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0.65 * Math.PI, 0.35 * Math.PI); ctx.stroke();
+    ctx.strokeStyle = "#b2c248";
+    ctx.beginPath(); ctx.arc(cx, cy, r, 1.28 * Math.PI, 1.75 * Math.PI); ctx.stroke();
+    ctx.strokeStyle = "#5b6f00"; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + r * 0.62, cy - r * 0.62); ctx.stroke();
+    ctx.fillStyle = "#5b6f00";
+    ctx.beginPath(); ctx.arc(cx, cy, 6, 0, 2 * Math.PI); ctx.fill();
+    ctx.fillStyle = "#b2c248";
+    ctx.beginPath(); ctx.arc(cx, cy + r, 4, 0, 2 * Math.PI); ctx.fill();
+
+    ctx.fillStyle = "#0e0f0c";
+    ctx.font = `600 30px ${SANS}`;
+    ctx.fillText("Token Widget", 152, 116);
+
+    ctx.font = `72px ${SERIF}`;
+    ctx.fillText(card.title, 76, 236);
+    if (card.rankLabel) {
+      ctx.font = `600 26px ${SANS}`;
+      ctx.fillStyle = "#5b6f00";
+      ctx.fillText(card.rankLabel, 82, 282);
+    }
+
+    // heatmap: last 17 weeks, top right
+    const cellPalette = ["#eaebe5", "#dde5b8", "#b2c248", "#788c15", "#5b6f00"];
+    const totals = card.dayLevels;
+    const cell = 16, gap = 4;
+    const hx = W - 76 - 17 * (cell + gap), hy = 96;
+    for (let i = 0; i < totals.length && i < 119; i += 1) {
+      const week = Math.floor(i / 7), day = i % 7;
+      ctx.fillStyle = cellPalette[totals[i]] ?? cellPalette[0];
+      ctx.beginPath();
+      ctx.roundRect(hx + week * (cell + gap), hy + day * (cell + gap), cell, cell, 4);
+      ctx.fill();
+    }
+
+    // stat row
+    const stats = card.stats;
+    const colWidth = (W - 152) / stats.length;
+    stats.forEach((stat, index) => {
+      const x = 76 + index * colWidth;
+      ctx.fillStyle = "#0e0f0c";
+      ctx.font = `600 54px ${SANS}`;
+      ctx.fillText(stat.value, x, 420);
+      ctx.fillStyle = "#72726e";
+      ctx.font = `24px ${SANS}`;
+      ctx.fillText(stat.label, x, 456);
+    });
+
+    // platform split bar
+    const platforms = card.platforms.filter((p) => p.tokens > 0);
+    const total = platforms.reduce((sum, p) => sum + p.tokens, 0);
+    if (total > 0) {
+      const barX = 76, barY = 500, barW = W - 152, barH = 20;
+      const shades = ["#5b6f00", "#b2c248", "#dde5b8"];
+      let x = barX;
+      ctx.beginPath(); ctx.roundRect(barX, barY, barW, barH, 10); ctx.save(); ctx.clip();
+      platforms.forEach((p, index) => {
+        const w = (p.tokens / total) * barW;
+        ctx.fillStyle = shades[index % shades.length];
+        ctx.fillRect(x, barY, w, barH);
+        x += w;
+      });
+      ctx.restore();
+      let lx = barX;
+      ctx.font = `500 22px ${SANS}`;
+      platforms.forEach((p, index) => {
+        ctx.fillStyle = shades[index % shades.length];
+        ctx.beginPath(); ctx.arc(lx + 8, 552, 7, 0, 2 * Math.PI); ctx.fill();
+        ctx.fillStyle = "#454745";
+        const label = `${p.name} ${Math.round((p.tokens / total) * 100)}%`;
+        ctx.fillText(label, lx + 24, 560);
+        lx += 24 + ctx.measureText(label).width + 32;
+      });
+    }
+
+    // install link, part of the picture itself
+    ctx.fillStyle = "#5b6f00";
+    ctx.font = `600 26px ${SANS}`;
+    const invite = "Get your own widget → tokenwidget.app";
+    ctx.fillText(invite, W - 96 - ctx.measureText(invite).width, 560);
+    return canvas;
+  }
+
   function emptyState(mark, title, copy) {
     el("empty-mark").textContent = mark;
     el("empty-title").textContent = title;
@@ -262,9 +398,11 @@
     member.className = "badge";
     member.textContent = "Community member";
     badges.append(member);
+    let weeklyRank = null;
     fetch("/api/v1/leaderboard").then((r) => r.json()).then(({ rows }) => {
       const index = (rows ?? []).findIndex((row) => row.handle === handle);
       if (index >= 0) {
+        weeklyRank = index + 1;
         const rank = document.createElement("span");
         rank.className = "badge rank";
         rank.textContent = `#${index + 1} this week`;
@@ -413,6 +551,51 @@
         host.append(bar);
       });
     }
+
+    /* share row: social links, copy, and the downloadable PNG card */
+    const links = buildShareLinks(handle, fmt(s.lifetimeTokens ?? 0));
+    el("share-x").href = links.x;
+    el("share-linkedin").href = links.linkedin;
+    el("share-copy").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(links.url);
+        el("share-copy").textContent = "Copied ✓";
+        setTimeout(() => { el("share-copy").textContent = "Copy link"; }, 1500);
+      } catch { /* clipboard unavailable */ }
+    });
+    el("share-png").addEventListener("click", async () => {
+      const dayLevels = [];
+      for (let i = 118; i >= 0; i -= 1) {
+        const d = new Date(now);
+        d.setDate(d.getDate() - i);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        dayLevels.push(level(totals[key] || 0));
+      }
+      const canvas = document.createElement("canvas");
+      await drawShareCard(canvas, {
+        title: `@${handle}`,
+        rankLabel: weeklyRank ? `#${weeklyRank} on the community leaderboard this week` : null,
+        dayLevels,
+        stats: [
+          { value: fmt(s.lifetimeTokens ?? 0), label: "Lifetime tokens" },
+          { value: fmt(profile.weekTokens ?? 0), label: "Past 7 days" },
+          { value: s.peakDay ? fmt(s.peakDay.tokens) : "—", label: "Peak day" },
+          { value: `${s.currentStreakDays ?? 0}d`, label: "Streak" },
+        ],
+        platforms: Object.entries(platformNames).map(([key, name]) => ({
+          name,
+          tokens: s.byPlatform?.[key] ?? 0,
+        })),
+      });
+      canvas.toBlob((blob) => {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `token-widget-${handle}.png`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5_000);
+      });
+    });
+    el("share-row").hidden = false;
 
     /* top usage days */
     if (Array.isArray(s.topDays) && s.topDays.length) {

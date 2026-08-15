@@ -4,6 +4,14 @@ The top entry is the current source version. Binary release metadata appears at
 `/api/v1/latest` only after a signed and notarized DMG has actually been
 published.
 
+## Unreleased
+
+- Share buttons on public profiles and the local dashboard: post to X or
+  LinkedIn, copy the profile link, or download a designed PNG stat card —
+  every share carries the install link (tokenwidget.app) so recipients can
+  get their own widget. Local-only users get the card plus a one-click path
+  into the publish wizard; social link previews now ship Open Graph tags.
+
 ## 0.2.1 — 2026-08-14
 
 - The signed, notarized "Token Widget.app" DMG returns as the primary

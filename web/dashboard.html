@@ -94,6 +94,17 @@
   .community-action button:disabled { opacity: 0.5; cursor: default; }
   .community-action span { color: var(--text-muted); font-size: 0.78rem; }
 
+  .share-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 16px; }
+  .share-row button, .share-row a {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 14px; font: 500 0.82rem inherit; font-family: inherit; color: var(--text-secondary);
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 9999px;
+    cursor: pointer; text-decoration: none;
+  }
+  .share-row button:hover, .share-row a:hover { border-color: var(--accent); color: var(--accent); }
+  .share-row .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .share-row .primary:hover { opacity: 0.9; color: #fff; }
+
   .claim-card {
     max-width: 460px; margin: 26px auto 0; padding: 18px 20px;
     background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px;
@@ -223,6 +234,13 @@
     <div class="avatar">TM</div>
     <h1 id="meter-id">—</h1>
     <p class="sub"><span id="handle"></span><span id="handle-sep" hidden> · </span><span class="badge" id="profile-badge">Local profile</span></p>
+    <div class="share-row" id="share-row" hidden>
+      <button class="primary" id="share-png" type="button">⬇︎&nbsp;Save card as PNG</button>
+      <a id="share-x" target="_blank" rel="noopener" hidden>Share on X</a>
+      <a id="share-linkedin" target="_blank" rel="noopener" hidden>Share on LinkedIn</a>
+      <button id="share-copy" type="button" hidden>Copy link</button>
+      <a id="share-publish" hidden>Get a shareable link</a>
+    </div>
     <div class="community-action">
       <button id="open-leaderboard" type="button">Open community leaderboard</button>
       <span id="leaderboard-status" aria-live="polite"></span>
@@ -478,6 +496,8 @@
   }
 
   function renderAll(data) {
+    lastUsageData = data;
+    updateShareRow();
     const s = data.stats;
     const set = (id, value) => { document.getElementById(id).textContent = value; };
     set("s-lifetime", fmt(s.lifetime));
@@ -575,7 +595,202 @@
     }
   });
 
+  // Share targets for a public profile. The install link rides along in the
+  // post text so every share doubles as an invitation.
+  function buildShareLinks(handle, lifetimeLabel) {
+    const url = `https://www.tokenwidget.app/u/${encodeURIComponent(handle)}`;
+    const text = `My AI coding stats: ${lifetimeLabel} lifetime tokens, live on the Token Widget leaderboard. Get your own widget at tokenwidget.app`;
+    return {
+      url,
+      x: `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`,
+      linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`,
+    };
+  }
+
+  // A designed 1200x630 card drawn from scratch in the brand palette — no
+  // page screenshot, no external libraries. The install URL is part of the
+  // image itself.
+  async function drawShareCard(canvas, card) {
+    const W = 1200, H = 630;
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    try { await document.fonts.ready; } catch { /* draw with fallbacks */ }
+    const SERIF = '"Playfair Display", Georgia, serif';
+    const SANS = '"DM Sans", -apple-system, "Segoe UI", sans-serif';
+
+    ctx.fillStyle = "#f7f7f2"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#e3e3e3";
+    ctx.beginPath(); ctx.roundRect(36, 36, W - 72, H - 72, 22); ctx.fill(); ctx.stroke();
+
+    const cx = 108, cy = 106, r = 26;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#5b6f00"; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0.65 * Math.PI, 0.35 * Math.PI); ctx.stroke();
+    ctx.strokeStyle = "#b2c248";
+    ctx.beginPath(); ctx.arc(cx, cy, r, 1.28 * Math.PI, 1.75 * Math.PI); ctx.stroke();
+    ctx.strokeStyle = "#5b6f00"; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + r * 0.62, cy - r * 0.62); ctx.stroke();
+    ctx.fillStyle = "#5b6f00";
+    ctx.beginPath(); ctx.arc(cx, cy, 6, 0, 2 * Math.PI); ctx.fill();
+    ctx.fillStyle = "#b2c248";
+    ctx.beginPath(); ctx.arc(cx, cy + r, 4, 0, 2 * Math.PI); ctx.fill();
+
+    ctx.fillStyle = "#0e0f0c";
+    ctx.font = `600 30px ${SANS}`;
+    ctx.fillText("Token Widget", 152, 116);
+
+    ctx.font = `72px ${SERIF}`;
+    ctx.fillText(card.title, 76, 236);
+    if (card.rankLabel) {
+      ctx.font = `600 26px ${SANS}`;
+      ctx.fillStyle = "#5b6f00";
+      ctx.fillText(card.rankLabel, 82, 282);
+    }
+
+    const cellPalette = ["#eaebe5", "#dde5b8", "#b2c248", "#788c15", "#5b6f00"];
+    const totals = card.dayLevels;
+    const cell = 16, gap = 4;
+    const hx = W - 76 - 17 * (cell + gap), hy = 96;
+    for (let i = 0; i < totals.length && i < 119; i += 1) {
+      const week = Math.floor(i / 7), day = i % 7;
+      ctx.fillStyle = cellPalette[totals[i]] ?? cellPalette[0];
+      ctx.beginPath();
+      ctx.roundRect(hx + week * (cell + gap), hy + day * (cell + gap), cell, cell, 4);
+      ctx.fill();
+    }
+
+    const stats = card.stats;
+    const colWidth = (W - 152) / stats.length;
+    stats.forEach((stat, index) => {
+      const x = 76 + index * colWidth;
+      ctx.fillStyle = "#0e0f0c";
+      ctx.font = `600 54px ${SANS}`;
+      ctx.fillText(stat.value, x, 420);
+      ctx.fillStyle = "#72726e";
+      ctx.font = `24px ${SANS}`;
+      ctx.fillText(stat.label, x, 456);
+    });
+
+    const platforms = card.platforms.filter((p) => p.tokens > 0);
+    const total = platforms.reduce((sum, p) => sum + p.tokens, 0);
+    if (total > 0) {
+      const barX = 76, barY = 500, barW = W - 152, barH = 20;
+      const shades = ["#5b6f00", "#b2c248", "#dde5b8"];
+      let x = barX;
+      ctx.beginPath(); ctx.roundRect(barX, barY, barW, barH, 10); ctx.save(); ctx.clip();
+      platforms.forEach((p, index) => {
+        const w = (p.tokens / total) * barW;
+        ctx.fillStyle = shades[index % shades.length];
+        ctx.fillRect(x, barY, w, barH);
+        x += w;
+      });
+      ctx.restore();
+      let lx = barX;
+      ctx.font = `500 22px ${SANS}`;
+      platforms.forEach((p, index) => {
+        ctx.fillStyle = shades[index % shades.length];
+        ctx.beginPath(); ctx.arc(lx + 8, 552, 7, 0, 2 * Math.PI); ctx.fill();
+        ctx.fillStyle = "#454745";
+        const label = `${p.name} ${Math.round((p.tokens / total) * 100)}%`;
+        ctx.fillText(label, lx + 24, 560);
+        lx += 24 + ctx.measureText(label).width + 32;
+      });
+    }
+
+    ctx.fillStyle = "#5b6f00";
+    ctx.font = `600 26px ${SANS}`;
+    const invite = "Get your own widget → tokenwidget.app";
+    ctx.fillText(invite, W - 96 - ctx.measureText(invite).width, 560);
+    return canvas;
+  }
+
+  let lastUsageData = null;
+  let lastProfileData = null;
+
+  function updateShareRow() {
+    const row = document.getElementById("share-row");
+    if (!lastProfileData) return;
+    row.hidden = false;
+    const profile = lastProfileData;
+    const publicReady = Boolean(
+      profile.handle && profile.handleClaimed && profile.sharing?.enabled,
+    );
+    const lifetimeLabel = fmt(lastUsageData?.stats?.lifetime ?? 0);
+    const xEl = document.getElementById("share-x");
+    const inEl = document.getElementById("share-linkedin");
+    const copyEl = document.getElementById("share-copy");
+    const publishEl = document.getElementById("share-publish");
+    if (publicReady) {
+      const links = buildShareLinks(profile.handle, lifetimeLabel);
+      xEl.href = links.x;
+      inEl.href = links.linkedin;
+      copyEl.dataset.url = links.url;
+      xEl.hidden = inEl.hidden = copyEl.hidden = false;
+      publishEl.hidden = true;
+    } else {
+      xEl.hidden = inEl.hidden = copyEl.hidden = true;
+      // Publishing through the consent wizard is what mints a public link.
+      publishEl.href = TOKEN ? `/share?token=${TOKEN}` : "#";
+      publishEl.hidden = !TOKEN;
+    }
+  }
+
+  document.getElementById("share-copy").addEventListener("click", async (event) => {
+    try {
+      await navigator.clipboard.writeText(event.currentTarget.dataset.url ?? "");
+      event.target.textContent = "Copied ✓";
+      setTimeout(() => { document.getElementById("share-copy").textContent = "Copy link"; }, 1500);
+    } catch { /* clipboard unavailable */ }
+  });
+
+  document.getElementById("share-png").addEventListener("click", async () => {
+    const data = lastUsageData;
+    if (!data) return;
+    const s = data.stats;
+    const totalsMap = data.dayTotals ?? {};
+    const nonzero = Object.values(totalsMap).filter((t) => t > 0).sort((a, b) => a - b);
+    const q = (p) => (nonzero.length ? nonzero[Math.min(nonzero.length - 1, Math.floor(nonzero.length * p))] : Infinity);
+    const t1 = q(0.25), t2 = q(0.5), t3 = q(0.75);
+    const level = (t) => (t <= 0 ? 0 : t >= t3 ? 4 : t >= t2 ? 3 : t >= t1 ? 2 : 1);
+    const now = new Date();
+    const dayLevels = [];
+    let weekTokens = 0;
+    for (let i = 118; i >= 0; i -= 1) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const total = totalsMap[dateKey(d)] || 0;
+      dayLevels.push(level(total));
+      if (i <= 6) weekTokens += total;
+    }
+    const title = lastProfileData?.handle
+      ? `@${lastProfileData.handle}`
+      : lastProfileData?.meterId ?? "Token Widget";
+    const canvas = document.createElement("canvas");
+    await drawShareCard(canvas, {
+      title,
+      rankLabel: "AI coding stats · computed locally by Token Widget",
+      dayLevels,
+      stats: [
+        { value: fmt(s.lifetime ?? 0), label: "Lifetime tokens" },
+        { value: fmt(weekTokens), label: "Past 7 days" },
+        { value: fmt(s.peakDayTokens ?? 0), label: "Peak day" },
+        { value: `${s.currentStreak ?? 0}d`, label: "Streak" },
+      ],
+      platforms: (s.platforms ?? []).map((p) => ({ name: p.name, tokens: p.tokens })),
+    });
+    canvas.toBlob((blob) => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `token-widget-card.png`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5_000);
+    });
+  });
+
   function renderProfile(profile) {
+    lastProfileData = profile;
+    updateShareRow();
     const meterIdEl = document.getElementById("meter-id");
     const handleEl = document.getElementById("handle");
     const sep = document.getElementById("handle-sep");
