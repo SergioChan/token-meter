@@ -82,7 +82,7 @@ spec:
               type: RuntimeDefault
       containers:
         - name: registry
-          image: us-west1-docker.pkg.dev/tworld-473700/token-widget/registry@sha256:af52b66df6b6ee0a958f08aa6b285517815c8d27b779d953be969e386e46f0f3
+          image: us-west1-docker.pkg.dev/tworld-473700/token-widget/registry@sha256:eae02aafa45c7007b75e514a0226a9e6aff3b1992e2001da7c7145e421953807
           imagePullPolicy: IfNotPresent
           env:
             - name: DATABASE_URL
