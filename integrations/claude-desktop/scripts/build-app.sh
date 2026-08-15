@@ -71,6 +71,7 @@ trap cleanup EXIT
   -whole-module-optimization \
   -framework AppKit \
   -framework ApplicationServices \
+  -framework Security \
   -framework WebKit \
   -o "$STAGING/Contents/MacOS/TokenMeterClaudeOverlay"
 /usr/bin/install -m 600 \

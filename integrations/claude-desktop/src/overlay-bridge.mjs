@@ -211,7 +211,14 @@ for await (const line of input) {
     if (request?.command === "update-info") {
       await writeLine(
         updateInfo
-          ? { requestId, ok: true, version: updateInfo.version, url: updateInfo.url }
+          ? {
+            requestId,
+            ok: true,
+            version: updateInfo.version,
+            url: updateInfo.url,
+            // The installer refuses to swap the bundle without this digest.
+            sha256: updateInfo.sha256 ?? null,
+          }
           : { requestId, ok: false },
       );
       continue;

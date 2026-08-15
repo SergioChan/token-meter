@@ -144,3 +144,22 @@ test("Claude installer trusts the LaunchAgent health state for Accessibility", a
   assert.match(healthGate, /\[ "\$ACCESSIBILITY_GRANTED" = true \]/);
   assert.doesNotMatch(healthGate, /--check-accessibility/);
 });
+
+test("Claude native overlay only self-installs its own signed builds", async () => {
+  const source = await readFile(
+    "integrations/claude-desktop/native/TokenMeterClaudeOverlay.swift",
+    "utf8",
+  );
+  // Three independent proofs stand between a download and the running bundle:
+  // the digest the registry published, Gatekeeper, and our own signature.
+  assert.match(source, /SHA256\.hash\(data: bytes\)/);
+  assert.match(source, /guard actual == expected else/);
+  assert.match(source, /"--assess", "--type", "install", image\.path/);
+  assert.match(source, /SecCodeCopyDesignatedRequirement/);
+  assert.match(source, /signedLikeUs\(replacement\)/);
+  // ditto preserves the signature that codesign sealed; replaceItem keeps the
+  // swap atomic so a crash can never leave a half-written bundle behind.
+  assert.match(source, /"\/usr\/bin\/ditto"/);
+  assert.match(source, /FileManager\.default\.replaceItem\(/);
+  assert.match(source, /fallBackToManualInstall/);
+});
