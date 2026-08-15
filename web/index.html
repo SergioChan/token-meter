@@ -35,6 +35,8 @@
     --sans: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
   body {
     margin: 0;
     background: var(--canvas);
@@ -43,7 +45,8 @@
     letter-spacing: 0.01em;
   }
 
-  nav {
+  /* Scoped to the page header: the feature tour uses a <nav> of its own. */
+  body > nav {
     position: sticky; top: 0; z-index: 20;
     background: var(--card);
     backdrop-filter: blur(16px);
@@ -59,7 +62,7 @@
   .nav-links { display: flex; gap: 16px; margin-left: 24px; }
   .nav-links a { color: var(--charcoal); font-size: 15px; text-decoration: none; }
   .nav-links a:hover { color: var(--forest); }
-  nav .pill { margin-left: auto; }
+  body > nav .pill { margin-left: auto; }
 
   .pill {
     display: inline-flex; align-items: center; gap: 8px;
@@ -130,53 +133,93 @@
   .cli-line button:hover { background: var(--sprout); }
   .cli-box p { margin: 0; color: var(--slate); font-size: 13px; }
 
-  .product-strip {
-    display: flex; gap: 24px; align-items: flex-start; justify-content: center;
-    margin-top: 56px; flex-wrap: wrap;
+  /* Feature tour: the index on the left stays put while the panels scroll
+     past it, so the active feature tracks the scroll in both directions. */
+  .tour { padding: 88px 0 24px; }
+  .tour-grid { display: grid; grid-template-columns: 216px 1fr; gap: 72px; align-items: start; }
+  .tour-nav { position: sticky; top: 104px; display: flex; flex-direction: column; }
+  .tour-nav a {
+    padding: 13px 0; color: var(--slate); font-size: 15px; text-decoration: none;
+    border-top: 1px solid var(--ash);
+    transition: color 0.3s ease, border-color 0.3s ease;
   }
-  .shot {
-    background: var(--card); border: 0.5px solid var(--stone); border-radius: 12px; overflow: hidden;
+  .tour-nav a:hover { color: var(--carbon); }
+  .tour-nav a.active { color: var(--ink); border-color: var(--ink); }
+
+  .tour-panel { max-width: 760px; padding-bottom: 128px; scroll-margin-top: 120px; }
+  .tour-panel:last-child { padding-bottom: 72px; }
+  .tour-panel h2 { margin: 0 0 14px; font: 400 clamp(28px, 3vw, 36px)/1.2 var(--serif); letter-spacing: -0.01em; }
+  .tour-panel > p { margin: 0 0 32px; max-width: 520px; color: var(--slate); font-size: 17px; font-weight: 300; line-height: 1.55; }
+
+  .frame { background: var(--card); border: 0.5px solid var(--stone); border-radius: 14px; overflow: hidden; box-shadow: rgba(0,0,0,0.14) 0 10px 44px; }
+  .frame-bar { display: flex; gap: 7px; padding: 12px 14px; background: var(--fog); border-bottom: 0.5px solid var(--stone); }
+  .frame-bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--stone); }
+  .frame img { display: block; width: 100%; height: auto; }
+
+  /* The meter is small by design; a tinted stage gives it room to be looked at. */
+  .stage {
+    display: grid; place-items: center; padding: 56px 24px; border-radius: 14px;
+    background: linear-gradient(155deg, var(--sprout), var(--fog) 70%);
+    border: 0.5px solid var(--stone);
   }
-  .shot img { display: block; width: 100%; height: auto; }
-  .product-strip > div:first-child { flex: 0 1 280px; }
-  .product-strip > div:last-child { flex: 1 1 460px; max-width: 720px; }
-  .shot-caption { margin-top: 10px; text-align: center; color: var(--slate); font-size: 13px; letter-spacing: 0.13px; }
+  .stage img { display: block; width: min(300px, 100%); height: auto; filter: drop-shadow(rgba(0,0,0,0.18) 0 10px 30px); }
+  /* The alarm shot is dark by nature; give it a ground that suits it. */
+  .stage.dark { background: linear-gradient(155deg, #1c1d19, #2b2a24 70%); border-color: #34342d; }
+  .stage.dark img { width: min(330px, 100%); border-radius: 12px; }
 
-  .features { padding: 64px 0 96px; }
-  .features .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-  .feature {
-    background: var(--canvas); border: 1px solid var(--ash); border-radius: 8px; padding: 24px;
+  .pv { padding: 32px; border-radius: 14px; background: var(--canvas); border: 1px solid var(--ash); }
+  .pv-box { padding: 22px; border: 1px dashed var(--stone); border-radius: 12px; background: var(--card); }
+  .pv-box h4 { margin: 0 0 4px; font: 500 13px/1.23 var(--sans); letter-spacing: 0.13px; color: var(--forest); text-transform: uppercase; }
+  .pv-box p { margin: 0 0 14px; color: var(--slate); font-size: 13px; }
+  .pv-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pv-chip { padding: 6px 12px; border-radius: 9999px; background: var(--fog); color: var(--carbon); font-size: 13px; }
+  .pv-chip.out { background: transparent; border: 1px solid var(--stone); color: var(--slate); text-decoration: line-through; }
+  .pv-gate { display: flex; align-items: center; gap: 12px; margin: 18px 0; color: var(--slate); font-size: 13px; }
+  .pv-gate::before, .pv-gate::after { content: ""; flex: 1; height: 1px; background: var(--ash); }
+  .pv-toggle { display: inline-flex; padding: 3px; border: 1px solid var(--stone); border-radius: 9999px; background: var(--card); }
+  .pv-toggle span { padding: 7px 15px; border-radius: 9999px; font-size: 13px; color: var(--slate); }
+  .pv-toggle .on { background: var(--sprout); color: var(--forest); font-weight: 500; }
+
+  /* Closing statement: the one dark surface on the page. */
+  .bigfoot { background: var(--ink); color: #f3f3ec; padding: 104px 0 32px; }
+  .bigfoot .mark { display: flex; justify-content: center; }
+  .bigfoot h2 {
+    max-width: 800px; margin: 28px auto 0; text-align: center;
+    font: 400 clamp(30px, 4vw, 46px)/1.16 var(--serif); letter-spacing: -0.015em;
   }
-  .feature small { display: block; font: 500 13px/1.23 var(--sans); letter-spacing: 0.13px; color: var(--forest); text-transform: uppercase; margin-bottom: 8px; }
-  .feature h3 { margin: 0 0 8px; font: 400 24px/1.25 var(--serif); letter-spacing: 0.01em; }
-  .feature p { margin: 0; color: var(--slate); font-size: 15px; line-height: 1.5; }
-
-  .steps { padding: 64px 0; }
-  .steps h2, .privacy h2 { font: 400 36px/1.25 var(--serif); letter-spacing: -0.54px; text-align: center; margin: 0 0 32px; }
-  .steps ol { max-width: 560px; margin: 0 auto; padding-left: 24px; color: var(--carbon); }
-  .steps li { margin-bottom: 14px; line-height: 1.5; }
-  .steps li b { color: var(--ink); font-weight: 600; }
-
-  .privacy { padding: 64px 0 96px; }
-  .privacy .card {
-    max-width: 680px; margin: 0 auto; text-align: center;
-    background: var(--card); border: 1px solid var(--ash); border-radius: 12px; padding: 32px 40px;
+  .bigfoot .lede { max-width: 560px; margin: 22px auto 0; text-align: center; color: rgb(243 243 236 / 0.6); font-size: 17px; font-weight: 300; line-height: 1.55; }
+  .pillars { display: flex; justify-content: center; gap: 56px; margin-top: 52px; flex-wrap: wrap; }
+  .pillar { text-align: center; max-width: 200px; }
+  .pillar b { display: block; font: 500 15px/1.4 var(--sans); }
+  .pillar span { color: rgb(243 243 236 / 0.5); font-size: 13px; line-height: 1.5; }
+  .gh-row { display: flex; justify-content: center; margin-top: 52px; }
+  .gh-pill {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 13px 24px; border: 1px solid rgb(243 243 236 / 0.25); border-radius: 9999px;
+    color: #f3f3ec; font-size: 15px; text-decoration: none;
   }
-  .privacy .card h2 { font-size: 24px; margin-bottom: 12px; letter-spacing: 0.01em; }
-  .privacy .card p { margin: 0; color: var(--slate); font-size: 15px; line-height: 1.55; }
-
-  footer { border-top: 1px solid var(--ash); padding: 24px 0 48px; text-align: center; color: var(--slate); font-size: 13px; letter-spacing: 0.13px; }
-  footer a { color: var(--carbon); }
+  .gh-pill:hover { background: rgb(243 243 236 / 0.08); border-color: rgb(243 243 236 / 0.45); }
+  .fine {
+    margin-top: 72px; padding-top: 24px; text-align: center;
+    border-top: 1px solid rgb(243 243 236 / 0.12);
+    color: rgb(243 243 236 / 0.45); font-size: 13px; letter-spacing: 0.13px;
+  }
+  .fine a { color: rgb(243 243 236 / 0.7); }
 
   @media (max-width: 860px) {
     .hero { grid-template-columns: 1fr; gap: 32px; }
     .hero-visual { min-height: 0; }
     .hero-visual .shot { position: static; margin: 0 0 16px; }
     .hero-visual .widget { width: 268px; }
+    .tour-grid { grid-template-columns: 1fr; gap: 32px; }
+    .tour-nav { position: static; flex-direction: row; gap: 20px; overflow-x: auto; }
+    .tour-nav a { border-top: 0; border-bottom: 2px solid transparent; padding: 8px 0; white-space: nowrap; }
+    .tour-nav a.active { border-color: var(--ink); }
+    .tour-panel { padding-bottom: 80px; }
   }
   @media (max-width: 620px) {
-    .features .grid { grid-template-columns: 1fr; }
     .nav-links { display: none; }
+    .pillars { gap: 32px; }
   }
 </style>
 </head>
@@ -204,7 +247,7 @@
         <a class="pill forest" href="https://github.com/SergioChan/token-meter/releases/latest/download/TokenWidget.dmg" id="install-btn">Download for Mac&nbsp; &#8681;</a>
         <button class="cli-link" type="button" id="cli-toggle">or install from the command line</button>
       </div>
-      <p class="cta-note">✓&nbsp; Notarized by Apple · Drag to Applications · Claude Code and Codex Desktop on macOS</p>
+      <p class="cta-note">✓&nbsp; Notarized by Apple · macOS · Tracks Claude Code, Codex, and Cline</p>
 
       <div class="cli-box" id="install">
         <h4>Terminal</h4>
@@ -236,58 +279,139 @@
   </div>
 </section>
 
-<section class="white features">
-  <div class="inner">
-    <div class="grid">
-      <div class="feature">
-        <small>Live telemetry</small>
-        <h3>A needle, not a percentage</h3>
-        <p>Tokens per minute against your own baseline. Red means this turn costs several times your normal.</p>
-      </div>
-      <div class="feature">
-        <small>Anomaly alarm</small>
-        <h3>Catches runaway context</h3>
-        <p>Flags context pollution, retry loops, and agent spirals before they eat another turn.</p>
-      </div>
-      <div class="feature">
-        <small>Identity</small>
-        <h3>Your @handle and dashboard</h3>
-        <p>Claim a handle. Click it for your calendar, streaks, cache hit rate, and platform breakdown.</p>
-      </div>
-      <div class="feature">
-        <small>Privacy</small>
-        <h3>Private by default</h3>
-        <p>Computed on your laptop. Sharing is opt-in and limited to signed totals — never content.</p>
-      </div>
+<section class="white tour">
+  <div class="inner tour-grid">
+    <nav class="tour-nav" aria-label="Features">
+      <a href="#live" class="active">Live telemetry</a>
+      <a href="#alarm">Runaway alarm</a>
+      <a href="#community">Identity &amp; community</a>
+      <a href="#privacy">Private by default</a>
+    </nav>
+
+    <div class="tour-panels">
+      <article class="tour-panel" id="live">
+        <h2>A needle, not a percentage</h2>
+        <p>The meter rides along beside your agent, reading tokens per minute against your own baseline. Session total, 24-hour total, streak, lifetime — without opening anything.</p>
+        <div class="stage">
+          <img src="assets/widget-expanded.png" alt="The Token Widget meter: live gauge, session total, 24-hour total, current streak, and lifetime tokens" width="288" height="222" loading="lazy">
+        </div>
+      </article>
+
+      <article class="tour-panel" id="alarm">
+        <h2>It knows what your normal looks like</h2>
+        <p>The alarm has no fixed number to trip. It learns the median rate of your own turns and speaks up when one runs several times past it — the signature of context pollution or a retry loop. Until it has seen enough of your work to be sure, it stays quiet.</p>
+        <div class="stage dark">
+          <img src="assets/widget-alert.png" alt="The meter in its alert state: the gauge in the red zone at 1.240M per minute against a 142.0K per minute baseline, warning that context pollution or a retry loop may be present" width="628" height="762" loading="lazy">
+        </div>
+      </article>
+
+      <article class="tour-panel" id="community">
+        <h2>Your @handle and dashboard</h2>
+        <p>Claim a handle that is yours across the community. Behind it sits your full record: the token activity calendar, streaks, cache hit rate, and the split across Claude Code, Codex, and Cline.</p>
+        <div class="frame">
+          <div class="frame-bar"><i></i><i></i><i></i></div>
+          <img src="assets/dashboard.png" alt="Personal usage dashboard showing lifetime tokens, streaks, the token activity calendar, and the platform breakdown" width="1240" height="940" loading="lazy">
+        </div>
+      </article>
+
+      <article class="tour-panel" id="privacy">
+        <h2>Nothing leaves without you saying so</h2>
+        <p>Every number is computed on your own machine and stays there. Sharing is a deliberate switch, and even then only signed totals travel — never a word of what you wrote.</p>
+        <div class="pv">
+          <div class="pv-box">
+            <h4>On your Mac</h4>
+            <p>Read locally, stored locally.</p>
+            <div class="pv-chips">
+              <span class="pv-chip">Token counts</span>
+              <span class="pv-chip">Timestamps</span>
+              <span class="pv-chip">Session IDs</span>
+              <span class="pv-chip out">Message content</span>
+              <span class="pv-chip out">Your prompts</span>
+              <span class="pv-chip out">File contents</span>
+            </div>
+          </div>
+          <div class="pv-gate">only if you switch it on</div>
+          <div class="pv-box">
+            <h4>Community</h4>
+            <p>Signed totals, nothing else.</p>
+            <div class="pv-toggle" role="img" aria-label="Sharing control, currently set to data stays local">
+              <span class="on">Data stays local</span>
+              <span>Share with community</span>
+            </div>
+          </div>
+        </div>
+      </article>
     </div>
   </div>
 </section>
 
-<section class="steps">
+<footer class="bigfoot">
   <div class="inner">
-    <h2>Up and running in two minutes</h2>
-    <ol>
-      <li><b>Install</b> — run the command above; the companion builds locally on your Mac.</li>
-      <li><b>Grant Accessibility</b> — one macOS permission, once.</li>
-      <li><b>Work</b> — the gauge appears with your session. Click <b>@your-handle</b> for the dashboard.</li>
-    </ol>
-  </div>
-</section>
-
-<section class="privacy">
-  <div class="inner">
-    <div class="card">
-      <h2>Local-first, verifiable</h2>
-      <p>Token Widget reads identifiers, timestamps, and token counts — never message content. It never patches the host apps. Open source: read every line.</p>
+    <div class="mark">
+      <svg width="34" height="34" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <path d="M20.5 51.92A23 23 0 1 1 43.5 51.92" stroke="#b2c248" stroke-width="7" stroke-linecap="round"/>
+        <path d="M32 9A23 23 0 0 1 48.26 15.74" stroke="#5b6f00" stroke-width="7" stroke-linecap="round"/>
+        <line x1="32" y1="32" x2="42.6" y2="21.4" stroke="#b2c248" stroke-width="6" stroke-linecap="round"/>
+        <circle cx="32" cy="32" r="5" fill="#b2c248"/>
+        <circle cx="32" cy="55" r="3.5" fill="#5b6f00"/>
+      </svg>
     </div>
-  </div>
-</section>
+    <h2>A privacy-first way to see your own token patterns.</h2>
+    <p class="lede">Free to use, open source end to end, and built so your usage data never has to leave your machine.</p>
 
-<footer>
-  MIT License · <a href="https://github.com/SergioChan/token-meter">GitHub</a> · <a href="/leaderboard">Leaderboard</a> · Token Widget is an independent open-source project, not affiliated with Anthropic or OpenAI.
+    <div class="pillars">
+      <div class="pillar"><b>Free</b><span>No account, no tier, no meter on the meter.</span></div>
+      <div class="pillar"><b>Open source</b><span>MIT licensed — every line is readable.</span></div>
+      <div class="pillar"><b>Yours</b><span>Local by default; sharing is always a choice.</span></div>
+    </div>
+
+    <div class="gh-row">
+      <a class="gh-pill" href="https://github.com/SergioChan/token-meter">
+        <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        Read the source on GitHub
+      </a>
+    </div>
+
+    <p class="fine">
+      MIT License · <a href="/leaderboard">Leaderboard</a> · Token Widget is an independent open-source project, not affiliated with Anthropic or OpenAI.
+    </p>
+  </div>
 </footer>
 
 <script>
+  // Feature tour: whichever panel crosses the middle of the viewport is the
+  // active one. Measuring geometry rather than observing intersections keeps
+  // this exact when panels are taller than the screen, when the page is jumped
+  // to an anchor, and when the reader scrolls back up.
+  const tourLinks = [...document.querySelectorAll(".tour-nav a")];
+  const panels = tourLinks.map((link) => document.querySelector(link.getAttribute("href")));
+  if (panels.every(Boolean)) {
+    let queued = false;
+    const syncTour = () => {
+      queued = false;
+      const viewport = window.innerHeight;
+      let active = 0;
+      let best = -Infinity;
+      panels.forEach((panel, index) => {
+        const box = panel.getBoundingClientRect();
+        // How much of this panel the reader can actually see. Panels are
+        // shorter than a tall window, so "closest to the middle" would jump
+        // ahead a feature; the one filling the screen is the one being read.
+        const visible = Math.min(box.bottom, viewport) - Math.max(box.top, 0);
+        const score = visible > 0 ? visible : -Math.abs(box.top);
+        if (score > best) { best = score; active = index; }
+      });
+      tourLinks.forEach((link, index) => link.classList.toggle("active", index === active));
+    };
+    addEventListener("scroll", () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(syncTour);
+    }, { passive: true });
+    addEventListener("resize", syncTour);
+    syncTour();
+  }
+
   const installBox = document.getElementById("install");
   const toggleInstall = () => installBox.classList.toggle("open");
   document.getElementById("cli-toggle").addEventListener("click", toggleInstall);
