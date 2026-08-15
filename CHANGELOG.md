@@ -4,7 +4,7 @@ The top entry is the current source version. Binary release metadata appears at
 `/api/v1/latest` only after a signed and notarized DMG has actually been
 published.
 
-## Unreleased
+## 0.2.2 — 2026-08-14
 
 - Share buttons on public profiles and the local dashboard: post to X or
   LinkedIn, copy the profile link, or download a designed PNG stat card —
