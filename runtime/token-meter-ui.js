@@ -117,14 +117,13 @@
     <div class="meter-settings" hidden>
       <div class="settings-identity">
         <button class="settings-power" type="button" aria-label="Turn off Token Widget">&#9211;</button>
-        <small>IDENTITY</small>
         <button class="settings-identity-link" type="button" hidden>@—</button>
         <span class="settings-anon">Anonymous meter</span>
       </div>
       <button class="settings-claim" type="button" hidden>Claim your @handle</button>
       <button class="settings-action-row settings-share" type="button">
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-        <span>Refer friends</span>
+        <span>Share with friends</span>
       </button>
       <button class="settings-action-row settings-dashboard" type="button">
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="8"/><line x1="18" y1="20" x2="18" y2="4"/></svg>
@@ -496,6 +495,29 @@
     elements.updateBanner.hidden = !available || updateDismissed || !elements.warning.hidden;
   };
 
+  // Progress for the self-installing update, pushed by the native layer as it
+  // downloads, verifies and swaps the bundle. "manual" is the fallback for the
+  // cases the app cannot install itself — an unwritable /Applications, mostly.
+  const UPDATE_STATES = {
+    downloading: ["Downloading update…", "Keep working — this runs in the background."],
+    verifying: ["Verifying update…", "Checking Apple's signature before installing."],
+    installing: ["Installing update…", "The meter restarts by itself in a moment."],
+    restarting: ["Restarting…", "Back in a few seconds with the new version."],
+    manual: ["Installer downloaded", "Drag Token Widget to Applications, then reopen."],
+    failed: ["Update failed", "Click to try again."],
+  };
+  const setUpdateState = (payload) => {
+    const copy = UPDATE_STATES[payload?.state];
+    if (!copy) return;
+    updateDownloadStarted = true;
+    [elements.updateTitle.textContent, elements.updateSub.textContent] = copy;
+    elements.updateBanner.hidden = updateDismissed || !elements.warning.hidden;
+    // Let the banner fall back to "ready" so a failed attempt can be retried.
+    if (payload.state === "failed" || payload.state === "manual") {
+      setTimeout(() => { updateDownloadStarted = false; }, 8_000);
+    }
+  };
+
   // First-run nudge for the bottom slot, lowest priority: the anomaly warning
   // and a pending update both win. Persistently dismissed via the identity
   // file, so it appears at most once per machine.
@@ -678,7 +700,10 @@
     event.stopPropagation();
   });
 
-  const INSTALL_URL = "https://github.com/SergioChan/token-meter";
+  // The home page, not the repository: it offers the notarized download and
+  // the curl one-liner side by side, so a referred user lands on a choice
+  // rather than on source code.
+  const INSTALL_URL = "https://www.tokenwidget.app";
   const nativeActions = () =>
     window.webkit?.messageHandlers?.tokenMeterAction ??
     window.__tokenMeterActionBridge ??
@@ -716,8 +741,7 @@
   const startUpdateDownload = () => {
     if (updateDownloadStarted) return;
     updateDownloadStarted = true;
-    elements.updateTitle.textContent = "Downloading update…";
-    elements.updateSub.textContent = "The installer opens by itself: drag to Applications, then reopen.";
+    setUpdateState({ state: "downloading" });
     postAction({ type: "open-update" });
     // Allow a retry if the download quietly fails (lost network, dead tunnel).
     setTimeout(() => {
@@ -769,7 +793,7 @@
     elements.settingsTip.textContent = text || versionLabel;
   };
   const tips = [
-    [elements.settingsShare, "Copy the install link to your clipboard and refer friends"],
+    [elements.settingsShare, "Copy the install link to your clipboard and share with friends"],
     [elements.settingsDashboard, "Open your private usage dashboard in the browser"],
     [elements.settingsLeaderboard, "See where you stand on the community leaderboard"],
     [elements.settingsIdentityLink, "Open your identity page"],
@@ -794,7 +818,7 @@
   elements.settingsShare.addEventListener("click", () => {
     postAction({
       type: "copy-text",
-      text: `See how hard your Agent is working — Token Meter: ${INSTALL_URL}`,
+      text: `See how hard your Agent is working — Token Widget: ${INSTALL_URL}`,
     });
     showTip("Copied install link ✓", 1400);
   });
@@ -884,6 +908,7 @@
     version: VERSION,
     update,
     configure,
+    setUpdateState,
     setCollapsed,
     ensureMounted,
     destroy: destroyWithObserver,

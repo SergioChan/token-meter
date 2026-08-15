@@ -195,13 +195,6 @@
   display: none;
 }
 
-.settings-identity small {
-  display: block;
-  color: rgb(32 33 31 / 0.55);
-  font-size: 9px;
-  letter-spacing: 0.06em;
-}
-
 .settings-identity-link {
   padding: 0;
   color: #20211f;
@@ -1117,7 +1110,6 @@
     background: rgb(107 165 231 / 0.12);
   }
 
-  .settings-identity small,
   .settings-tip {
     color: rgb(236 238 233 / 0.55);
   }
