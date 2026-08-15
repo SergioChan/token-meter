@@ -20,6 +20,20 @@ const dataFile =
     "Registry",
     "registry.json",
   );
+// Production containers carry no DMG. A release is published to installed
+// widgets by describing it in the environment: version + digest + size feed
+// /api/v1/latest, and the download route redirects to the immutable release
+// asset (TOKEN_METER_LATEST_URL). Absent these, the local dist/ files serve.
+const latestRelease =
+  process.env.TOKEN_METER_LATEST_VERSION && process.env.TOKEN_METER_LATEST_SHA256
+    ? {
+        version: process.env.TOKEN_METER_LATEST_VERSION,
+        path: "/download/token-widget.dmg",
+        sha256: process.env.TOKEN_METER_LATEST_SHA256,
+        size: Number(process.env.TOKEN_METER_LATEST_SIZE) || null,
+      }
+    : null;
+
 const server = new RegistryServer({
   store: createRegistryStore({
     databaseUrl: process.env.DATABASE_URL,
@@ -29,6 +43,8 @@ const server = new RegistryServer({
   downloadFile: path.join(root, "dist", `token-widget-${version}-macos.zip`),
   dmgFile: path.join(root, "dist", `TokenWidget-${version}.dmg`),
   latestVersion: version,
+  latestRelease,
+  dmgRedirectUrl: process.env.TOKEN_METER_LATEST_URL || null,
   host,
 });
 await server.start(port);
