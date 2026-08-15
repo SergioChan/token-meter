@@ -38,6 +38,7 @@ const server = new RegistryServer({
   store: createRegistryStore({
     databaseUrl: process.env.DATABASE_URL,
     dataFile,
+    profileReads: process.env.TOKEN_WIDGET_PROFILE_READS === "1",
   }),
   webDir: path.join(root, "web"),
   downloadFile: path.join(root, "dist", `token-widget-${version}-macos.zip`),

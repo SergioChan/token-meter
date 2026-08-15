@@ -7,6 +7,7 @@ import {
 import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 import pg from "pg";
+import { aggregateProfileSnapshots } from "./profile-rollup.mjs";
 
 const { Pool } = pg;
 const FILE_PROFILE_SCHEMA_VERSION = 1;
@@ -49,10 +50,24 @@ function publicMeterRow(meterId, meter) {
   };
 }
 
+function publicProfileRow(profileId, profile) {
+  return {
+    rowId: registryRowId(profileId),
+    name: displayName(profileId, profile.handle),
+    handle: profile.handle ?? null,
+    tokens: profile.weekTokens ?? 0,
+    lifetimeTokens: profile.stats?.lifetimeTokens ?? 0,
+    sessions: profile.stats?.sessionsLast7Days ?? null,
+    sessionWindowDays: 7,
+    updatedAtMs: profile.updatedAtMs,
+  };
+}
+
 export class FileRegistryStore {
-  constructor({ dataFile }) {
+  constructor({ dataFile, profileReads = false }) {
     if (!dataFile) throw new TypeError("dataFile is required");
     this.dataFile = dataFile;
+    this.profileReads = profileReads;
     try {
       const loaded = JSON.parse(readFileSync(dataFile, "utf8"));
       this.data = {
@@ -119,6 +134,68 @@ export class FileRegistryStore {
     return true;
   }
 
+  #ensureProfileForMeter(meterId, nowMs) {
+    const existingDevice = this.data.profileDevices[meterId];
+    if (existingDevice) return existingDevice.profileId;
+    const meter = this.data.meters[meterId];
+    if (!meter) throw new Error(`cannot create profile for unknown meter ${meterId}`);
+    const handleEntry = Object.entries(this.data.handles).find(
+      ([, value]) => value.meterId === meterId,
+    );
+    const handle = handleEntry?.[0] ?? null;
+    const profileId = handleEntry?.[1]?.profileId ?? meterId;
+    const joinedAtMs = handleEntry?.[1]?.claimedAtMs ?? meter.updatedAtMs ?? nowMs;
+    this.data.profiles[profileId] ??= {
+      ownerMeterId: meterId,
+      handle,
+      days: meter.days ?? [],
+      stats: meter.stats ?? {},
+      weekTokens: meter.weekTokens ?? 0,
+      generatedAtMs: meter.generatedAtMs ?? null,
+      updatedAtMs: meter.updatedAtMs ?? nowMs,
+      createdAtMs: joinedAtMs,
+      rollupVersion: 1,
+      timeZone: null,
+    };
+    this.data.profileDevices[meterId] = {
+      profileId,
+      role: "owner",
+      sharingEnabled: meter.generatedAtMs != null,
+      joinedAtMs,
+      lastReportedAtMs: meter.generatedAtMs == null ? null : meter.updatedAtMs,
+      revokedAtMs: null,
+      replacedByMeterId: null,
+      deviceLabel: null,
+    };
+    if (handleEntry) handleEntry[1].profileId = profileId;
+    return profileId;
+  }
+
+  #recomputeProfile(profileId, nowMs) {
+    const profile = this.data.profiles[profileId];
+    if (!profile) throw new Error(`unknown profile ${profileId}`);
+    const snapshots = Object.entries(this.data.profileDevices)
+      .filter(([, device]) =>
+        device.profileId === profileId &&
+        device.revokedAtMs == null &&
+        device.sharingEnabled)
+      .map(([meterId]) => this.data.meters[meterId])
+      .filter(Boolean);
+    const rollup = aggregateProfileSnapshots(snapshots);
+    profile.days = rollup.days;
+    profile.stats = rollup.stats;
+    profile.weekTokens = rollup.weekTokens;
+    profile.generatedAtMs = rollup.generatedAtMs;
+    profile.updatedAtMs = Math.max(rollup.updatedAtMs ?? 0, nowMs);
+    profile.rollupVersion = 1;
+  }
+
+  #sortedProfiles() {
+    return Object.entries(this.data.profiles)
+      .filter(([, profile]) => profile.generatedAtMs != null)
+      .sort(compareMeters);
+  }
+
   #save() {
     mkdirSync(dirname(this.dataFile), { recursive: true });
     const temporaryFile = `${this.dataFile}.writing`;
@@ -175,6 +252,9 @@ export class FileRegistryStore {
     meter.handle = handle;
     meter.publicKey = publicKey;
     meter.updatedAtMs = nowMs;
+    const profileId = this.#ensureProfileForMeter(meterId, nowMs);
+    this.data.handles[handle].profileId = profileId;
+    this.data.profiles[profileId].handle = handle;
     this.#save();
     return { claimed: true };
   }
@@ -211,6 +291,11 @@ export class FileRegistryStore {
     if (handle && this.data.handles[handle]?.meterId === meterId) {
       meter.handle = handle;
     }
+    const profileId = this.#ensureProfileForMeter(meterId, nowMs);
+    const device = this.data.profileDevices[meterId];
+    device.sharingEnabled = true;
+    device.lastReportedAtMs = nowMs;
+    this.#recomputeProfile(profileId, nowMs);
     meter.updatedAtMs = nowMs;
     this.#save();
     return { accepted: true, ignored: false };
@@ -272,6 +357,26 @@ export class FileRegistryStore {
     if (!session) return null;
     const meter = this.data.meters[session.meterId] ?? null;
     if (meter?.publicKey && meter.publicKey !== session.publicKey) return null;
+    if (this.profileReads) {
+      const device = this.data.profileDevices[session.meterId];
+      const profile = device ? this.data.profiles[device.profileId] : null;
+      const sorted = this.#sortedProfiles();
+      const index = sorted.findIndex(([profileId]) => profileId === device?.profileId);
+      return {
+        meterId: session.meterId,
+        profileId: device?.profileId ?? null,
+        rowId: registryRowId(device?.profileId ?? session.meterId),
+        name: displayName(device?.profileId ?? session.meterId, profile?.handle),
+        handle: profile?.handle ?? null,
+        rank: index >= 0 ? index + 1 : null,
+        totalMeters: sorted.length,
+        tokens: profile?.weekTokens ?? 0,
+        sessions: profile?.stats?.sessionsLast7Days ?? null,
+        sessionWindowDays: 7,
+        sharingReported: profile?.generatedAtMs != null,
+        expiresAtMs: session.expiresAtMs,
+      };
+    }
     // Rank and totals only count meters with shared data — a withdrawn
     // meter keeps its handle but disappears from the board.
     const sorted = Object.entries(this.data.meters)
@@ -313,11 +418,22 @@ export class FileRegistryStore {
     delete meter.weekTokens;
     delete meter.generatedAtMs;
     meter.updatedAtMs = nowMs;
+    const device = this.data.profileDevices[meterId];
+    if (device) {
+      device.sharingEnabled = false;
+      device.lastReportedAtMs = nowMs;
+      this.#recomputeProfile(device.profileId, nowMs);
+    }
     this.#save();
     return { wiped: true };
   }
 
   async leaderboard(limit = 100) {
+    if (this.profileReads) {
+      return this.#sortedProfiles()
+        .map(([profileId, profile]) => publicProfileRow(profileId, profile))
+        .slice(0, limit);
+    }
     return Object.entries(this.data.meters)
       .filter(([, meter]) => meter.generatedAtMs != null)
       .sort(compareMeters)
@@ -326,6 +442,20 @@ export class FileRegistryStore {
   }
 
   async profile(handle) {
+    if (this.profileReads) {
+      const profileId = this.data.handles[handle]?.profileId;
+      const profile = profileId ? this.data.profiles[profileId] : null;
+      if (!profile) return null;
+      if (profile.generatedAtMs == null) return { handle, shared: false };
+      return {
+        handle,
+        shared: true,
+        days: profile.days ?? [],
+        stats: profile.stats ?? {},
+        weekTokens: profile.weekTokens ?? 0,
+        updatedAtMs: profile.updatedAtMs,
+      };
+    }
     const meterId = this.data.handles[handle]?.meterId;
     const meter = meterId ? this.data.meters[meterId] : null;
     if (!meter) return null;
@@ -344,7 +474,7 @@ export class FileRegistryStore {
 }
 
 export class PostgresRegistryStore {
-  constructor({ databaseUrl, pool = null }) {
+  constructor({ databaseUrl, pool = null, profileReads = false }) {
     if (!databaseUrl && !pool) {
       throw new TypeError("databaseUrl or pool is required");
     }
@@ -355,10 +485,150 @@ export class PostgresRegistryStore {
       idleTimeoutMillis: 30_000,
     });
     this.ownsPool = pool == null;
+    this.profileReadsRequested = profileReads;
+    this.profileSchemaAvailable = false;
   }
 
   async init() {
-    await this.pool.query(POSTGRES_SCHEMA_SQL);
+    if (!await this.#tableExists("registry_meters")) {
+      await this.pool.query(POSTGRES_SCHEMA_SQL);
+    }
+    const profileTables = await Promise.all([
+      this.#tableExists("registry_profiles"),
+      this.#tableExists("registry_profile_devices"),
+      this.#tableExists("registry_device_invites"),
+    ]);
+    this.profileSchemaAvailable = profileTables.every(Boolean);
+    if (this.profileReadsRequested && !this.profileSchemaAvailable) {
+      throw new Error(
+        "profile reads were requested before registry profile migrations were applied",
+      );
+    }
+  }
+
+  async #tableExists(tableName) {
+    const result = await this.pool.query(
+      `SELECT COUNT(*)::bigint AS count
+       FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = $1`,
+      [tableName],
+    );
+    return Number(result.rows[0].count) === 1;
+  }
+
+  async #ensureProfileForMeter(client, { meterId, nowMs }) {
+    const existing = await client.query(
+      "SELECT profile_id FROM registry_profile_devices WHERE meter_id = $1",
+      [meterId],
+    );
+    if (existing.rowCount > 0) return existing.rows[0].profile_id;
+    const meterResult = await client.query(
+      `SELECT days, stats, week_tokens, generated_at_ms, updated_at_ms
+       FROM registry_meters
+       WHERE meter_id = $1`,
+      [meterId],
+    );
+    const meter = meterResult.rows[0];
+    if (!meter) throw new Error(`cannot create profile for unknown meter ${meterId}`);
+    const handleResult = await client.query(
+      `SELECT handle, profile_id, claimed_at_ms
+       FROM registry_handles
+       WHERE meter_id = $1`,
+      [meterId],
+    );
+    const handle = handleResult.rows[0] ?? null;
+    const profileId = handle?.profile_id ?? meterId;
+    const joinedAtMs = asNumber(handle?.claimed_at_ms) ?? asNumber(meter.updated_at_ms) ?? nowMs;
+    await client.query(
+      `INSERT INTO registry_profiles
+         (profile_id, owner_meter_id, handle, days, stats, week_tokens,
+          generated_at_ms, updated_at_ms, created_at_ms)
+       VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, $9)
+       ON CONFLICT (profile_id) DO NOTHING`,
+      [
+        profileId,
+        meterId,
+        handle?.handle ?? null,
+        JSON.stringify(meter.days ?? []),
+        JSON.stringify(meter.stats ?? {}),
+        asNumber(meter.week_tokens) ?? 0,
+        asNumber(meter.generated_at_ms),
+        asNumber(meter.updated_at_ms) ?? nowMs,
+        joinedAtMs,
+      ],
+    );
+    await client.query(
+      `INSERT INTO registry_profile_devices
+         (profile_id, meter_id, role, sharing_enabled, joined_at_ms, last_reported_at_ms)
+       VALUES ($1, $2, 'owner', $3, $4, $5)
+       ON CONFLICT (meter_id) DO NOTHING`,
+      [
+        profileId,
+        meterId,
+        meter.generated_at_ms != null,
+        joinedAtMs,
+        meter.generated_at_ms == null ? null : asNumber(meter.updated_at_ms),
+      ],
+    );
+    if (handle) {
+      await client.query(
+        "UPDATE registry_handles SET profile_id = $2 WHERE handle = $1",
+        [handle.handle, profileId],
+      );
+      await client.query(
+        "UPDATE registry_profiles SET handle = $2 WHERE profile_id = $1",
+        [profileId, handle.handle],
+      );
+    }
+    const membership = await client.query(
+      "SELECT profile_id FROM registry_profile_devices WHERE meter_id = $1",
+      [meterId],
+    );
+    return membership.rows[0].profile_id;
+  }
+
+  async #recomputeProfile(client, profileId, nowMs) {
+    const profile = await client.query(
+      "SELECT profile_id FROM registry_profiles WHERE profile_id = $1 FOR UPDATE",
+      [profileId],
+    );
+    if (profile.rowCount !== 1) throw new Error(`unknown profile ${profileId}`);
+    const result = await client.query(
+      `SELECT m.days, m.stats, m.week_tokens, m.generated_at_ms, m.updated_at_ms
+       FROM registry_profile_devices AS d
+       JOIN registry_meters AS m ON m.meter_id = d.meter_id
+       WHERE d.profile_id = $1
+         AND d.revoked_at_ms IS NULL
+         AND d.sharing_enabled = TRUE
+         AND m.generated_at_ms IS NOT NULL`,
+      [profileId],
+    );
+    const snapshots = result.rows.map((meter) => ({
+      days: meter.days ?? [],
+      stats: meter.stats ?? {},
+      weekTokens: asNumber(meter.week_tokens) ?? 0,
+      generatedAtMs: asNumber(meter.generated_at_ms),
+      updatedAtMs: asNumber(meter.updated_at_ms) ?? 0,
+    }));
+    const rollup = aggregateProfileSnapshots(snapshots);
+    await client.query(
+      `UPDATE registry_profiles
+       SET days = $2::jsonb,
+           stats = $3::jsonb,
+           week_tokens = $4,
+           generated_at_ms = $5,
+           updated_at_ms = $6,
+           rollup_version = 1
+       WHERE profile_id = $1`,
+      [
+        profileId,
+        JSON.stringify(rollup.days),
+        JSON.stringify(rollup.stats),
+        rollup.weekTokens,
+        rollup.generatedAtMs,
+        Math.max(rollup.updatedAtMs ?? 0, nowMs),
+      ],
+    );
   }
 
   async health() {
@@ -422,6 +692,17 @@ export class PostgresRegistryStore {
          WHERE meter_id = $1`,
         [meterId, handle, nowMs],
       );
+      if (this.profileSchemaAvailable) {
+        const profileId = await this.#ensureProfileForMeter(client, { meterId, nowMs });
+        await client.query(
+          "UPDATE registry_handles SET profile_id = $2 WHERE handle = $1",
+          [handle, profileId],
+        );
+        await client.query(
+          "UPDATE registry_profiles SET handle = $2 WHERE profile_id = $1",
+          [profileId, handle],
+        );
+      }
       await client.query("COMMIT");
       return { claimed: true };
     } catch (error) {
@@ -505,6 +786,16 @@ export class PostgresRegistryStore {
           nowMs,
         ],
       );
+      if (this.profileSchemaAvailable) {
+        const profileId = await this.#ensureProfileForMeter(client, { meterId, nowMs });
+        await client.query(
+          `UPDATE registry_profile_devices
+           SET sharing_enabled = TRUE, last_reported_at_ms = $2
+           WHERE meter_id = $1 AND revoked_at_ms IS NULL`,
+          [meterId, nowMs],
+        );
+        await this.#recomputeProfile(client, profileId, nowMs);
+      }
       await client.query("COMMIT");
       return { accepted: true, ignored: false };
     } catch (error) {
@@ -632,6 +923,51 @@ export class PostgresRegistryStore {
       );
       return null;
     }
+    if (this.profileReadsRequested) {
+      const profileResult = await this.pool.query(
+        `SELECT d.profile_id, p.handle, p.week_tokens, p.stats,
+                p.generated_at_ms, p.updated_at_ms
+         FROM registry_profile_devices AS d
+         JOIN registry_profiles AS p ON p.profile_id = d.profile_id
+         JOIN registry_meters AS m ON m.meter_id = d.meter_id
+         WHERE d.meter_id = $1
+           AND d.revoked_at_ms IS NULL
+           AND m.public_key = $2`,
+        [session.meter_id, session.public_key],
+      );
+      const profile = profileResult.rows[0];
+      if (!profile) return null;
+      const totalResult = await this.pool.query(
+        "SELECT COUNT(*)::bigint AS total FROM registry_profiles WHERE generated_at_ms IS NOT NULL",
+      );
+      let rank = null;
+      if (profile.generated_at_ms != null) {
+        const rankResult = await this.pool.query(
+          `SELECT COUNT(*)::bigint AS ahead
+           FROM registry_profiles
+           WHERE generated_at_ms IS NOT NULL
+             AND (week_tokens > $1
+              OR (week_tokens = $1 AND updated_at_ms > $2)
+              OR (week_tokens = $1 AND updated_at_ms = $2 AND profile_id < $3))`,
+          [profile.week_tokens, profile.updated_at_ms, profile.profile_id],
+        );
+        rank = Number(rankResult.rows[0].ahead) + 1;
+      }
+      return {
+        meterId: session.meter_id,
+        profileId: profile.profile_id,
+        rowId: registryRowId(profile.profile_id),
+        name: displayName(profile.profile_id, profile.handle),
+        handle: profile.handle ?? null,
+        rank,
+        totalMeters: Number(totalResult.rows[0].total),
+        tokens: asNumber(profile.week_tokens) ?? 0,
+        sessions: profile.stats?.sessionsLast7Days ?? null,
+        sessionWindowDays: 7,
+        sharingReported: profile.generated_at_ms != null,
+        expiresAtMs: Number(session.expires_at_ms),
+      };
+    }
     const totalResult = await this.pool.query(
       "SELECT COUNT(*)::bigint AS total FROM registry_meters WHERE generated_at_ms IS NOT NULL",
     );
@@ -679,26 +1015,76 @@ export class PostgresRegistryStore {
   }
 
   async withdraw({ meterId, publicKey, nowMs }) {
-    const result = await this.pool.query(
-      `UPDATE registry_meters
-       SET days = '[]'::jsonb,
-           stats = '{}'::jsonb,
-           week_tokens = 0,
-           generated_at_ms = NULL,
-           updated_at_ms = $3
-       WHERE meter_id = $1 AND public_key = $2 AND generated_at_ms IS NOT NULL`,
-      [meterId, publicKey, nowMs],
-    );
-    if (result.rowCount > 0) return { wiped: true };
-    const collision = await this.pool.query(
-      "SELECT 1 FROM registry_meters WHERE meter_id = $1 AND public_key <> $2",
-      [meterId, publicKey],
-    );
-    if (collision.rowCount > 0) return { wiped: false, reason: "identity-collision" };
-    return { wiped: false };
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `UPDATE registry_meters
+         SET days = '[]'::jsonb,
+             stats = '{}'::jsonb,
+             week_tokens = 0,
+             generated_at_ms = NULL,
+             updated_at_ms = $3
+         WHERE meter_id = $1 AND public_key = $2 AND generated_at_ms IS NOT NULL`,
+        [meterId, publicKey, nowMs],
+      );
+      if (result.rowCount > 0 && this.profileSchemaAvailable) {
+        const membership = await client.query(
+          "SELECT profile_id FROM registry_profile_devices WHERE meter_id = $1",
+          [meterId],
+        );
+        if (membership.rowCount > 0) {
+          await client.query(
+            `UPDATE registry_profile_devices
+             SET sharing_enabled = FALSE, last_reported_at_ms = $2
+             WHERE meter_id = $1`,
+            [meterId, nowMs],
+          );
+          await this.#recomputeProfile(client, membership.rows[0].profile_id, nowMs);
+        }
+      }
+      if (result.rowCount > 0) {
+        await client.query("COMMIT");
+        return { wiped: true };
+      }
+      const collision = await client.query(
+        "SELECT 1 FROM registry_meters WHERE meter_id = $1 AND public_key <> $2",
+        [meterId, publicKey],
+      );
+      await client.query("COMMIT");
+      if (collision.rowCount > 0) {
+        return { wiped: false, reason: "identity-collision" };
+      }
+      return { wiped: false };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async leaderboard(limit = 100) {
+    if (this.profileReadsRequested) {
+      const result = await this.pool.query(
+        `SELECT profile_id, handle, week_tokens, stats, updated_at_ms
+         FROM registry_profiles
+         WHERE generated_at_ms IS NOT NULL
+         ORDER BY week_tokens DESC, updated_at_ms DESC, profile_id ASC
+         LIMIT $1`,
+        [limit],
+      );
+      return result.rows.map((profile) => ({
+        rowId: registryRowId(profile.profile_id),
+        name: displayName(profile.profile_id, profile.handle),
+        handle: profile.handle ?? null,
+        tokens: asNumber(profile.week_tokens) ?? 0,
+        lifetimeTokens: profile.stats?.lifetimeTokens ?? 0,
+        sessions: profile.stats?.sessionsLast7Days ?? null,
+        sessionWindowDays: 7,
+        updatedAtMs: asNumber(profile.updated_at_ms),
+      }));
+    }
     const result = await this.pool.query(
       `SELECT meter_id, handle, week_tokens, stats, updated_at_ms
        FROM registry_meters
@@ -720,6 +1106,26 @@ export class PostgresRegistryStore {
   }
 
   async profile(handle) {
+    if (this.profileReadsRequested) {
+      const result = await this.pool.query(
+        `SELECT p.days, p.stats, p.week_tokens, p.generated_at_ms, p.updated_at_ms
+         FROM registry_handles AS h
+         JOIN registry_profiles AS p ON p.profile_id = h.profile_id
+         WHERE h.handle = $1`,
+        [handle],
+      );
+      const profile = result.rows[0];
+      if (!profile) return null;
+      if (profile.generated_at_ms == null) return { handle, shared: false };
+      return {
+        handle,
+        shared: true,
+        days: profile.days ?? [],
+        stats: profile.stats ?? {},
+        weekTokens: asNumber(profile.week_tokens) ?? 0,
+        updatedAtMs: asNumber(profile.updated_at_ms),
+      };
+    }
     const result = await this.pool.query(
       `SELECT m.days, m.stats, m.week_tokens, m.generated_at_ms, m.updated_at_ms
        FROM registry_handles AS h
@@ -745,8 +1151,8 @@ export class PostgresRegistryStore {
   }
 }
 
-export function createRegistryStore({ databaseUrl, dataFile }) {
+export function createRegistryStore({ databaseUrl, dataFile, profileReads = false }) {
   return databaseUrl
-    ? new PostgresRegistryStore({ databaseUrl })
-    : new FileRegistryStore({ dataFile });
+    ? new PostgresRegistryStore({ databaseUrl, profileReads })
+    : new FileRegistryStore({ dataFile, profileReads });
 }

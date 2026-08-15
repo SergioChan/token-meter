@@ -7,6 +7,7 @@ import { newDb } from "pg-mem";
 import {
   applyRegistryMigrations,
   migrationStatus,
+  reconcileRegistryProfiles,
   registryMigrations,
   verifyRegistryProfileMigration,
 } from "../server/registry-migrations.mjs";
@@ -106,6 +107,7 @@ test("registry migrations backfill one profile and owner device per legacy meter
         profilesWithoutOwnerMembership: 0,
         handlesWithoutProfile: 0,
         handleProfileMismatches: 0,
+        rollupMismatches: 0,
       },
     });
   } finally {
@@ -163,6 +165,55 @@ test("profile migration verification reports broken handle ownership", async () 
     const verification = await verifyRegistryProfileMigration(pool);
     assert.equal(verification.ok, false);
     assert.equal(verification.checks.handleProfileMismatches, 1);
+  } finally {
+    await pool.end();
+  }
+});
+
+test("profile migration verification detects a stale shadow rollup", async () => {
+  const pool = createPool();
+  try {
+    await seedLegacyRegistry(pool);
+    await applyRegistryMigrations(pool, { nowMs: 1_000, useAdvisoryLock: false });
+    await pool.query(
+      "UPDATE registry_profiles SET week_tokens = 999 WHERE handle = 'alice'",
+    );
+    const verification = await verifyRegistryProfileMigration(pool);
+    assert.equal(verification.ok, false);
+    assert.equal(verification.checks.rollupMismatches, 1);
+  } finally {
+    await pool.end();
+  }
+});
+
+test("profile reconciliation catches a meter written by a late v1 server", async () => {
+  const pool = createPool();
+  try {
+    await applyRegistryMigrations(pool, { nowMs: 1_000, useAdvisoryLock: false });
+    await pool.query(
+      `INSERT INTO registry_meters
+         (meter_id, public_key, handle, days, stats, week_tokens,
+          generated_at_ms, updated_at_ms)
+       VALUES
+          ('TM-LATE-V111-WRIT', 'late-key', 'late',
+           '[{"date":"2026-08-15","total":42}]',
+          '{"lifetimeTokens":42,"sessionCount":1}', 42, 2000, 2001)`,
+    );
+    await pool.query(
+      `INSERT INTO registry_handles
+         (handle, meter_id, public_key, claimed_at_ms, profile_id)
+       VALUES ('late', 'TM-LATE-V111-WRIT', 'late-key', 1500, NULL)`,
+    );
+    assert.equal((await verifyRegistryProfileMigration(pool)).ok, false);
+    assert.deepEqual(
+      await reconcileRegistryProfiles(pool, { useAdvisoryLock: false }),
+      { reconciledProfiles: ["TM-LATE-V111-WRIT"] },
+    );
+    assert.equal((await verifyRegistryProfileMigration(pool)).ok, true);
+    assert.deepEqual(
+      await reconcileRegistryProfiles(pool, { useAdvisoryLock: false }),
+      { reconciledProfiles: [] },
+    );
   } finally {
     await pool.end();
   }

@@ -3,6 +3,7 @@ import pg from "pg";
 import {
   applyRegistryMigrations,
   migrationStatus,
+  reconcileRegistryProfiles,
   verifyRegistryProfileMigration,
 } from "./registry-migrations.mjs";
 
@@ -27,15 +28,21 @@ try {
     process.stdout.write(`${JSON.stringify(await migrationStatus(pool), null, 2)}\n`);
   } else if (command === "up") {
     const result = await applyRegistryMigrations(pool);
+    const reconciliation = await reconcileRegistryProfiles(pool);
     const verification = await verifyRegistryProfileMigration(pool);
-    process.stdout.write(`${JSON.stringify({ ...result, verification }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ ...result, reconciliation, verification }, null, 2)}\n`);
+    if (!verification.ok) process.exitCode = 1;
+  } else if (command === "reconcile") {
+    const reconciliation = await reconcileRegistryProfiles(pool);
+    const verification = await verifyRegistryProfileMigration(pool);
+    process.stdout.write(`${JSON.stringify({ reconciliation, verification }, null, 2)}\n`);
     if (!verification.ok) process.exitCode = 1;
   } else if (command === "verify") {
     const verification = await verifyRegistryProfileMigration(pool);
     process.stdout.write(`${JSON.stringify(verification, null, 2)}\n`);
     if (!verification.ok) process.exitCode = 1;
   } else {
-    process.stderr.write("Usage: node server/migrate.mjs [status|up|verify]\n");
+    process.stderr.write("Usage: node server/migrate.mjs [status|up|reconcile|verify]\n");
     process.exitCode = 2;
   }
 } finally {
