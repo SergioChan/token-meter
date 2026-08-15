@@ -42,6 +42,12 @@
     background: var(--canvas); border: 1px solid var(--stone); border-radius: 8px;
   }
   .handle-row input:focus { outline: 2px solid var(--fern); outline-offset: -1px; }
+  .wide-input {
+    width: 100%; padding: 10px 12px; font: 500 14px var(--sans); color: var(--ink);
+    background: var(--canvas); border: 1px solid var(--stone); border-radius: 8px;
+  }
+  .wide-input:focus { outline: 2px solid var(--fern); outline-offset: -1px; }
+  .field-label { display: block; margin: 12px 0 5px; color: var(--carbon); font-size: 12px; font-weight: 600; }
   .handle-status { min-height: 20px; margin-top: 8px; font-size: 13px; }
   .handle-status.ok { color: var(--forest); }
   .handle-status.err { color: var(--clay); }
@@ -72,6 +78,22 @@
   .cancel { display: inline-block; margin-left: 14px; color: var(--slate); font-size: 14px; background: none; border: none; cursor: pointer; text-decoration: underline; }
   .note { min-height: 20px; margin-top: 14px; text-align: center; font-size: 13.5px; color: var(--clay); }
   .note.ok { color: var(--forest); }
+  .invite-code {
+    margin-top: 14px; padding: 12px; overflow-wrap: anywhere; user-select: all;
+    background: var(--sprout); border: 1px solid var(--fern); border-radius: 8px;
+    color: var(--forest); font: 600 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .device-list { display: grid; gap: 10px; margin-top: 14px; }
+  .device {
+    padding: 12px; background: var(--canvas); border: 1px solid var(--ash); border-radius: 8px;
+  }
+  .device-head { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; }
+  .device-meta { color: var(--slate); font-size: 12px; overflow-wrap: anywhere; }
+  .device-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+  .device-actions button {
+    padding: 5px 10px; border: 1px solid var(--stone); border-radius: 999px;
+    background: var(--card); color: var(--carbon); cursor: pointer; font: 500 12px var(--sans);
+  }
 
   .done { text-align: center; padding: 40px 0 10px; }
   .done .mark { font-size: 44px; }
@@ -142,6 +164,59 @@
     </div>
   </section>
 
+  <!-- ============ JOIN AN EXISTING PROFILE ============ -->
+  <section id="join-flow" hidden>
+    <h1>Join your existing Profile</h1>
+    <p class="lede">This Mac keeps its own key and Meter ID. The invitation only links its aggregate usage to your existing @handle.</p>
+    <div class="step">
+      <h2><span class="num">1</span>Paste the one-time invitation</h2>
+      <p>Create it from Token Widget on the current Profile owner computer. It expires after ten minutes and works once.</p>
+      <label class="field-label" for="invite-token">Invitation token</label>
+      <input class="wide-input" id="invite-token" maxlength="43" autocomplete="off" spellcheck="false" placeholder="43-character one-time token">
+      <label class="field-label" for="device-label">Device label (optional)</label>
+      <input class="wide-input" id="device-label" maxlength="80" autocomplete="off" placeholder="For example: Studio Mac">
+    </div>
+    <div class="step">
+      <h2><span class="num">2</span>Confirm this device's sharing</h2>
+      <ul class="shares">
+        <li><span class="yes">✓</span>This Mac keeps a separate private key; no key is copied between computers</li>
+        <li><span class="yes">✓</span>Only numeric usage aggregates and mergeable histograms are uploaded</li>
+        <li><span class="no">✗</span>Never: prompts, transcripts, code, file names, host name, or Session IDs</li>
+      </ul>
+      <label class="agree">
+        <input type="checkbox" id="join-agree">
+        <span>I want this device's aggregate usage included in the invited Profile and understand that I can stop sharing from this Mac later.</span>
+      </label>
+    </div>
+    <div class="actions">
+      <button class="publish" id="join-button" disabled>Join Profile and sync</button>
+      <button class="cancel" id="join-cancel" type="button">Cancel</button>
+      <div class="note" id="join-note"></div>
+    </div>
+  </section>
+
+  <!-- ============ PROFILE DEVICES ============ -->
+  <section id="devices-flow" hidden>
+    <h1>Profile computers</h1>
+    <p class="lede">Only the owner device can add, replace, revoke, or promote a computer.</p>
+    <div class="step">
+      <h2><span class="num">1</span>Create a one-time invitation</h2>
+      <p>Send the token directly to your other Mac. It expires after ten minutes and is never stored in plaintext by the server.</p>
+      <button class="publish" id="create-invite" type="button">Invite another computer</button>
+      <div class="invite-code" id="invite-code" hidden></div>
+      <div class="note" id="invite-note"></div>
+    </div>
+    <div class="step">
+      <h2><span class="num">2</span>Bound computers</h2>
+      <p>Replacing a computer removes its old contribution before the new one joins. Ownership must be transferred before the owner can be revoked.</p>
+      <div class="device-list" id="device-list"></div>
+      <div class="note" id="devices-note"></div>
+    </div>
+    <div class="actions">
+      <button class="cancel" id="devices-close" type="button">Back to dashboard</button>
+    </div>
+  </section>
+
   <!-- ============ DONE ============ -->
   <section id="done" class="done" hidden>
     <div class="mark" id="done-mark">✓</div>
@@ -162,12 +237,22 @@
 
 <script>
   const TOKEN = new URLSearchParams(location.search).get("token");
-  const MODE = new URLSearchParams(location.search).get("mode") === "withdraw" ? "withdraw" : "share";
+  const requestedMode = new URLSearchParams(location.search).get("mode");
+  const MODE = ["share", "withdraw", "join", "devices"].includes(requestedMode)
+    ? requestedMode
+    : "share";
   const api = (path, options) => fetch(`${path}${path.includes("?") ? "&" : "?"}token=${TOKEN}`, options);
   const el = (id) => document.getElementById(id);
 
   function show(section) {
-    for (const id of ["share-flow", "withdraw-flow", "done", "no-token"]) el(id).hidden = id !== section;
+    for (const id of [
+      "share-flow",
+      "withdraw-flow",
+      "join-flow",
+      "devices-flow",
+      "done",
+      "no-token",
+    ]) el(id).hidden = id !== section;
   }
 
   function finish(title, copy, link) {
@@ -183,10 +268,8 @@
 
   if (!TOKEN) {
     show("no-token");
-  } else if (MODE === "withdraw") {
-    show("withdraw-flow");
   } else {
-    show("share-flow");
+    show(`${MODE}-flow`);
   }
 
   /* ---------- share flow ---------- */
@@ -339,6 +422,161 @@
     el("done-mark").textContent = "✓";
     finish("Still sharing", "Nothing changed — your stats remain on the leaderboard.", null);
   });
+
+  /* ---------- join existing Profile ---------- */
+  const inviteTokenInput = el("invite-token");
+  const deviceLabelInput = el("device-label");
+  const joinAgree = el("join-agree");
+  const joinButton = el("join-button");
+  const joinNote = el("join-note");
+  function updateJoinButton() {
+    joinButton.disabled = !(
+      /^[A-Za-z0-9_-]{43}$/.test(inviteTokenInput.value.trim()) &&
+      joinAgree.checked
+    );
+  }
+  inviteTokenInput.addEventListener("input", () => {
+    inviteTokenInput.value = inviteTokenInput.value.trim().replace(/[^A-Za-z0-9_-]/g, "");
+    updateJoinButton();
+  });
+  joinAgree.addEventListener("change", updateJoinButton);
+  joinButton.addEventListener("click", async () => {
+    joinButton.disabled = true;
+    joinNote.textContent = "Binding this device with its own key…";
+    try {
+      const response = await api("/api/profile/join", {
+        method: "POST",
+        body: JSON.stringify({
+          inviteToken: inviteTokenInput.value.trim(),
+          deviceLabel: deviceLabelInput.value.trim() || null,
+          agree: joinAgree.checked,
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Profile join failed");
+      finish(
+        `Joined @${body.joined.handle}`,
+        body.sync === "pending"
+          ? "This Mac is bound. Its first aggregate upload will retry automatically."
+          : "This Mac now contributes through its own Meter ID and private key.",
+        body.profileUrl ? {
+          label: body.profileUrl.replace(/^https?:\/\//, ""),
+          href: body.profileUrl,
+        } : null,
+      );
+    } catch (error) {
+      joinNote.textContent = String(error.message || error);
+      updateJoinButton();
+    }
+  });
+  el("join-cancel").addEventListener("click", () => history.back());
+
+  /* ---------- owner device management ---------- */
+  const inviteCode = el("invite-code");
+  const inviteNote = el("invite-note");
+  const devicesNote = el("devices-note");
+  async function createDeviceInvite(mode = "add", replaceMeterId = null) {
+    inviteNote.textContent = "Creating a signed one-time invitation…";
+    const response = await api("/api/profile/invite", {
+      method: "POST",
+      body: JSON.stringify({ mode, replaceMeterId }),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || "invitation failed");
+    inviteCode.textContent = body.token;
+    inviteCode.hidden = false;
+    inviteCode.title = "Click to copy";
+    inviteNote.className = "note ok";
+    inviteNote.textContent = mode === "replace"
+      ? "Replacement invitation ready. The old contribution is removed only when the new Mac joins. Click the token to copy."
+      : "Invitation ready for ten minutes. Click the token to copy.";
+    try { await navigator.clipboard.writeText(body.token); } catch { /* manual copy remains */ }
+  }
+  inviteCode.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(inviteCode.textContent);
+      inviteNote.textContent = "Copied. Paste it into Token Widget on the other Mac.";
+    } catch { /* selectable plaintext remains */ }
+  });
+  el("create-invite").addEventListener("click", async (event) => {
+    event.currentTarget.disabled = true;
+    try { await createDeviceInvite(); }
+    catch (error) { inviteNote.className = "note"; inviteNote.textContent = String(error.message || error); }
+    finally { event.currentTarget.disabled = false; }
+  });
+
+  async function deviceAction(path, targetMeterId) {
+    const response = await api(path, {
+      method: "POST",
+      body: JSON.stringify({ targetMeterId }),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || "device update failed");
+    return body;
+  }
+
+  async function loadDevices() {
+    devicesNote.textContent = "Loading signed membership…";
+    try {
+      const response = await api("/api/profile/devices");
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "device lookup failed");
+      const list = el("device-list");
+      list.textContent = "";
+      for (const device of body.devices) {
+        const card = document.createElement("div");
+        card.className = "device";
+        const head = document.createElement("div");
+        head.className = "device-head";
+        const name = document.createElement("span");
+        name.textContent = device.deviceLabel || (device.role === "owner" ? "Owner computer" : "Member computer");
+        const state = document.createElement("span");
+        state.textContent = device.revokedAtMs == null ? device.role : "revoked";
+        head.append(name, state);
+        const meta = document.createElement("div");
+        meta.className = "device-meta";
+        meta.textContent = `${device.meterId} · ${device.sharingEnabled ? "sharing" : "not sharing"}`;
+        card.append(head, meta);
+        if (device.role !== "owner" && device.revokedAtMs == null) {
+          const actions = document.createElement("div");
+          actions.className = "device-actions";
+          const replace = document.createElement("button");
+          replace.textContent = "Replace";
+          replace.addEventListener("click", () => createDeviceInvite("replace", device.meterId)
+            .catch((error) => { devicesNote.textContent = String(error.message || error); }));
+          const promote = document.createElement("button");
+          promote.textContent = "Make owner";
+          promote.addEventListener("click", async () => {
+            if (!confirm("Transfer Profile ownership to this computer?")) return;
+            try {
+              await deviceAction("/api/profile/devices/transfer-owner", device.meterId);
+              location.href = `/?token=${TOKEN}`;
+            } catch (error) { devicesNote.textContent = String(error.message || error); }
+          });
+          const revoke = document.createElement("button");
+          revoke.textContent = "Revoke";
+          revoke.addEventListener("click", async () => {
+            if (!confirm("Remove this computer and its contribution from the Profile?")) return;
+            try {
+              await deviceAction("/api/profile/devices/revoke", device.meterId);
+              await loadDevices();
+            } catch (error) { devicesNote.textContent = String(error.message || error); }
+          });
+          actions.append(replace, promote, revoke);
+          card.append(actions);
+        }
+        list.append(card);
+      }
+      devicesNote.textContent = "";
+    } catch (error) {
+      devicesNote.textContent = String(error.message || error);
+      el("create-invite").disabled = true;
+    }
+  }
+  el("devices-close").addEventListener("click", () => {
+    location.href = `/?token=${TOKEN}`;
+  });
+  if (TOKEN && MODE === "devices") loadDevices();
 
   /* Prefill the handle from the local identity. */
   if (TOKEN && MODE === "share") {

@@ -12,6 +12,7 @@ import {
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { sessionTokenHistogram } from "./usage-merge.mjs";
 
 const CACHE_VERSION = 1;
 const MS_PER_DAY = 86_400_000;
@@ -503,6 +504,7 @@ export class UsageHistory {
         ),
       ).length,
       medianSessionTokens,
+      sessionTokenHistogram: sessionTokenHistogram(sessionTokens),
       largestSessionTokens: largestSession?.tokens ?? 0,
       longestSessionMs: longestSession?.durationMs ?? 0,
       cacheReadShare: inputSide === 0 ? 0 : totals.cacheRead / inputSide,

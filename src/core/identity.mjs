@@ -132,6 +132,37 @@ export function markHandleClaimed(dirPath = defaultIdentityDir()) {
   return saveIdentity(identity, dirPath);
 }
 
+export function setProfileMembership(membership, dirPath = defaultIdentityDir()) {
+  if (
+    membership == null ||
+    !isMeterId(membership.profileId) ||
+    !["owner", "member"].includes(membership.role) ||
+    (membership.handle != null && !isValidHandle(membership.handle))
+  ) {
+    throw new Error("invalid Profile membership");
+  }
+  const identity = loadOrCreateIdentity(dirPath);
+  identity.profile = {
+    profileId: membership.profileId,
+    role: membership.role,
+    deviceLabel: membership.deviceLabel ?? null,
+    joinedAtMs: membership.joinedAtMs ?? Date.now(),
+    lastConfirmedAtMs: membership.lastConfirmedAtMs ?? Date.now(),
+  };
+  identity.handle = membership.handle ?? null;
+  identity.handleClaimed = membership.handle != null;
+  return saveIdentity(identity, dirPath);
+}
+
+export function clearProfileMembership(dirPath = defaultIdentityDir()) {
+  const identity = loadOrCreateIdentity(dirPath);
+  delete identity.profile;
+  identity.handle = null;
+  identity.handleClaimed = false;
+  identity.sharing = { ...identity.sharing, enabled: false };
+  return saveIdentity(identity, dirPath);
+}
+
 // Remembers that the first-run handle prompt was shown so the overlay never
 // nags twice, regardless of whether a handle was reserved.
 export function markHandlePrompted(dirPath = defaultIdentityDir(), nowMs = Date.now()) {

@@ -7,6 +7,7 @@ import {
   isValidHandle,
   verifySignedPayload,
 } from "../src/core/identity.mjs";
+import { SESSION_TOKEN_BUCKET_MAXIMA } from "../src/core/usage-merge.mjs";
 import { FileRegistryStore } from "./registry-store.mjs";
 
 const MAX_BODY_BYTES = 512 * 1024;
@@ -161,7 +162,73 @@ function normalizeExtendedStats(stats) {
   return extended;
 }
 
-function normalizeUsagePayload(payload, nowMs) {
+function safeArrayTotal(values) {
+  let total = 0;
+  for (const value of values) {
+    total += value;
+    if (!Number.isSafeInteger(total)) return null;
+  }
+  return total;
+}
+
+function normalizeMergeStats(value, stats) {
+  if (value == null || typeof value !== "object" || value.version !== 1) return null;
+  const tokenBreakdown = value.tokenBreakdown;
+  if (
+    tokenBreakdown == null ||
+    typeof tokenBreakdown !== "object" ||
+    !["input", "output", "cacheRead", "cacheWrite"].every((key) =>
+      safeInteger(tokenBreakdown[key]))
+  ) {
+    return null;
+  }
+  const integerArray = (candidate, length) =>
+    Array.isArray(candidate) &&
+    candidate.length === length &&
+    candidate.every((item) => safeInteger(item));
+  if (
+    !integerArray(value.hours, 24) ||
+    !integerArray(value.weekdayTokens, 7) ||
+    !integerArray(value.sessionTokenHistogram, SESSION_TOKEN_BUCKET_MAXIMA.length)
+  ) {
+    return null;
+  }
+  if (
+    safeArrayTotal(value.sessionTokenHistogram) !== stats.sessionCount ||
+    safeArrayTotal(Object.values(tokenBreakdown)) !== stats.lifetimeTokens ||
+    safeArrayTotal(value.hours) !== stats.lifetimeTokens ||
+    safeArrayTotal(value.weekdayTokens) !== stats.lifetimeTokens ||
+    safeArrayTotal(Object.values(stats.byPlatform)) !== stats.lifetimeTokens
+  ) {
+    return null;
+  }
+  if (!Array.isArray(value.activeDates) || value.activeDates.length > 3_660) return null;
+  const activeDates = [];
+  const seenDates = new Set();
+  for (const date of value.activeDates) {
+    if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date) || seenDates.has(date)) {
+      return null;
+    }
+    seenDates.add(date);
+    activeDates.push(date);
+  }
+  activeDates.sort();
+  return {
+    version: 1,
+    tokenBreakdown: {
+      input: tokenBreakdown.input,
+      output: tokenBreakdown.output,
+      cacheRead: tokenBreakdown.cacheRead,
+      cacheWrite: tokenBreakdown.cacheWrite,
+    },
+    hours: [...value.hours],
+    weekdayTokens: [...value.weekdayTokens],
+    sessionTokenHistogram: [...value.sessionTokenHistogram],
+    activeDates,
+  };
+}
+
+function normalizeUsagePayload(payload, nowMs, { requireMerge = false } = {}) {
   if (
     !safeInteger(payload.generatedAtMs) ||
     payload.generatedAtMs < nowMs - MAX_REPORT_AGE_MS ||
@@ -209,6 +276,10 @@ function normalizeUsagePayload(payload, nowMs) {
   }
   const extended = normalizeExtendedStats(stats);
   if (extended == null) return null;
+  const merge = payload.reportVersion === 2
+    ? normalizeMergeStats(payload.merge, stats)
+    : null;
+  if (requireMerge && merge == null) return null;
   return {
     days,
     stats: {
@@ -227,6 +298,7 @@ function normalizeUsagePayload(payload, nowMs) {
         cline: stats.byPlatform.cline,
       },
       ...extended,
+      ...(merge ? { merge } : {}),
     },
     weekTokens: payload.weekTokens,
     generatedAtMs: payload.generatedAtMs,
@@ -491,6 +563,30 @@ export class RegistryServer {
       const nowMs = this.now();
       if (!timelySignedRequest(payload, nowMs)) {
         return json(422, { error: "stale or invalid signed request" });
+      }
+
+      if (path === "/api/v2/report") {
+        if (payload.kind !== "usage-v2" || payload.reportVersion !== 2) {
+          return json(422, { error: "invalid v2 usage report" });
+        }
+        const usage = normalizeUsagePayload(payload, nowMs, { requireMerge: true });
+        if (!usage) return json(422, { error: "invalid v2 usage report" });
+        const result = await this.store.report({
+          meterId: payload.meterId,
+          publicKey: payload.publicKey,
+          handle: isValidHandle(payload.handle ?? "")
+            ? payload.handle.toLowerCase()
+            : null,
+          ...usage,
+          nowMs,
+        });
+        if (!result.accepted) {
+          if (result.reason === "device-revoked") {
+            return json(403, { error: "this device was revoked from its Profile" });
+          }
+          return json(409, { error: "identity collision" });
+        }
+        return json(200, { ok: true, ignored: result.ignored, reportVersion: 2 });
       }
 
       if (path === "/api/v2/profile-invites") {

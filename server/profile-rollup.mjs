@@ -1,4 +1,8 @@
 import { dateFallsInTrailingWindow } from "../src/core/usage-history.mjs";
+import {
+  approximateMedianFromHistogram,
+  SESSION_TOKEN_BUCKET_MAXIMA,
+} from "../src/core/usage-merge.mjs";
 
 function safeSum(values, label) {
   let total = 0;
@@ -159,6 +163,75 @@ export function aggregateProfileSnapshots(snapshots) {
         `${platform} session count`,
       );
     }
+  }
+
+  const mergeInputs = active.map((snapshot) => snapshot.stats?.merge);
+  if (mergeInputs.every((value) => value?.version === 1)) {
+    const tokenBreakdown = {};
+    for (const key of ["input", "output", "cacheRead", "cacheWrite"]) {
+      tokenBreakdown[key] = safeSum(
+        mergeInputs.map((value) => value.tokenBreakdown[key]),
+        `${key} tokens`,
+      );
+    }
+    const inputSide = safeSum(
+      [tokenBreakdown.input, tokenBreakdown.cacheRead, tokenBreakdown.cacheWrite],
+      "input-side tokens",
+    );
+    stats.cacheReadShare = inputSide === 0 ? 0 : tokenBreakdown.cacheRead / inputSide;
+    stats.outputShare = stats.lifetimeTokens === 0
+      ? 0
+      : tokenBreakdown.output / stats.lifetimeTokens;
+    stats.hours = Array.from({ length: 24 }, (_, index) =>
+      safeSum(mergeInputs.map((value) => value.hours[index]), `hour ${index}`));
+    stats.peakHour = stats.hours.indexOf(Math.max(...stats.hours));
+    const weekdayTokens = Array.from({ length: 7 }, (_, index) =>
+      safeSum(
+        mergeInputs.map((value) => value.weekdayTokens[index]),
+        `weekday ${index}`,
+      ));
+    stats.busiestWeekday = weekdayTokens.indexOf(Math.max(...weekdayTokens));
+    const histogram = Array.from(
+      { length: SESSION_TOKEN_BUCKET_MAXIMA.length },
+      (_, index) => safeSum(
+        mergeInputs.map((value) => value.sessionTokenHistogram[index]),
+        `session histogram ${index}`,
+      ),
+    );
+    stats.medianSessionTokens = approximateMedianFromHistogram(histogram);
+    const activeDates = [...new Set(mergeInputs.flatMap((value) => value.activeDates))].sort();
+    const lifetimeStreaks = mergedStreaks(
+      activeDates.map((date) => ({ date, total: 1 })),
+      generatedAtMs,
+    );
+    stats.daysActive = activeDates.length;
+    stats.daysObserved = activeDates.length;
+    stats.firstActivityDate = activeDates[0] ?? null;
+    stats.avgPerActiveDay = activeDates.length === 0
+      ? 0
+      : Math.round(stats.lifetimeTokens / activeDates.length);
+    stats.currentStreakDays = lifetimeStreaks.current;
+    stats.longestStreakDays = lifetimeStreaks.longest;
+    stats.merge = {
+      version: 1,
+      tokenBreakdown,
+      hours: stats.hours,
+      weekdayTokens,
+      sessionTokenHistogram: histogram,
+      activeDates,
+    };
+    stats.aggregation.exact.push(
+      "cacheReadShare",
+      "outputShare",
+      "peakHour",
+      "busiestWeekday",
+      "daysActive",
+      "longestStreakDays",
+    );
+    stats.aggregation.approximate = ["medianSessionTokens"];
+    stats.aggregation.partial = stats.aggregation.partial.filter(
+      (field) => field !== "longestStreakDays",
+    );
   }
 
   const weekTokens = safeSum(

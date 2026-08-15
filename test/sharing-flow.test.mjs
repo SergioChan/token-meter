@@ -9,6 +9,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RegistryServer } from "../server/registry-server.mjs";
+import { FileRegistryStore } from "../server/registry-store.mjs";
 import { DashboardServer, handleCandidates } from "../src/core/dashboard-server.mjs";
 import { createIdentity, isValidHandle, loadOrCreateIdentity, signPayload } from "../src/core/identity.mjs";
 import { dateFallsInTrailingWindow } from "../src/core/usage-history.mjs";
@@ -24,7 +25,14 @@ function localDateKey(ms) {
 function usageFixture(daysBack, perDay = 1_000) {
   const days = [];
   for (let i = daysBack - 1; i >= 0; i -= 1) {
-    days.push({ date: localDateKey(Date.now() - i * DAY_MS), total: perDay });
+    days.push({
+      date: localDateKey(Date.now() - i * DAY_MS),
+      total: perDay,
+      input: 0,
+      output: perDay,
+      cacheRead: 0,
+      cacheWrite: 0,
+    });
   }
   const total = daysBack * perDay;
   return {
@@ -63,7 +71,10 @@ async function startWorld({ usage = usageFixture(30) } = {}) {
   const registryDir = mkdtempSync(join(tmpdir(), "token-meter-registry-"));
   writeFileSync(join(registryDir, "index.html"), "<!doctype html><title>home</title>");
   const registry = new RegistryServer({
-    dataFile: join(registryDir, "data.json"),
+    store: new FileRegistryStore({
+      dataFile: join(registryDir, "data.json"),
+      profileReads: true,
+    }),
     webDir: registryDir,
   });
   await registry.start(0);
@@ -131,6 +142,17 @@ test("new user shares immediately: publish claims the handle, uploads, and lands
     assert.equal(profile.stats.cacheReadShare, 0.95);
     assert.equal(profile.stats.hours.length, 24);
     assert.equal(profile.stats.byPlatformSessions.claudeCode, 60);
+
+    const membership = await (await world.api.get("/api/profile/membership")).json();
+    assert.equal(membership.member, true);
+    assert.equal(membership.role, "owner");
+    assert.equal(loadOrCreateIdentity(world.identityDir).profile.role, "owner");
+    const invite = await world.api.post("/api/profile/invite", { mode: "add" });
+    assert.equal(invite.status, 200);
+    assert.match((await invite.json()).token, /^[A-Za-z0-9_-]{43}$/);
+    const devices = await (await world.api.get("/api/profile/devices")).json();
+    assert.equal(devices.devices.length, 1);
+    assert.equal(devices.devices[0].role, "owner");
   } finally {
     await world.stop();
   }
@@ -151,6 +173,77 @@ test("long-time local user shares later: months of history upload in one publish
       .filter((day) => dateFallsInTrailingWindow(day.date, Date.now()))
       .reduce((sum, day) => sum + day.total, 0);
     assert.equal(profile.weekTokens, expectedWeek);
+  } finally {
+    await world.stop();
+  }
+});
+
+test("a new Mac joins an existing handle through consent without claiming it again", async () => {
+  const world = await startWorld({ usage: usageFixture(14, 3_000) });
+  try {
+    const owner = { ...createIdentity(), handle: "sergio" };
+    const now = Date.now();
+    const claim = signPayload(owner, {
+      kind: "claim",
+      meterId: owner.meterId,
+      publicKey: owner.publicKey,
+      handle: owner.handle,
+      generatedAtMs: now,
+    });
+    assert.equal((await fetch(`${world.registryBase}/api/v1/claim`, {
+      method: "POST",
+      body: JSON.stringify(claim),
+    })).status, 200);
+    const invitation = signPayload(owner, {
+      kind: "profile-invite",
+      meterId: owner.meterId,
+      publicKey: owner.publicKey,
+      mode: "add",
+      replaceMeterId: null,
+      generatedAtMs: now,
+    });
+    const inviteResponse = await fetch(`${world.registryBase}/api/v2/profile-invites`, {
+      method: "POST",
+      body: JSON.stringify(invitation),
+    });
+    assert.equal(inviteResponse.status, 201);
+    const invite = await inviteResponse.json();
+
+    const join = await world.api.post("/api/profile/join", {
+      inviteToken: invite.token,
+      deviceLabel: "Studio Mac",
+      agree: true,
+    });
+    const body = await join.json();
+    assert.equal(join.status, 200);
+    assert.equal(body.handle, "sergio");
+    assert.equal(body.handleClaimed, true);
+    assert.equal(body.profile.profileId, owner.meterId);
+    assert.equal(body.profile.role, "member");
+    assert.equal(body.sharing.enabled, true);
+    assert.equal(body.sync, "ok");
+
+    const localIdentity = loadOrCreateIdentity(world.identityDir);
+    assert.notEqual(localIdentity.meterId, owner.meterId);
+    assert.equal(localIdentity.handle, "sergio");
+    assert.equal(localIdentity.handleClaimed, true);
+    assert.equal(localIdentity.profile.profileId, owner.meterId);
+
+    const profile = await (await fetch(`${world.registryBase}/api/v1/profile/sergio`)).json();
+    assert.equal(profile.shared, true);
+    assert.equal(profile.stats.lifetimeTokens, 42_000);
+    assert.equal((await (await fetch(`${world.registryBase}/api/v1/handle/sergio/available`)).json()).available, false);
+    const devices = await (await fetch(`${world.registryBase}/api/v2/profile-membership`, {
+      method: "POST",
+      body: JSON.stringify(signPayload(localIdentity, {
+        kind: "profile-membership",
+        meterId: localIdentity.meterId,
+        publicKey: localIdentity.publicKey,
+        generatedAtMs: Date.now(),
+      })),
+    })).json();
+    assert.equal(devices.handle, "sergio");
+    assert.equal(devices.role, "member");
   } finally {
     await world.stop();
   }

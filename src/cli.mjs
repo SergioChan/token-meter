@@ -26,8 +26,17 @@ function parseArguments(argv) {
       options.clearHandle = true;
     } else if (value === "--sharing") {
       options.sharing = rest[++index];
-    }
-    else throw new Error(`Unknown argument: ${value}`);
+    } else if (value === "--invite-token") {
+      options.inviteToken = rest[++index];
+    } else if (value === "--device-label") {
+      options.deviceLabel = rest[++index];
+    } else if (value === "--mode") {
+      options.mode = rest[++index];
+    } else if (value === "--replace-meter-id") {
+      options.replaceMeterId = rest[++index];
+    } else if (value === "--target-meter-id") {
+      options.targetMeterId = rest[++index];
+    } else throw new Error(`Unknown argument: ${value}`);
   }
   return options;
 }
@@ -105,9 +114,64 @@ if (options.command === "snapshot") {
   }
   const { privateKeyPem, ...publicFields } = identity;
   process.stdout.write(`${JSON.stringify(publicFields, null, 2)}\n`);
+} else if (options.command === "profile-invite") {
+  const { loadOrCreateIdentity } = await import("./core/identity.mjs");
+  const { createProfileInvite } = await import("./core/registry-client.mjs");
+  const result = await createProfileInvite(loadOrCreateIdentity(), {
+    mode: options.mode ?? "add",
+    replaceMeterId: options.replaceMeterId ?? null,
+  });
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+} else if (options.command === "profile-join") {
+  if (!options.inviteToken) throw new Error("--invite-token is required for profile-join");
+  const { loadOrCreateIdentity, setSharingEnabled } = await import("./core/identity.mjs");
+  const { joinExistingProfile, uploadUsage } = await import("./core/registry-client.mjs");
+  const result = await joinExistingProfile(loadOrCreateIdentity(), {
+    inviteToken: options.inviteToken,
+    deviceLabel: options.deviceLabel ?? null,
+  });
+  let sync = "disabled";
+  if (options.sharing === "on" || options.sharing === "true") {
+    const identity = setSharingEnabled(true);
+    await uploadUsage(identity);
+    sync = "ok";
+  }
+  process.stdout.write(`${JSON.stringify({ ...result, sync }, null, 2)}\n`);
+} else if (options.command === "profile-membership") {
+  const { loadOrCreateIdentity } = await import("./core/identity.mjs");
+  const { fetchProfileMembership } = await import("./core/registry-client.mjs");
+  process.stdout.write(`${JSON.stringify(
+    await fetchProfileMembership(loadOrCreateIdentity()),
+    null,
+    2,
+  )}\n`);
+} else if (options.command === "profile-devices") {
+  const { loadOrCreateIdentity } = await import("./core/identity.mjs");
+  const { fetchProfileDevices } = await import("./core/registry-client.mjs");
+  process.stdout.write(`${JSON.stringify(
+    await fetchProfileDevices(loadOrCreateIdentity()),
+    null,
+    2,
+  )}\n`);
+} else if (options.command === "profile-revoke" || options.command === "profile-transfer") {
+  if (!options.targetMeterId) {
+    throw new Error(`--target-meter-id is required for ${options.command}`);
+  }
+  const { loadOrCreateIdentity } = await import("./core/identity.mjs");
+  const { revokeProfileDevice, transferProfileOwner } = await import(
+    "./core/registry-client.mjs"
+  );
+  const action = options.command === "profile-transfer"
+    ? transferProfileOwner
+    : revokeProfileDevice;
+  process.stdout.write(`${JSON.stringify(
+    await action(loadOrCreateIdentity(), options.targetMeterId),
+    null,
+    2,
+  )}\n`);
 } else {
   const script = fileURLToPath(import.meta.url);
   throw new Error(
-    `Unknown command \"${options.command}\". Run ${script} snapshot, claude-snapshot, identity, inject, or remove.`,
+    `Unknown command \"${options.command}\". Run ${script} snapshot, claude-snapshot, identity, profile-invite, profile-join, profile-membership, profile-devices, profile-revoke, profile-transfer, inject, or remove.`,
   );
 }

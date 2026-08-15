@@ -61,6 +61,55 @@ function usageReport(identity, total) {
   });
 }
 
+function usageReportV2(identity, {
+  total,
+  input,
+  output,
+  cacheRead,
+  cacheWrite,
+  activeDates,
+  hour,
+}) {
+  const hours = Array(24).fill(0);
+  hours[hour] = total;
+  const weekdayTokens = Array(7).fill(0);
+  for (const date of activeDates) {
+    weekdayTokens[new Date(`${date}T12:00:00`).getDay()] += Math.floor(total / activeDates.length);
+  }
+  return signPayload(identity, {
+    kind: "usage-v2",
+    reportVersion: 2,
+    meterId: identity.meterId,
+    publicKey: identity.publicKey,
+    handle: identity.handle ?? null,
+    generatedAtMs: nowMs,
+    days: activeDates.map((date, index) => ({
+      date,
+      total: index === activeDates.length - 1
+        ? total - Math.floor(total / activeDates.length) * (activeDates.length - 1)
+        : Math.floor(total / activeDates.length),
+    })),
+    stats: {
+      lifetimeTokens: total,
+      sessionCount: 1,
+      sessionsLast7Days: 1,
+      currentStreakDays: activeDates.length,
+      longestStreakDays: activeDates.length,
+      peakDay: null,
+      byPlatform: { claudeCode: 0, codex: total, cline: 0 },
+    },
+    weekTokens: total,
+    merge: {
+      version: 1,
+      tokenBreakdown: { input, output, cacheRead, cacheWrite },
+      hours,
+      weekdayTokens,
+      sessionTokenHistogram: [0, 1, 0, 0, 0, 0, 0, 0],
+      activeDates,
+    },
+  });
+}
+
 test("claims are signed, first-come-first-served, and idempotent", async () => {
   const { server, base } = await startRegistry();
   try {
@@ -703,6 +752,87 @@ test("replacement and owner transfer preserve one globally unique handle", async
     assert.equal(devices.devices.find((device) => device.meterId === replacement.meterId).role, "owner");
     assert.equal(devices.devices.find((device) => device.meterId === owner.meterId).role, "member");
     assert.notEqual(devices.devices.find((device) => device.meterId === oldMember.meterId).revokedAtMs, null);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("v2 reports merge raw numeric buckets without exposing session identifiers", async () => {
+  const { server, base } = await startRegistry({ profileReads: true });
+  try {
+    const owner = { ...createIdentity(), handle: "mergeable" };
+    const member = createIdentity();
+    await signedPost(base, "/api/v1/claim", owner, {
+      kind: "claim",
+      handle: owner.handle,
+    });
+    const invite = await (await signedPost(base, "/api/v2/profile-invites", owner, {
+      kind: "profile-invite",
+      mode: "add",
+    })).json();
+    await signedPost(base, "/api/v2/profile-join", member, {
+      kind: "profile-join",
+      inviteToken: invite.token,
+      deviceLabel: "Second Mac",
+    });
+
+    const first = usageReportV2(owner, {
+      total: 100,
+      input: 20,
+      output: 10,
+      cacheRead: 60,
+      cacheWrite: 10,
+      activeDates: ["2026-08-13", "2026-08-14"],
+      hour: 8,
+    });
+    const second = usageReportV2(member, {
+      total: 200,
+      input: 100,
+      output: 40,
+      cacheRead: 40,
+      cacheWrite: 20,
+      activeDates: ["2026-08-14", "2026-08-15"],
+      hour: 9,
+    });
+    assert.equal((await fetch(`${base}/api/v2/report`, {
+      method: "POST",
+      body: JSON.stringify(first),
+    })).status, 200);
+    assert.equal((await fetch(`${base}/api/v2/report`, {
+      method: "POST",
+      body: JSON.stringify(second),
+    })).status, 200);
+
+    const profile = await (await fetch(`${base}/api/v1/profile/mergeable`)).json();
+    assert.equal(profile.stats.lifetimeTokens, 300);
+    assert.equal(profile.stats.daysActive, 3);
+    assert.equal(profile.stats.currentStreakDays, 3);
+    assert.equal(profile.stats.longestStreakDays, 3);
+    assert.equal(profile.stats.peakHour, 9);
+    assert.equal(profile.stats.cacheReadShare, 100 / 250);
+    assert.equal(profile.stats.outputShare, 50 / 300);
+    assert.equal(profile.stats.merge, undefined);
+    const privateMerge = server.store.data.profiles[owner.meterId].stats.merge;
+    assert.deepEqual(privateMerge.tokenBreakdown, {
+      input: 120,
+      output: 50,
+      cacheRead: 100,
+      cacheWrite: 30,
+    });
+    assert.deepEqual(privateMerge.activeDates, [
+      "2026-08-13",
+      "2026-08-14",
+      "2026-08-15",
+    ]);
+    assert.equal(JSON.stringify(second).includes("sessionId"), false);
+
+    const malformed = structuredClone(second);
+    malformed.payload.merge.sessionTokenHistogram = [1];
+    const resigned = signPayload(member, malformed.payload);
+    assert.equal((await fetch(`${base}/api/v2/report`, {
+      method: "POST",
+      body: JSON.stringify(resigned),
+    })).status, 422);
   } finally {
     await server.stop();
   }

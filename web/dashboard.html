@@ -267,6 +267,8 @@
     <div class="community-action">
       <button id="open-leaderboard" type="button">Open community leaderboard</button>
       <a id="share-publish" class="quiet-link" hidden>Share to community →</a>
+      <a id="profile-add-device" class="quiet-link" hidden>Add another computer →</a>
+      <a id="profile-join" class="quiet-link" hidden>Join an existing Profile →</a>
       <span id="leaderboard-status" aria-live="polite"></span>
     </div>
   </section>
@@ -350,6 +352,7 @@
     <p>All your data are stored locally, unless you feel comfortable to share your record with our server and bring your token patterns into the community.</p>
     <div class="modal-row">
       <button id="modal-share" type="button">Share my data</button>
+      <button id="modal-join" type="button" class="ghost">Join my existing Profile</button>
       <button id="modal-local" type="button" class="ghost">Keep everything local</button>
     </div>
     <p class="modal-note" id="modal-note"></p>
@@ -832,12 +835,19 @@
     const sep = document.getElementById("handle-sep");
     const badge = document.getElementById("profile-badge");
     const claimCard = document.getElementById("claim-card");
+    const addDevice = document.getElementById("profile-add-device");
+    const joinProfile = document.getElementById("profile-join");
+    addDevice.href = TOKEN ? `/share?token=${TOKEN}&mode=devices` : "#";
+    joinProfile.href = TOKEN ? `/share?token=${TOKEN}&mode=join` : "#";
+    addDevice.hidden = profile.profile?.role !== "owner";
+    joinProfile.hidden = Boolean(profile.profile);
     if (profile.handle) {
       meterIdEl.textContent = "@" + profile.handle;
       handleEl.textContent = profile.meterId;
       sep.hidden = false;
       badge.textContent =
         (profile.handleClaimed ? "Claimed on registry" : "Reserved on this device") +
+        (profile.profile?.role ? ` · ${profile.profile.role === "owner" ? "Owner" : "Member"}` : "") +
         (profile.sharing && profile.sharing.enabled ? " · Sharing on" : "");
       claimCard.hidden = true;
     } else {
@@ -866,6 +876,9 @@
     // list of what leaves the machine, and an explicit publish step.
     location.href = `/share?token=${TOKEN}`;
   });
+  document.getElementById("modal-join").addEventListener("click", () => {
+    location.href = `/share?token=${TOKEN}&mode=join`;
+  });
   document.getElementById("modal-local").addEventListener("click", () => {
     shareModal.hidden = true;
   });
@@ -879,6 +892,7 @@
       return;
     }
     try {
+      await api("/api/profile/membership").catch(() => null);
       const profile = await (await api("/api/profile")).json();
       renderProfile(profile);
       maybeAskToShare(profile);

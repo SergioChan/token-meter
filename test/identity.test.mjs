@@ -6,9 +6,11 @@ import { join } from "node:path";
 import {
   buildSignedUsageReport,
   createIdentity,
+  clearProfileMembership,
   deriveMeterId,
   isMeterId,
   loadOrCreateIdentity,
+  setProfileMembership,
   setSharingEnabled,
   verifySignedUsageReport,
 } from "../src/core/identity.mjs";
@@ -53,6 +55,38 @@ test("handles are validated, persisted, and unclaimed by default", async () => {
   assert.equal(updated.handleClaimed, false);
   const cleared = setHandle(null, dir);
   assert.equal(cleared.handle, null);
+});
+
+test("Profile membership keeps the device key independent and disables sharing when revoked", () => {
+  const dir = mkdtempSync(join(tmpdir(), "token-meter-identity-"));
+  const original = loadOrCreateIdentity(dir);
+  const joined = setProfileMembership({
+    profileId: "TM-2222-3333-4444",
+    handle: "sergio",
+    role: "member",
+    deviceLabel: "Studio Mac",
+    joinedAtMs: 100,
+    lastConfirmedAtMs: 200,
+  }, dir);
+  assert.equal(joined.meterId, original.meterId);
+  assert.equal(joined.privateKeyPem, original.privateKeyPem);
+  assert.equal(joined.handle, "sergio");
+  assert.equal(joined.handleClaimed, true);
+  assert.deepEqual(joined.profile, {
+    profileId: "TM-2222-3333-4444",
+    role: "member",
+    deviceLabel: "Studio Mac",
+    joinedAtMs: 100,
+    lastConfirmedAtMs: 200,
+  });
+  setSharingEnabled(true, dir);
+  const cleared = clearProfileMembership(dir);
+  assert.equal(cleared.meterId, original.meterId);
+  assert.equal(cleared.privateKeyPem, original.privateKeyPem);
+  assert.equal(cleared.profile, undefined);
+  assert.equal(cleared.handle, null);
+  assert.equal(cleared.handleClaimed, false);
+  assert.equal(cleared.sharing.enabled, false);
 });
 
 test("usage reports verify and reject tampering", () => {

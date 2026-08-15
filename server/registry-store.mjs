@@ -63,6 +63,12 @@ function publicProfileRow(profileId, profile) {
   };
 }
 
+function publicProfileStats(stats) {
+  if (stats == null || typeof stats !== "object") return {};
+  const { merge: _privateMergePrimitives, ...publicStats } = stats;
+  return publicStats;
+}
+
 export class FileRegistryStore {
   constructor({ dataFile, profileReads = false }) {
     if (!dataFile) throw new TypeError("dataFile is required");
@@ -476,7 +482,7 @@ export class FileRegistryStore {
         handle,
         shared: true,
         days: profile.days ?? [],
-        stats: profile.stats ?? {},
+        stats: publicProfileStats(profile.stats),
         weekTokens: profile.weekTokens ?? 0,
         updatedAtMs: profile.updatedAtMs,
       };
@@ -489,7 +495,7 @@ export class FileRegistryStore {
       handle,
       shared: true,
       days: meter.days ?? [],
-      stats: meter.stats ?? {},
+      stats: publicProfileStats(meter.stats),
       weekTokens: meter.weekTokens ?? 0,
       updatedAtMs: meter.updatedAtMs,
     };
@@ -1376,7 +1382,7 @@ export class PostgresRegistryStore {
         handle,
         shared: true,
         days: profile.days ?? [],
-        stats: profile.stats ?? {},
+        stats: publicProfileStats(profile.stats),
         weekTokens: asNumber(profile.week_tokens) ?? 0,
         updatedAtMs: asNumber(profile.updated_at_ms),
       };
@@ -1395,7 +1401,7 @@ export class PostgresRegistryStore {
       handle,
       shared: true,
       days: meter.days ?? [],
-      stats: meter.stats ?? {},
+      stats: publicProfileStats(meter.stats),
       weekTokens: asNumber(meter.week_tokens) ?? 0,
       updatedAtMs: asNumber(meter.updated_at_ms),
     };

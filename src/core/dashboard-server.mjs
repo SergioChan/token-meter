@@ -7,6 +7,7 @@ import {
   isValidHandle,
   loadOrCreateIdentity,
   markHandleClaimed,
+  setProfileMembership,
   setHandle,
   setPendingWithdraw,
   setSharingEnabled,
@@ -17,6 +18,12 @@ import {
   checkHandleAvailable,
   claimHandle,
   createLeaderboardUrl,
+  createProfileInvite,
+  fetchProfileDevices,
+  fetchProfileMembership,
+  joinExistingProfile,
+  revokeProfileDevice,
+  transferProfileOwner,
   uploadUsage,
   withdrawUsage,
 } from "./registry-client.mjs";
@@ -53,6 +60,12 @@ export class DashboardServer {
     usageWithdrawer = withdrawUsage,
     handleChecker = checkHandleAvailable,
     handleClaimer = claimHandle,
+    profileInviteCreator = createProfileInvite,
+    profileJoiner = joinExistingProfile,
+    profileMembershipFetcher = fetchProfileMembership,
+    profileDevicesFetcher = fetchProfileDevices,
+    profileDeviceRevoker = revokeProfileDevice,
+    profileOwnerTransferer = transferProfileOwner,
   }) {
     if (!webDir) throw new TypeError("webDir is required");
     this.webDir = webDir;
@@ -63,6 +76,12 @@ export class DashboardServer {
     this.usageWithdrawer = usageWithdrawer;
     this.handleChecker = handleChecker;
     this.handleClaimer = handleClaimer;
+    this.profileInviteCreator = profileInviteCreator;
+    this.profileJoiner = profileJoiner;
+    this.profileMembershipFetcher = profileMembershipFetcher;
+    this.profileDevicesFetcher = profileDevicesFetcher;
+    this.profileDeviceRevoker = profileDeviceRevoker;
+    this.profileOwnerTransferer = profileOwnerTransferer;
     this.usageMemo = null;
     this.nonce = randomBytes(16).toString("hex");
     this.server = null;
@@ -245,6 +264,123 @@ export class DashboardServer {
     }
     if (request.method === "GET" && requestUrl.pathname === "/api/profile") {
       return replyJson(200, this.#publicIdentity());
+    }
+    if (request.method === "GET" && requestUrl.pathname === "/api/profile/membership") {
+      if (!registryEnabled()) return replyJson(503, { error: "community registry is not configured" });
+      const identity = loadOrCreateIdentity(this.identityDir);
+      try {
+        const membership = await this.profileMembershipFetcher(identity);
+        if (membership.member) {
+          setProfileMembership({
+            ...membership,
+            lastConfirmedAtMs: Date.now(),
+          }, this.identityDir);
+        }
+        return replyJson(200, membership);
+      } catch (error) {
+        return replyJson(error.status ?? 502, { error: error.message ?? "membership lookup failed" });
+      }
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/api/profile/join") {
+      let body;
+      try {
+        body = JSON.parse(await this.#readBody(request));
+      } catch (error) {
+        return replyJson(error.status ?? 400, { error: error.message ?? "invalid JSON" });
+      }
+      if (body.agree !== true) {
+        return replyJson(422, { error: "the privacy agreement was not accepted" });
+      }
+      if (typeof body.inviteToken !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(body.inviteToken)) {
+        return replyJson(422, { error: "invalid device invitation" });
+      }
+      const deviceLabel = body.deviceLabel == null ? null : String(body.deviceLabel).trim();
+      if (deviceLabel != null && (deviceLabel.length < 1 || deviceLabel.length > 80)) {
+        return replyJson(422, { error: "device label must be 1-80 characters" });
+      }
+      if (!registryEnabled()) return replyJson(503, { error: "community registry is not configured" });
+      try {
+        const identity = loadOrCreateIdentity(this.identityDir);
+        const joined = await this.profileJoiner(
+          identity,
+          { inviteToken: body.inviteToken, deviceLabel },
+          this.identityDir,
+        );
+        const sharingIdentity = setSharingEnabled(true, this.identityDir);
+        let sync = "ok";
+        try {
+          await this.usageUploader(sharingIdentity, this.#usage());
+        } catch {
+          sync = "pending";
+        }
+        const webBase = communityWebBase();
+        return replyJson(200, {
+          ...this.#publicIdentity(),
+          joined,
+          sync,
+          profileUrl:
+            webBase && joined.handle ? `${webBase}/u/${joined.handle}` : null,
+        });
+      } catch (error) {
+        return replyJson(error.status ?? 502, { error: error.message ?? "Profile join failed" });
+      }
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/api/profile/invite") {
+      let body;
+      try {
+        body = JSON.parse(await this.#readBody(request));
+      } catch (error) {
+        return replyJson(error.status ?? 400, { error: error.message ?? "invalid JSON" });
+      }
+      const mode = body.mode ?? "add";
+      if (!registryEnabled()) return replyJson(503, { error: "community registry is not configured" });
+      try {
+        const result = await this.profileInviteCreator(
+          loadOrCreateIdentity(this.identityDir),
+          { mode, replaceMeterId: body.replaceMeterId ?? null },
+        );
+        return replyJson(200, result);
+      } catch (error) {
+        return replyJson(error.status ?? 502, { error: error.message ?? "invitation failed" });
+      }
+    }
+    if (request.method === "GET" && requestUrl.pathname === "/api/profile/devices") {
+      if (!registryEnabled()) return replyJson(503, { error: "community registry is not configured" });
+      try {
+        return replyJson(200, await this.profileDevicesFetcher(
+          loadOrCreateIdentity(this.identityDir),
+        ));
+      } catch (error) {
+        return replyJson(error.status ?? 502, { error: error.message ?? "device lookup failed" });
+      }
+    }
+    if (
+      request.method === "POST" &&
+      ["/api/profile/devices/revoke", "/api/profile/devices/transfer-owner"].includes(
+        requestUrl.pathname,
+      )
+    ) {
+      let body;
+      try {
+        body = JSON.parse(await this.#readBody(request));
+      } catch (error) {
+        return replyJson(error.status ?? 400, { error: error.message ?? "invalid JSON" });
+      }
+      if (typeof body.targetMeterId !== "string") {
+        return replyJson(422, { error: "targetMeterId is required" });
+      }
+      if (!registryEnabled()) return replyJson(503, { error: "community registry is not configured" });
+      const action = requestUrl.pathname.endsWith("transfer-owner")
+        ? this.profileOwnerTransferer
+        : this.profileDeviceRevoker;
+      try {
+        return replyJson(200, await action(
+          loadOrCreateIdentity(this.identityDir),
+          body.targetMeterId,
+        ));
+      } catch (error) {
+        return replyJson(error.status ?? 502, { error: error.message ?? "device update failed" });
+      }
     }
     if (request.method === "GET" && requestUrl.pathname === "/api/usage") {
       return replyJson(200, this.#usage());

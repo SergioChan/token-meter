@@ -1,9 +1,14 @@
-import { signPayload, markHandleClaimed } from "./identity.mjs";
+import {
+  markHandleClaimed,
+  setProfileMembership,
+  signPayload,
+} from "./identity.mjs";
 import { communityWebBase, registryBase } from "./registry-config.mjs";
 import {
   UsageHistory,
   dateFallsInTrailingWindow,
 } from "./usage-history.mjs";
+import { SESSION_TOKEN_BUCKET_MAXIMA } from "./usage-merge.mjs";
 
 const FETCH_TIMEOUT_MS = 10_000;
 
@@ -97,8 +102,7 @@ export async function claimHandle(identity, identityDir = undefined) {
 
 // Uploads aggregate usage only: daily totals and headline stats. Session and
 // message content never appear in this payload.
-export async function uploadUsage(identity, usage = null) {
-  const collected = usage ?? new UsageHistory().collect();
+function buildUsagePayload(identity, collected, { version }) {
   const stats = collected.stats;
   const days = collected.days.slice(-119).map((day) => ({
     date: day.date,
@@ -112,8 +116,9 @@ export async function uploadUsage(identity, usage = null) {
     stats.byPlatform.codex.sessions,
     stats.byPlatform.cline.sessions,
   ];
-  const signed = signPayload(identity, {
-    kind: "usage",
+  const payload = {
+    kind: version === 2 ? "usage-v2" : "usage",
+    ...(version === 2 ? { reportVersion: 2 } : {}),
     meterId: identity.meterId,
     publicKey: identity.publicKey,
     handle: identity.handle ?? null,
@@ -159,12 +164,164 @@ export async function uploadUsage(identity, usage = null) {
         dateFallsInTrailingWindow(day.date, collected.generatedAtMs),
       )
       .reduce((sum, day) => sum + day.total, 0),
-  });
-  return call("/api/v1/report", {
+  };
+  if (version === 2) {
+    const tokenBreakdown = collected.days.reduce(
+      (totals, day) => ({
+        input: totals.input + (day.input ?? 0),
+        output: totals.output + (day.output ?? 0),
+        cacheRead: totals.cacheRead + (day.cacheRead ?? 0),
+        cacheWrite: totals.cacheWrite + (day.cacheWrite ?? 0),
+      }),
+      { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    );
+    const weekdayTokens = Array(7).fill(0);
+    for (const day of collected.days) {
+      const weekday = new Date(`${day.date}T12:00:00`).getDay();
+      if (Number.isInteger(weekday)) weekdayTokens[weekday] += day.total ?? 0;
+    }
+    let histogram = stats.sessionTokenHistogram;
+    if (!Array.isArray(histogram) || histogram.length !== SESSION_TOKEN_BUCKET_MAXIMA.length) {
+      histogram = Array(SESSION_TOKEN_BUCKET_MAXIMA.length).fill(0);
+      const median = stats.medianSessionTokens ?? 0;
+      const index = SESSION_TOKEN_BUCKET_MAXIMA.findIndex((maximum) => median <= maximum);
+      histogram[index < 0 ? histogram.length - 1 : index] = stats.sessionCount;
+    }
+    payload.merge = {
+      version: 1,
+      tokenBreakdown,
+      hours: Array.isArray(collected.hours) && collected.hours.length === 24
+        ? collected.hours
+        : Array(24).fill(0),
+      weekdayTokens,
+      sessionTokenHistogram: histogram,
+      activeDates: collected.days
+        .filter((day) => day.total > 0)
+        .map((day) => day.date)
+        .slice(-3_660),
+    };
+  }
+  return signPayload(identity, payload);
+}
+
+export async function uploadUsage(identity, usage = null) {
+  const collected = usage ?? new UsageHistory().collect();
+  const send = (path, signed) => call(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(signed),
   });
+  try {
+    return await send("/api/v2/report", buildUsagePayload(identity, collected, { version: 2 }));
+  } catch (error) {
+    if (error.status !== 404 && error.status !== 405) throw error;
+    return send("/api/v1/report", buildUsagePayload(identity, collected, { version: 1 }));
+  }
+}
+
+export async function createProfileInvite(
+  identity,
+  { mode = "add", replaceMeterId = null } = {},
+  nowMs = Date.now(),
+) {
+  const signed = signPayload(identity, {
+    kind: "profile-invite",
+    meterId: identity.meterId,
+    publicKey: identity.publicKey,
+    mode,
+    replaceMeterId: mode === "replace" ? replaceMeterId : null,
+    generatedAtMs: nowMs,
+  });
+  return call("/api/v2/profile-invites", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(signed),
+  });
+}
+
+export async function joinExistingProfile(
+  identity,
+  { inviteToken, deviceLabel = null },
+  identityDir = undefined,
+  nowMs = Date.now(),
+) {
+  const signed = signPayload(identity, {
+    kind: "profile-join",
+    meterId: identity.meterId,
+    publicKey: identity.publicKey,
+    inviteToken,
+    deviceLabel,
+    generatedAtMs: nowMs,
+  });
+  const result = await call("/api/v2/profile-join", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(signed),
+  });
+  setProfileMembership({
+    profileId: result.profileId,
+    handle: result.handle,
+    role: result.role,
+    deviceLabel,
+    joinedAtMs: nowMs,
+    lastConfirmedAtMs: nowMs,
+  }, ...(identityDir ? [identityDir] : []));
+  return result;
+}
+
+async function signedProfileCall(path, kind, identity, extras = {}, nowMs = Date.now()) {
+  const signed = signPayload(identity, {
+    kind,
+    meterId: identity.meterId,
+    publicKey: identity.publicKey,
+    ...extras,
+    generatedAtMs: nowMs,
+  });
+  return call(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(signed),
+  });
+}
+
+export function fetchProfileMembership(identity, nowMs = Date.now()) {
+  return signedProfileCall(
+    "/api/v2/profile-membership",
+    "profile-membership",
+    identity,
+    {},
+    nowMs,
+  );
+}
+
+export function fetchProfileDevices(identity, nowMs = Date.now()) {
+  return signedProfileCall(
+    "/api/v2/profile-devices",
+    "profile-devices",
+    identity,
+    {},
+    nowMs,
+  );
+}
+
+export function revokeProfileDevice(identity, targetMeterId, nowMs = Date.now()) {
+  return signedProfileCall(
+    "/api/v2/profile-devices/revoke",
+    "profile-device-revoke",
+    identity,
+    { targetMeterId },
+    nowMs,
+  );
+}
+
+export function transferProfileOwner(identity, targetMeterId, nowMs = Date.now()) {
+  return signedProfileCall(
+    "/api/v2/profile-devices/transfer-owner",
+    "profile-owner-transfer",
+    identity,
+    { targetMeterId },
+    nowMs,
+  );
 }
 
 // Delete this meter's shared aggregates from the registry. The handle claim

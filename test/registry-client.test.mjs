@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  createProfileInvite,
   createLeaderboardUrl,
   isNewerVersion,
+  joinExistingProfile,
   uploadUsage,
 } from "../src/core/registry-client.mjs";
 import {
@@ -16,9 +21,11 @@ test("usage uploads sign the rolling seven-day session count", async () => {
   const previousFetch = globalThis.fetch;
   const identity = createIdentity(1_000);
   let signed = null;
+  let requestUrl = null;
   try {
     process.env.TOKEN_METER_REGISTRY_URL = "https://registry.example";
-    globalThis.fetch = async (_url, options) => {
+    globalThis.fetch = async (url, options) => {
+      requestUrl = String(url);
       signed = JSON.parse(options.body);
       return new Response(JSON.stringify({ ok: true, ignored: false }), {
         status: 200,
@@ -43,8 +50,127 @@ test("usage uploads sign the rolling seven-day session count", async () => {
       },
     });
     assert.equal(verifySignedPayload(signed), true);
+    assert.equal(requestUrl, "https://registry.example/api/v2/report");
+    assert.equal(signed.payload.kind, "usage-v2");
+    assert.equal(signed.payload.reportVersion, 2);
     assert.equal(signed.payload.stats.sessionCount, 9);
     assert.equal(signed.payload.stats.sessionsLast7Days, 4);
+    assert.equal(signed.payload.merge.sessionTokenHistogram.reduce((sum, value) => sum + value, 0), 9);
+    assert.equal("sessionId" in signed.payload.merge, false);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousRegistry == null) delete process.env.TOKEN_METER_REGISTRY_URL;
+    else process.env.TOKEN_METER_REGISTRY_URL = previousRegistry;
+  }
+});
+
+test("usage upload falls back to v1 only when a registry has no v2 route", async () => {
+  const previousRegistry = process.env.TOKEN_METER_REGISTRY_URL;
+  const previousFetch = globalThis.fetch;
+  const identity = createIdentity(1_000);
+  const requests = [];
+  try {
+    process.env.TOKEN_METER_REGISTRY_URL = "https://registry.example";
+    globalThis.fetch = async (url, options) => {
+      requests.push({ url: String(url), signed: JSON.parse(options.body) });
+      if (requests.length === 1) {
+        return new Response(JSON.stringify({ error: "not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    await uploadUsage(identity, {
+      generatedAtMs: Date.now(),
+      days: [],
+      hours: Array(24).fill(0),
+      stats: {
+        lifetimeTokens: 0,
+        currentStreakDays: 0,
+        longestStreakDays: 0,
+        sessionCount: 0,
+        sessionsLast7Days: 0,
+        peakDay: null,
+        medianSessionTokens: 0,
+        sessionTokenHistogram: Array(8).fill(0),
+        byPlatform: {
+          claudeCode: { tokens: 0, sessions: 0 },
+          codex: { tokens: 0, sessions: 0 },
+          cline: { tokens: 0, sessions: 0 },
+        },
+      },
+    });
+    assert.deepEqual(requests.map(({ url }) => url), [
+      "https://registry.example/api/v2/report",
+      "https://registry.example/api/v1/report",
+    ]);
+    assert.equal(requests[0].signed.payload.kind, "usage-v2");
+    assert.equal(requests[1].signed.payload.kind, "usage");
+    assert.equal("merge" in requests[1].signed.payload, false);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousRegistry == null) delete process.env.TOKEN_METER_REGISTRY_URL;
+    else process.env.TOKEN_METER_REGISTRY_URL = previousRegistry;
+  }
+});
+
+test("Profile invite and join requests are signed and persist membership locally", async () => {
+  const previousRegistry = process.env.TOKEN_METER_REGISTRY_URL;
+  const previousFetch = globalThis.fetch;
+  const identity = createIdentity(1_000);
+  const profileId = "TM-2222-3333-4444";
+  const directory = mkdtempSync(join(tmpdir(), "token-widget-profile-client-"));
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "identity.json"), `${JSON.stringify(identity, null, 2)}\n`);
+  const requests = [];
+  try {
+    process.env.TOKEN_METER_REGISTRY_URL = "https://registry.example";
+    globalThis.fetch = async (url, options) => {
+      const signed = JSON.parse(options.body);
+      requests.push({ url: String(url), signed });
+      assert.equal(verifySignedPayload(signed), true);
+      if (String(url).endsWith("/profile-invites")) {
+        return new Response(JSON.stringify({
+          token: "A".repeat(43),
+          profileId,
+          handle: "sergio",
+          expiresAtMs: 20_000,
+        }), { status: 201, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify({
+        joined: true,
+        profileId,
+        handle: "sergio",
+        role: "member",
+        deviceCount: 2,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+
+    await createProfileInvite(identity, { mode: "add" }, 2_000);
+    await joinExistingProfile(identity, {
+      inviteToken: "A".repeat(43),
+      deviceLabel: "Studio Mac",
+    }, directory, 3_000);
+    assert.deepEqual(requests.map(({ url }) => url), [
+      "https://registry.example/api/v2/profile-invites",
+      "https://registry.example/api/v2/profile-join",
+    ]);
+    assert.equal(requests[0].signed.payload.kind, "profile-invite");
+    assert.equal(requests[1].signed.payload.kind, "profile-join");
+    const persisted = JSON.parse(readFileSync(join(directory, "identity.json"), "utf8"));
+    assert.equal(persisted.handle, "sergio");
+    assert.equal(persisted.handleClaimed, true);
+    assert.deepEqual(persisted.profile, {
+      profileId,
+      role: "member",
+      deviceLabel: "Studio Mac",
+      joinedAtMs: 3_000,
+      lastConfirmedAtMs: 3_000,
+    });
   } finally {
     globalThis.fetch = previousFetch;
     if (previousRegistry == null) delete process.env.TOKEN_METER_REGISTRY_URL;
