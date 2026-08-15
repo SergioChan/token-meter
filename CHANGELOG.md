@@ -4,6 +4,34 @@ The top entry is the current source version. Binary release metadata appears at
 `/api/v1/latest` only after a signed and notarized DMG has actually been
 published.
 
+## 0.2.5 — 2026-08-14
+
+- The widget updates itself. Clicking the update banner now downloads the
+  release, proves it three ways — the registry's published SHA-256, Apple's
+  notarization assessment, and the running app's own designated code-signing
+  requirement — swaps the bundle in place, and lets launchd relaunch the new
+  version seconds later. Any failed check, or an unwritable /Applications,
+  falls back to the old verified-DMG-in-Downloads flow. Quitting or updating
+  now also shuts down the Node bridge instead of stranding it.
+- The registry can publish a release without carrying the bytes:
+  `TOKEN_METER_LATEST_*` environment variables describe the version, digest,
+  and size, and `/download/token-widget.dmg` redirects to the immutable
+  GitHub release asset. `/api/v1/latest` goes live for the first time.
+- The DMG opens like a real installer: styled Finder window with background
+  art, hidden chrome, and the app and Applications laid out for the drag.
+- Share actions on the dashboard and public profiles are now icon buttons
+  (X, LinkedIn, copy link, PNG card) with the leaderboard CTA on its own
+  row; fixed a CSS bug that kept state-hidden share buttons visible.
+- Widget settings polish: "Share with friends" (formerly "Refer friends")
+  now copies the tokenwidget.app home page instead of the GitHub repo, and
+  the identity block leads with your @handle.
+- New homepage: hero, a scroll-tracked feature tour (live telemetry, the
+  runaway alarm, identity & community, privacy), and a privacy-first footer.
+  The support line now names everything tracked: Claude Code, Codex, Cline.
+
+Versions 0.2.3 and 0.2.4 were internal builds used to test the self-update
+pipeline end to end; they were never published.
+
 ## 0.2.2 — 2026-08-14
 
 - Share buttons on public profiles and the local dashboard: post to X or
