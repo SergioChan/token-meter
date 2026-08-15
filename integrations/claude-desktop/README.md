@@ -1,10 +1,10 @@
 # Claude Code in Claude Desktop Integration
 
-This integration displays the shared Token Meter as an independent native macOS overlay attached to the Code surface inside Claude Desktop.
+This integration displays the shared Token Widget runtime as an independent native macOS overlay attached to the Code surface inside Claude Desktop.
 
 It does **not** inject JavaScript into Claude, patch `app.asar`, re-sign Claude.app, or restart Claude. Production Claude Desktop rejects public CDP debugging without an Anthropic-signed authorization value, so the supported integration uses a native companion instead.
 
-Distribution is source-only: every developer builds and ad-hoc signs the companion locally. No prebuilt or notarized Claude package is published.
+The release DMG contains a self-contained Developer ID-signed and notarized app with an embedded runtime and Node.js. Developers can also build and install the companion from source; source builds are ad-hoc signed unless a stable signing identity is supplied.
 
 ## Interface
 

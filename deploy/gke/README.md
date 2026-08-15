@@ -50,6 +50,11 @@ kubectl apply -f deploy/gke/token-widget.yaml
 kubectl -n token-widget rollout status deployment/token-widget-registry
 ```
 
+The manifest intentionally keeps `TOKEN_WIDGET_PROFILE_READS=0`. For the
+multi-device Profile upgrade, follow
+[the staged migration runbook](../../docs/multi-device-migration.md); do not
+flip that flag merely because the new image is healthy.
+
 The Ingress uses the reserved global address `34.102.136.142`. Create this DNS
 record after the registry Pod and database health check pass:
 

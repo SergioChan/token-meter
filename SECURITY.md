@@ -1,6 +1,6 @@
 # Security Policy
 
-Token Meter uses two local Desktop integration mechanisms: Codex opens a loopback Chromium DevTools Protocol endpoint and receives a renderer payload; Claude uses an independent native companion with macOS Accessibility permission. Treat changes to launch, process verification, target selection, Accessibility parsing, event parsing, and cleanup as security-sensitive.
+Token Widget uses two local Desktop integration mechanisms: Codex opens a loopback Chromium DevTools Protocol endpoint and receives a renderer payload; Claude uses an independent native companion with macOS Accessibility permission. Treat changes to launch, process verification, target selection, Accessibility parsing, event parsing, and cleanup as security-sensitive.
 
 ## Supported versions
 
@@ -36,7 +36,7 @@ The Codex integration is designed to defend against accidental renderer confusio
 - Installs only a per-user LaunchAgent and a copied runtime under the current user's Application Support directory.
 - Makes at most one normal quit/relaunch attempt for a Codex process that lacks the required endpoint; it never force-quits or enters a relaunch loop.
 
-Token Meter cannot protect the CDP endpoint or its user-writable installed copy from a malicious process already running as the same macOS user. Do not run untrusted local software while CDP is enabled. Uninstall with `./scripts/uninstall-token-meter-macos.sh --restart`, or restart Codex normally after stopping a one-shot run, to close the endpoint.
+Token Widget cannot protect the CDP endpoint or its user-writable installed copy from a malicious process already running as the same macOS user. Do not run untrusted local software while CDP is enabled. Uninstall with `./scripts/uninstall-token-meter-macos.sh --restart`, or restart Codex normally after stopping a one-shot run, to close the endpoint.
 
 ### Claude Code in Claude Desktop
 
@@ -53,7 +53,7 @@ The Claude integration is designed to defend against accidental Session confusio
 - Validates structured health state against the exact installed executable and an argument boundary, then checks Accessibility live and reports UI, bridge, and Session readiness separately; prefix lookalikes are rejected.
 - Never quits or relaunches Claude.
 
-Accessibility permission allows the companion to inspect UI elements exposed by applications in the user's session. Token Meter intentionally narrows its reads, but a maliciously modified installed companion could abuse that permission. Install only from a reviewed source revision and keep the installed directory writable only by the current user.
+Accessibility permission allows the companion to inspect UI elements exposed by applications in the user's session. Token Widget intentionally narrows its reads, but a maliciously modified installed companion could abuse that permission. Install only from a reviewed source revision and keep the installed directory writable only by the current user.
 
 Source builds are ad-hoc signed by default. Their code identity can change after rebuilding, which may require renewed Accessibility approval. They also record the selected external Node.js path; if that runtime is later removed, rerun the installer with a compatible runtime.
 

@@ -145,6 +145,49 @@ test("claims are signed, first-come-first-served, and idempotent", async () => {
   }
 });
 
+test("a member cannot claim a handle for a handle-less Profile", async () => {
+  const { server, base } = await startRegistry({ profileReads: true });
+  try {
+    const owner = createIdentity();
+    const member = createIdentity();
+    assert.equal((await fetch(`${base}/api/v1/report`, {
+      method: "POST",
+      body: JSON.stringify(usageReport(owner, 10)),
+    })).status, 200);
+    const invite = await (await signedPost(base, "/api/v2/profile-invites", owner, {
+      kind: "profile-invite",
+      mode: "add",
+    })).json();
+    assert.equal((await signedPost(base, "/api/v2/profile-join", member, {
+      kind: "profile-join",
+      inviteToken: invite.token,
+      deviceLabel: "Member Mac",
+    })).status, 200);
+
+    const memberClaim = await signedPost(base, "/api/v1/claim", member, {
+      kind: "claim",
+      handle: "member-picked",
+    });
+    assert.equal(memberClaim.status, 403);
+    assert.equal((await memberClaim.json()).claimed, false);
+    assert.deepEqual(
+      await (await fetch(`${base}/api/v1/handle/member-picked/available`)).json(),
+      { available: true },
+    );
+
+    assert.equal((await signedPost(base, "/api/v1/claim", owner, {
+      kind: "claim",
+      handle: "owner-picked",
+    })).status, 200);
+    assert.equal(
+      (await (await fetch(`${base}/api/v1/profile/owner-picked`)).json()).handle,
+      "owner-picked",
+    );
+  } finally {
+    await server.stop();
+  }
+});
+
 test("liveness does not depend on registry storage", async () => {
   const { server, base } = await startRegistry();
   try {
@@ -636,6 +679,26 @@ test("owner invitation joins one independent device without reclaiming the handl
     assert.equal(board.rows.length, 1);
     assert.equal(board.rows[0].handle, "sergio");
 
+    const pairing = await (await signedPost(base, "/api/v1/browser-pairings", member, {
+      kind: "browser-pairing",
+    })).json();
+    const exchange = await fetch(`${base}/api/v1/browser-sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: base },
+      body: JSON.stringify({ code: pairing.code }),
+    });
+    assert.equal(exchange.status, 200);
+    const memberCookie = exchange.headers.get("set-cookie").split(";", 1)[0];
+    assert.equal((await fetch(`${base}/api/v1/me`, {
+      headers: { Cookie: memberCookie },
+    })).status, 200);
+    const pendingPairing = await (await signedPost(
+      base,
+      "/api/v1/browser-pairings",
+      member,
+      { kind: "browser-pairing" },
+    )).json();
+
     const devices = await signedPost(base, "/api/v2/profile-devices", owner, {
       kind: "profile-devices",
     });
@@ -648,6 +711,14 @@ test("owner invitation joins one independent device without reclaiming the handl
       targetMeterId: member.meterId,
     });
     assert.equal(revoke.status, 200);
+    assert.equal((await fetch(`${base}/api/v1/me`, {
+      headers: { Cookie: memberCookie },
+    })).status, 401);
+    assert.equal((await fetch(`${base}/api/v1/browser-sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: base },
+      body: JSON.stringify({ code: pendingPairing.code }),
+    })).status, 401);
     assert.equal((await (await fetch(`${base}/api/v1/profile/sergio`)).json()).weekTokens, 100);
     assert.deepEqual(
       await (await signedPost(base, "/api/v2/profile-membership", member, {
@@ -666,6 +737,63 @@ test("owner invitation joins one independent device without reclaiming the handl
       kind: "profile-device-revoke",
       targetMeterId: owner.meterId,
     })).status, 409);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("withdraw removes only the signing device contribution from a multi-device Profile", async () => {
+  const { server, base } = await startRegistry({ profileReads: true });
+  try {
+    const owner = { ...createIdentity(), handle: "shared-home" };
+    const member = createIdentity();
+    await signedPost(base, "/api/v1/claim", owner, {
+      kind: "claim",
+      handle: owner.handle,
+    });
+    const invite = await (await signedPost(base, "/api/v2/profile-invites", owner, {
+      kind: "profile-invite",
+      mode: "add",
+    })).json();
+    await signedPost(base, "/api/v2/profile-join", member, {
+      kind: "profile-join",
+      inviteToken: invite.token,
+      deviceLabel: "Travel Mac",
+    });
+    await fetch(`${base}/api/v1/report`, {
+      method: "POST",
+      body: JSON.stringify(usageReport(owner, 100)),
+    });
+    await fetch(`${base}/api/v1/report`, {
+      method: "POST",
+      body: JSON.stringify(usageReport(member, 250)),
+    });
+    assert.equal(
+      (await (await fetch(`${base}/api/v1/profile/shared-home`)).json()).weekTokens,
+      350,
+    );
+
+    const withdrawal = await signedPost(base, "/api/v1/withdraw", member, {
+      kind: "withdraw",
+    });
+    assert.deepEqual(await withdrawal.json(), { ok: true, wiped: true });
+
+    const profile = await (await fetch(`${base}/api/v1/profile/shared-home`)).json();
+    assert.equal(profile.shared, true);
+    assert.equal(profile.weekTokens, 100);
+    assert.equal(profile.stats.lifetimeTokens, 100);
+    const membership = await (await signedPost(
+      base,
+      "/api/v2/profile-membership",
+      member,
+      { kind: "profile-membership" },
+    )).json();
+    assert.equal(membership.member, true);
+    assert.equal(membership.sharingEnabled, false);
+    assert.equal(
+      (await (await fetch(`${base}/api/v1/leaderboard`)).json()).rows.length,
+      1,
+    );
   } finally {
     await server.stop();
   }

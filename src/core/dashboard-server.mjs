@@ -259,6 +259,7 @@ export class DashboardServer {
       return replyJson(200, {
         ...this.#publicIdentity(),
         wiped,
+        deviceContributionRemoved: wiped,
         pendingWithdraw: !wiped && registryEnabled(),
       });
     }

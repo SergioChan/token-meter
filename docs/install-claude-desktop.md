@@ -1,19 +1,29 @@
 # Install Token Widget for Claude Code in Claude Desktop
 
-Token Meter supports the Code surface inside Claude Desktop on macOS through an independent native overlay. The companion follows the focused Claude window and reads an exact selected `local_<uuid>` or `session_<24 chars>` through macOS Accessibility. Legacy local Sessions map to local Claude Code transcripts; current cloud Code Sessions map to complete usage-event pages already present in Claude's local HTTP cache. The overlay hides when that identity or telemetry cannot be proven.
+Token Widget supports the Code surface inside Claude Desktop on macOS through an independent native overlay. The companion follows the focused Claude window and reads an exact selected `local_<uuid>` or `session_<24 chars>` through macOS Accessibility. Legacy local Sessions map to local Claude Code transcripts; current cloud Code Sessions map to complete usage-event pages already present in Claude's local HTTP cache. The overlay hides when that identity or telemetry cannot be proven.
 
 The installer does not quit, relaunch, modify, patch, or re-sign Claude.app.
 
-The Claude integration is source-distributed. Each developer compiles and ad-hoc signs the companion locally; this repository does not publish a prebuilt or notarized application package.
+The signed and Apple-notarized DMG is the normal installation path. Source builds remain available for development and recovery and are ad-hoc signed unless a stable signing identity is supplied.
 
 ## Requirements
 
 - macOS 13 or newer.
 - The official signed Claude Desktop application at `/Applications/Claude.app`.
-- Git.
-- Node.js 22.12 or newer.
-- Xcode Command Line Tools with Swift.
 - Permission to enable **Token Widget for Claude** in System Settings > Privacy & Security > Accessibility.
+
+The DMG contains its own compatible Node.js runtime. Building from source additionally requires Git, Node.js 22.12 or newer, and Xcode Command Line Tools with Swift.
+
+## Install the release DMG
+
+1. [Download Token Widget](https://www.tokenwidget.app/download/token-widget.dmg).
+2. Open the DMG and drag **Token Widget.app** to **Applications**.
+3. Open Token Widget once. It registers its per-user LaunchAgent and exits; the LaunchAgent-owned overlay process takes over.
+4. Enable **Token Widget** in System Settings > Privacy & Security > Accessibility.
+
+The self-contained app verifies through Gatekeeper and does not modify Claude.app.
+
+## Install from source
 
 Check all local build prerequisites:
 
@@ -22,8 +32,6 @@ Check all local build prerequisites:
 ```
 
 The installer searches compatible Homebrew, PATH, and nvm candidates and skips old Node.js versions. Pass `--node` only when a specific compatible absolute path is required.
-
-## Install
 
 From the repository root:
 
@@ -151,7 +159,7 @@ input_tokens
 + cache_read_input_tokens
 ```
 
-Output is excluded from active-context occupancy. The context-window denominator comes from a strict Context-window button ratio inside the same exact Code web area when available, otherwise from the current installed Claude model catalog matched to the exact Session model. Token Meter does not scan static text or conversation content for this value. These are private local compatibility surfaces and may change between Claude Desktop releases.
+Output is excluded from active-context occupancy. The context-window denominator comes from a strict Context-window button ratio inside the same exact Code web area when available, otherwise from the current installed Claude model catalog matched to the exact Session model. Token Widget does not scan static text or conversation content for this value. These are private local compatibility surfaces and may change between Claude Desktop releases.
 
 The reading is useful for Agent workload intensity and Session health. It is not Claude subscription billing and does not claim to reproduce undisclosed backend plan accounting.
 

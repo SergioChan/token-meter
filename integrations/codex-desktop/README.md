@@ -1,6 +1,6 @@
-# Codex Desktop Integration
+# Codex Desktop integration
 
-This integration injects the shared Token Meter runtime into the verified Codex Desktop renderer on macOS.
+This integration injects the shared Token Widget runtime into the verified Codex Desktop renderer on macOS.
 
 ## Interface
 

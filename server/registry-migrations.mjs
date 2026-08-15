@@ -252,8 +252,172 @@ export async function reconcileRegistryProfiles(
       }
       reconciledProfiles.push(profileId);
     }
+
+    // A v1 instance can remain warm briefly after the additive migration. Its
+    // report/withdraw writes update registry_meters but cannot update the new
+    // membership row. Mirror that signed legacy state for active devices before
+    // rebuilding Profile rollups. Revoked/replaced devices are deliberately
+    // excluded so a stale server can never reactivate them.
+    const activeMemberships = await client.query(
+      `SELECT meter_id
+       FROM registry_profile_devices
+       WHERE revoked_at_ms IS NULL
+       ORDER BY meter_id`,
+    );
+    const reconciledDevices = [];
+    for (const { meter_id: meterId } of activeMemberships.rows) {
+      // Lock in the same meter -> membership order as normal report writes.
+      // This prevents reconciliation from overwriting a concurrent v2 report
+      // with an older state selected before that report committed.
+      const meterResult = await client.query(
+        `SELECT generated_at_ms, updated_at_ms
+         FROM registry_meters
+         WHERE meter_id = $1
+         FOR UPDATE`,
+        [meterId],
+      );
+      const deviceResult = await client.query(
+        `SELECT sharing_enabled, last_reported_at_ms
+         FROM registry_profile_devices
+         WHERE meter_id = $1 AND revoked_at_ms IS NULL
+         FOR UPDATE`,
+        [meterId],
+      );
+      const meter = meterResult.rows[0];
+      const device = deviceResult.rows[0];
+      if (!meter || !device) continue;
+      const sharingEnabled = meter.generated_at_ms != null;
+      const lastReportedAtMs = sharingEnabled ? Number(meter.updated_at_ms) : null;
+      const currentLastReportedAtMs = device.last_reported_at_ms == null
+        ? null
+        : Number(device.last_reported_at_ms);
+      if (
+        device.sharing_enabled === sharingEnabled &&
+        currentLastReportedAtMs === lastReportedAtMs
+      ) continue;
+      await client.query(
+        `UPDATE registry_profile_devices
+         SET sharing_enabled = $2, last_reported_at_ms = $3
+         WHERE meter_id = $1 AND revoked_at_ms IS NULL`,
+        [meterId, sharingEnabled, lastReportedAtMs],
+      );
+      reconciledDevices.push(meterId);
+    }
+
+    // The same rolling-deploy window can contain a late v1 handle claim for a
+    // Meter that already received its Profile during the backfill. Attach only
+    // an owner's claim. A member-side claim is ambiguous and remains a hard
+    // failure instead of silently assigning a second handle to a Profile.
+    const lateHandles = await client.query(
+      `SELECT h.handle, h.meter_id, d.profile_id,
+              p.owner_meter_id, p.handle AS profile_handle
+       FROM registry_handles AS h
+       JOIN registry_profile_devices AS d ON d.meter_id = h.meter_id
+       JOIN registry_profiles AS p ON p.profile_id = d.profile_id
+       LEFT JOIN registry_profiles AS assigned ON assigned.profile_id = h.profile_id
+       WHERE assigned.profile_id IS NULL
+       ORDER BY h.handle`,
+    );
+    const reconciledHandles = [];
+    for (const candidate of lateHandles.rows) {
+      if (candidate.owner_meter_id !== candidate.meter_id) {
+        throw new Error(
+          `cannot reconcile late handle ${candidate.handle}: claimant is not Profile owner`,
+        );
+      }
+      if (candidate.profile_handle != null && candidate.profile_handle !== candidate.handle) {
+        throw new Error(
+          `cannot reconcile late handle ${candidate.handle}: Profile already owns ${candidate.profile_handle}`,
+        );
+      }
+      await client.query(
+        "UPDATE registry_handles SET profile_id = $2 WHERE handle = $1",
+        [candidate.handle, candidate.profile_id],
+      );
+      await client.query(
+        "UPDATE registry_profiles SET handle = $2 WHERE profile_id = $1",
+        [candidate.profile_id, candidate.handle],
+      );
+      reconciledHandles.push(candidate.handle);
+    }
+
+    // Recompute every stale rollup, not just newly discovered Profiles. This is
+    // what closes the late-v1-write race during a rolling server deployment.
+    const profiles = await client.query(
+      `SELECT profile_id, days, stats, week_tokens, generated_at_ms, updated_at_ms
+       FROM registry_profiles
+       ORDER BY profile_id
+       FOR UPDATE`,
+    );
+    const activeDevices = await client.query(
+      `SELECT d.profile_id, m.days, m.stats, m.week_tokens,
+              m.generated_at_ms, m.updated_at_ms
+       FROM registry_profile_devices AS d
+       JOIN registry_meters AS m ON m.meter_id = d.meter_id
+       WHERE d.revoked_at_ms IS NULL
+         AND d.sharing_enabled = TRUE
+         AND m.generated_at_ms IS NOT NULL
+       ORDER BY d.profile_id, d.meter_id`,
+    );
+    const snapshotsByProfile = new Map();
+    for (const meter of activeDevices.rows) {
+      const snapshots = snapshotsByProfile.get(meter.profile_id) ?? [];
+      snapshots.push({
+        days: meter.days ?? [],
+        stats: meter.stats ?? {},
+        weekTokens: Number(meter.week_tokens) || 0,
+        generatedAtMs:
+          meter.generated_at_ms == null ? null : Number(meter.generated_at_ms),
+        updatedAtMs: meter.updated_at_ms == null ? 0 : Number(meter.updated_at_ms),
+      });
+      snapshotsByProfile.set(meter.profile_id, snapshots);
+    }
+    const reconciledRollups = [];
+    for (const profile of profiles.rows) {
+      const expected = aggregateProfileSnapshots(
+        snapshotsByProfile.get(profile.profile_id) ?? [],
+      );
+      const actualComparable = canonical({
+        days: profile.days ?? [],
+        stats: profile.stats ?? {},
+        weekTokens: Number(profile.week_tokens) || 0,
+        generatedAtMs:
+          profile.generated_at_ms == null ? null : Number(profile.generated_at_ms),
+      });
+      const expectedComparable = canonical({
+        days: expected.days,
+        stats: expected.stats,
+        weekTokens: expected.weekTokens,
+        generatedAtMs: expected.generatedAtMs,
+      });
+      if (JSON.stringify(actualComparable) === JSON.stringify(expectedComparable)) continue;
+      await client.query(
+        `UPDATE registry_profiles
+         SET days = $2::jsonb,
+             stats = $3::jsonb,
+             week_tokens = $4,
+             generated_at_ms = $5,
+             updated_at_ms = $6,
+             rollup_version = 1
+         WHERE profile_id = $1`,
+        [
+          profile.profile_id,
+          JSON.stringify(expected.days),
+          JSON.stringify(expected.stats),
+          expected.weekTokens,
+          expected.generatedAtMs,
+          Math.max(expected.updatedAtMs ?? 0, Number(profile.updated_at_ms) || 0),
+        ],
+      );
+      reconciledRollups.push(profile.profile_id);
+    }
     await client.query("COMMIT");
-    return { reconciledProfiles };
+    return {
+      reconciledProfiles,
+      reconciledDevices,
+      reconciledHandles,
+      reconciledRollups,
+    };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -359,21 +523,52 @@ export async function verifyRegistryProfileMigration(pool) {
          ON d.profile_id = p.profile_id
         AND d.meter_id = p.owner_meter_id
         AND d.role = 'owner'
+        AND d.revoked_at_ms IS NULL
        WHERE d.meter_id IS NULL`,
+    ),
+    unexpectedOwnerMemberships: await count(
+      pool,
+      `SELECT COUNT(*)::bigint AS count
+       FROM registry_profile_devices AS d
+       JOIN registry_profiles AS p ON p.profile_id = d.profile_id
+       WHERE d.role = 'owner'
+         AND (d.meter_id <> p.owner_meter_id OR d.revoked_at_ms IS NOT NULL)`,
+    ),
+    deviceSharingStateMismatches: await count(
+      pool,
+      `SELECT COUNT(*)::bigint AS count
+       FROM registry_profile_devices AS d
+       JOIN registry_meters AS m ON m.meter_id = d.meter_id
+       WHERE d.revoked_at_ms IS NULL
+         AND (
+           d.sharing_enabled <> (m.generated_at_ms IS NOT NULL)
+           OR (m.generated_at_ms IS NULL AND d.last_reported_at_ms IS NOT NULL)
+           OR (
+             m.generated_at_ms IS NOT NULL
+             AND (
+               d.last_reported_at_ms IS NULL
+               OR d.last_reported_at_ms <> m.updated_at_ms
+             )
+           )
+         )`,
     ),
     handlesWithoutProfile: await count(
       pool,
       `SELECT COUNT(*)::bigint AS count
-       FROM registry_handles
-       WHERE profile_id IS NULL`,
+       FROM registry_handles AS h
+       LEFT JOIN registry_profiles AS p ON p.profile_id = h.profile_id
+       WHERE p.profile_id IS NULL`,
     ),
     handleProfileMismatches: await count(
       pool,
       `SELECT COUNT(*)::bigint AS count
        FROM registry_handles AS h
        JOIN registry_profiles AS p ON p.profile_id = h.profile_id
+       JOIN registry_meters AS m ON m.meter_id = p.owner_meter_id
        WHERE COALESCE(p.handle, '') <> h.handle
-          OR p.owner_meter_id <> h.meter_id`,
+          OR p.owner_meter_id <> h.meter_id
+          OR h.public_key <> m.public_key
+          OR COALESCE(m.handle, '') <> h.handle`,
     ),
     rollupMismatches: await countRollupMismatches(pool),
   };
@@ -381,6 +576,8 @@ export async function verifyRegistryProfileMigration(pool) {
     "metersWithoutDevice",
     "devicesWithoutProfile",
     "profilesWithoutOwnerMembership",
+    "unexpectedOwnerMemberships",
+    "deviceSharingStateMismatches",
     "handlesWithoutProfile",
     "handleProfileMismatches",
     "rollupMismatches",

@@ -314,6 +314,7 @@ test("withdraw wipes server data now, keeps the handle claim, and re-sharing res
     const body = await withdraw.json();
     assert.equal(withdraw.status, 200);
     assert.equal(body.wiped, true);
+    assert.equal(body.deviceContributionRemoved, true);
     assert.equal(body.sharing.enabled, false);
 
     const { rows } = await (await fetch(`${world.registryBase}/api/v1/leaderboard`)).json();

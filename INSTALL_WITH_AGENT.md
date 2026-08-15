@@ -1,10 +1,10 @@
-# Token Meter Automated Installation Task
+# Token Widget automated installation task
 
-You are the installation agent. Install and verify Token Meter from this repository on the user's macOS machine. Work autonomously through all safe, reversible steps, but obey every confirmation gate below.
+You are the installation agent. Install and verify Token Widget from this repository on the user's macOS machine. Work autonomously through all safe, reversible steps, but obey every confirmation gate below.
 
 ## Objective
 
-Install Token Meter for every supported Desktop host that is actually present:
+Install Token Widget for every supported Desktop host that is actually present:
 
 - Codex Desktop for macOS: verified loopback CDP injection.
 - Claude Code inside Claude Desktop for macOS: native companion overlay using exact Accessibility Session binding.

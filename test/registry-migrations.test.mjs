@@ -105,6 +105,8 @@ test("registry migrations backfill one profile and owner device per legacy meter
         metersWithoutDevice: 0,
         devicesWithoutProfile: 0,
         profilesWithoutOwnerMembership: 0,
+        unexpectedOwnerMemberships: 0,
+        deviceSharingStateMismatches: 0,
         handlesWithoutProfile: 0,
         handleProfileMismatches: 0,
         rollupMismatches: 0,
@@ -207,13 +209,105 @@ test("profile reconciliation catches a meter written by a late v1 server", async
     assert.equal((await verifyRegistryProfileMigration(pool)).ok, false);
     assert.deepEqual(
       await reconcileRegistryProfiles(pool, { useAdvisoryLock: false }),
-      { reconciledProfiles: ["TM-LATE-V111-WRIT"] },
+      {
+        reconciledProfiles: ["TM-LATE-V111-WRIT"],
+        reconciledDevices: [],
+        reconciledHandles: [],
+        reconciledRollups: [],
+      },
     );
     assert.equal((await verifyRegistryProfileMigration(pool)).ok, true);
     assert.deepEqual(
       await reconcileRegistryProfiles(pool, { useAdvisoryLock: false }),
-      { reconciledProfiles: [] },
+      {
+        reconciledProfiles: [],
+        reconciledDevices: [],
+        reconciledHandles: [],
+        reconciledRollups: [],
+      },
     );
+  } finally {
+    await pool.end();
+  }
+});
+
+test("profile reconciliation repairs late v1 reports, withdrawals, and owner handle claims", async () => {
+  const pool = createPool();
+  try {
+    await seedLegacyRegistry(pool);
+    await applyRegistryMigrations(pool, { nowMs: 1_000, useAdvisoryLock: false });
+
+    // Alice was already sharing when migration 2 ran. A warm v1 instance then
+    // accepts a newer report but knows nothing about the Profile shadow row.
+    await pool.query(
+      `UPDATE registry_meters
+       SET days = '[{"date":"2026-08-15","total":90}]'::jsonb,
+           stats = '{"lifetimeTokens":90,"sessionCount":3}'::jsonb,
+           week_tokens = 90,
+           generated_at_ms = 3000,
+           updated_at_ms = 3001
+       WHERE meter_id = 'TM-AAAA-BBBB-CCCC'`,
+    );
+
+    // Bob was local-only during migration. A late v1 claim + report must attach
+    // to Bob's existing owner Profile without creating or stealing a handle.
+    await pool.query(
+      `UPDATE registry_meters
+       SET handle = 'bob',
+           days = '[{"date":"2026-08-15","total":25}]'::jsonb,
+           stats = '{"lifetimeTokens":25,"sessionCount":1}'::jsonb,
+           week_tokens = 25,
+           generated_at_ms = 4000,
+           updated_at_ms = 4001
+       WHERE meter_id = 'TM-DDDD-EEEE-FFFF'`,
+    );
+    await pool.query(
+      `INSERT INTO registry_handles
+         (handle, meter_id, public_key, claimed_at_ms, profile_id)
+       VALUES ('bob', 'TM-DDDD-EEEE-FFFF', 'bob-key', 3999, NULL)`,
+    );
+
+    assert.equal((await verifyRegistryProfileMigration(pool)).ok, false);
+    assert.deepEqual(
+      await reconcileRegistryProfiles(pool, { useAdvisoryLock: false }),
+      {
+        reconciledProfiles: [],
+        reconciledDevices: ["TM-AAAA-BBBB-CCCC", "TM-DDDD-EEEE-FFFF"],
+        reconciledHandles: ["bob"],
+        reconciledRollups: ["TM-AAAA-BBBB-CCCC", "TM-DDDD-EEEE-FFFF"],
+      },
+    );
+    assert.equal((await verifyRegistryProfileMigration(pool)).ok, true);
+
+    const bob = await pool.query(
+      `SELECT p.handle, p.week_tokens, d.sharing_enabled, h.profile_id
+       FROM registry_profiles AS p
+       JOIN registry_profile_devices AS d ON d.profile_id = p.profile_id
+       JOIN registry_handles AS h ON h.profile_id = p.profile_id
+       WHERE p.profile_id = 'TM-DDDD-EEEE-FFFF'`,
+    );
+    assert.deepEqual(bob.rows[0], {
+      handle: "bob",
+      week_tokens: 25,
+      sharing_enabled: true,
+      profile_id: "TM-DDDD-EEEE-FFFF",
+    });
+
+    // A late v1 withdrawal also converges: it hides the device contribution
+    // and therefore the single-device Profile without releasing the handle.
+    await pool.query(
+      `UPDATE registry_meters
+       SET days = '[]'::jsonb,
+           stats = '{}'::jsonb,
+           week_tokens = 0,
+           generated_at_ms = NULL,
+           updated_at_ms = 5001
+       WHERE meter_id = 'TM-DDDD-EEEE-FFFF'`,
+    );
+    const withdrawal = await reconcileRegistryProfiles(pool, { useAdvisoryLock: false });
+    assert.deepEqual(withdrawal.reconciledDevices, ["TM-DDDD-EEEE-FFFF"]);
+    assert.deepEqual(withdrawal.reconciledRollups, ["TM-DDDD-EEEE-FFFF"]);
+    assert.equal((await verifyRegistryProfileMigration(pool)).ok, true);
   } finally {
     await pool.end();
   }

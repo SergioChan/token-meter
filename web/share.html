@@ -134,7 +134,7 @@
       </ul>
       <label class="agree">
         <input type="checkbox" id="agree-box">
-        <span>I understand these aggregate stats will be published on the public leaderboard and my profile page, and I can delete them from the server at any time by switching back to "Data stays local".</span>
+        <span>I understand this device's aggregate stats will be published on the public leaderboard and my profile page, and I can remove this device's contribution at any time by switching back to "Data stays local".</span>
       </label>
     </div>
 
@@ -147,18 +147,20 @@
 
   <!-- ============ WITHDRAW MODE ============ -->
   <section id="withdraw-flow" hidden>
-    <h1>Take your data local again</h1>
+    <h1>Stop sharing from this Mac</h1>
     <p class="lede">Here is exactly what happens when you confirm.</p>
     <div class="step">
       <ul class="shares">
-        <li><span class="yes">✓</span>Your leaderboard row and public profile data are <b>deleted from the server now</b></li>
-        <li><span class="yes">✓</span>Uploads stop — future usage never leaves this machine</li>
+        <li><span class="yes">✓</span>This Mac's uploaded contribution is <b>deleted from the server now</b></li>
+        <li><span class="yes">✓</span>Uploads stop — future usage from this Mac never leaves it</li>
+        <li><span class="yes">✓</span>If another computer is sharing to the same Profile, its public data stays live</li>
+        <li><span class="yes">✓</span>If this is the last sharing device, the Profile leaves the leaderboard</li>
         <li><span class="yes">✓</span>Your @handle stays reserved for you and comes back if you re-share</li>
         <li><span class="yes">✓</span>Your local dashboard keeps working exactly as before</li>
       </ul>
     </div>
     <div class="actions">
-      <button class="publish danger" id="withdraw-button">Delete my shared data</button>
+      <button class="publish danger" id="withdraw-button">Stop sharing from this Mac</button>
       <button class="cancel" id="withdraw-cancel" type="button">Keep sharing</button>
       <div class="note" id="withdraw-note"></div>
     </div>
@@ -407,10 +409,10 @@
       if (!response.ok) throw new Error(body.error || "withdrawal failed");
       el("done-mark").textContent = "🏡";
       finish(
-        "Your data stays local now",
+        "This Mac's data stays local now",
         body.wiped
-          ? "Your shared stats were deleted from the server, and uploads have stopped. Your @handle stays reserved for you."
-          : "Uploads have stopped. The server-side deletion completes automatically the next time the registry is reachable.",
+          ? "This Mac's uploaded contribution was deleted, and its uploads have stopped. Other computers on the Profile are unchanged, and your @handle stays reserved."
+          : "Uploads from this Mac have stopped. Its server-side deletion completes automatically the next time the registry is reachable.",
         null,
       );
     } catch (error) {

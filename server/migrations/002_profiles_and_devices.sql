@@ -113,8 +113,10 @@ SELECT
   COALESCE(h.claimed_at_ms, m.updated_at_ms),
   CASE WHEN m.generated_at_ms IS NULL THEN NULL ELSE m.updated_at_ms END
 FROM registry_meters AS m
+JOIN registry_profiles AS p ON p.profile_id = m.meter_id
 LEFT JOIN registry_handles AS h ON h.meter_id = m.meter_id
 ON CONFLICT (meter_id) DO NOTHING;
 
 UPDATE registry_handles
-SET profile_id = meter_id;
+SET profile_id = meter_id
+WHERE meter_id IN (SELECT profile_id FROM registry_profiles);

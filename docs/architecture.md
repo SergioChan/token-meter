@@ -1,8 +1,8 @@
-# Token Meter Architecture
+# Token Widget architecture
 
 ## Decision
 
-Token Meter is a local desktop enhancement with a small core and host adapters. The core knows nothing about Codex DOM selectors or Claude UI. Each host adapter must provide two things:
+Token Widget is a local desktop enhancement with a small core and host adapters. The core knows nothing about Codex DOM selectors or Claude UI. Each host adapter must provide two things:
 
 1. Exact active-session identity.
 2. Confirmed token-usage events and turn boundaries.
@@ -105,7 +105,7 @@ Neither metric claims to reproduce the backend account activity shown by Codex `
 
 The App Server's `account/usage/read` method has no parameters and returns an account summary plus optional daily buckets. It exposes no thread, Session, turn, model, input, cached-input, or output attribution. Conversely, `thread/tokenUsage/updated` and rollout `token_count` events expose raw thread usage but not the backend account weighting used by `/usage`.
 
-Token Meter therefore does not infer an exact per-Session backend number. Account deltas cannot be assigned safely when Sessions, child Agents, other devices, or delayed backend aggregation overlap. The meter retains raw workload because repeated cached requests are still useful evidence of agent intensity and runaway loops, while documentation and UI must not call that reading an account bill or `/usage` equivalent.
+Token Widget therefore does not infer an exact per-Session backend number. Account deltas cannot be assigned safely when Sessions, child Agents, other devices, or delayed backend aggregation overlap. The meter retains raw workload because repeated cached requests are still useful evidence of agent intensity and runaway loops, while documentation and UI must not call that reading an account bill or `/usage` equivalent.
 
 ## Community identity and passwordless browser pairing
 
@@ -131,7 +131,11 @@ sequenceDiagram
 
 The registry stores only SHA-256 hashes of the random pairing and session secrets. The browser cookie uses the `__Host-` prefix, has no `Domain` attribute, and expires after 30 days. Public ranking rows use a stable truncated hash of the Meter ID rather than the full ID. An authenticated `/me` response returns the same opaque row ID, allowing the web client to label exactly one row **you** without putting the local private key or full Meter ID in public data.
 
-Pairing succeeds even in local-only mode and returns `rank: null` until the Meter has reported usage. Enabling **Share with community** causes an immediate signed aggregate upload and future periodic uploads. Disabling it stops future uploads; it does not retroactively delete already shared public totals. Pairing never flips the sharing flag.
+Pairing succeeds even in local-only mode and returns `rank: null` until the Profile has reported usage. Enabling **Share with community** causes an immediate signed aggregate upload and future periodic uploads from that Device. Disabling it sends a signed withdrawal, removes that Device's stored contribution, and stops future uploads; other active Devices on the same Profile remain unchanged. Pairing never flips the sharing flag.
+
+Community identity has two layers. A Device keeps one Ed25519 key and derived Meter ID. A Profile owns the globally unique handle and derives one public rollup from every active, non-revoked, sharing-enabled Device snapshot. A second computer joins through a hashed, one-use, ten-minute owner invitation and keeps its own key. Joining never claims a handle. Owner transfer changes the canonical handle signer without changing the Profile ID or public URL.
+
+The v2 aggregate report adds token-breakdown totals, fixed hour and weekday bins, a fixed Session-size histogram, and active dates so multi-device totals can be merged without uploading Session IDs, hostnames, or content. Internal merge primitives are stripped from public API responses. Fixed-bin reconstruction makes median Session size approximate; exact and partial fields are identified in internal aggregation metadata.
 
 The aggregate history scan covers Codex, Claude Code, and Cline roots on the same machine. JSONL sources are read synchronously in bounded chunks rather than as whole strings; individual content rows above the safety limit are discarded until the next newline, while small numerical usage rows continue to be counted. Large or long-running scans checkpoint their file summaries atomically, so an interruption does not discard completed work.
 
@@ -161,7 +165,7 @@ The identity probe inspects at most 512 Accessibility roles in a shallow focused
 
 Historical completed-turn rates are summarized by median, mean, p95, and median absolute deviation. The initial classifier is deliberately conservative and has a learning state until at least five completed historical turns, 20 seconds of current activity, and 10,000 current-turn tokens are present.
 
-Alerts are advisory. Token Meter never interrupts Codex, kills an agent, or creates a new session automatically.
+Alerts are advisory. Token Widget never interrupts Codex, kills an agent, or creates a new session automatically.
 
 ## Compatibility policy
 
@@ -191,7 +195,7 @@ The latest live validation recorded in this repository used Codex Desktop `26.73
 
 The Claude target is the Code surface inside Claude Desktop, not the Claude Code CLI status line. It reuses the metrics and visual-language layers, but not the Codex Session probe, rollout reader, CDP verifier, renderer allowlist, or injected DOM.
 
-Claude Desktop `1.24012.9` rejects public CDP debugging unless a short-lived `CLAUDE_CDP_AUTH` value validates against Anthropic's embedded public key and exact user-data directory. Token Meter does not forge or bypass that control. Its supported path is therefore the independent native companion described above.
+Claude Desktop `1.24012.9` rejects public CDP debugging unless a short-lived `CLAUDE_CDP_AUTH` value validates against Anthropic's embedded public key and exact user-data directory. Token Widget does not forge or bypass that control. Its supported path is therefore the independent native companion described above.
 
 The Claude adapter has four host-specific responsibilities:
 

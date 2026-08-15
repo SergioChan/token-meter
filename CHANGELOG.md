@@ -6,6 +6,29 @@ published.
 
 ## Unreleased
 
+- Community handles now belong to a durable Profile instead of one computer.
+  Each Mac keeps its own Ed25519 key and Meter ID; an owner can link another
+  computer with a hashed, one-use, ten-minute invitation, then list, replace,
+  revoke, or promote devices without copying private keys or reclaiming the
+  handle. Handle uniqueness remains enforced by the existing primary key.
+- Multi-device Profile totals are derived from independently signed Device
+  snapshots. The v2 aggregate report adds token breakdowns, fixed hour and
+  weekday bins, a fixed Session-size histogram, and active dates so totals,
+  streaks, shares, and rhythms can be merged without uploading Session IDs,
+  hostnames, or content. Internal merge primitives never appear in public
+  Profile responses.
+- The server upgrade has a checksummed, advisory-locked, transactional,
+  additive migration and a Profile read flag. Reconciliation repairs Meter
+  rows and owner handle claims written by late v1 Pods, rebuilds stale
+  rollups, and refuses to reactivate revoked devices; verification checks
+  every relationship and reconstructed rollup before cutover.
+- The local dashboard and CLI can join an existing Profile and manage its
+  devices. Switching to **Data stays local** now accurately describes and
+  performs a per-computer withdrawal: that Device's contribution is removed,
+  while other active computers and the reserved handle remain unchanged.
+- The README, sharing specification, Claude installation guide, architecture,
+  GKE configuration, and production backup/migration/rollback runbook now use
+  the Token Widget product model and staged release procedure.
 - Codex now performs its own signed community sync 15 seconds after startup
   and every hour, so public profile aggregates no longer depend on the Claude
   companion being active.

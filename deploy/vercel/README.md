@@ -41,9 +41,13 @@ After DNS and TLS are active, verify:
 curl -fsS https://tokenwidget.app/
 curl -fsS https://tokenwidget.app/api/v1/health
 curl -fsS https://tokenwidget.app/api/v1/leaderboard
+curl -fsS https://tokenwidget.app/api/v1/latest
 curl -fsS https://tokenwidget.app/install.sh
 ```
 
-`/api/v1/latest` and `/download/*` return `404` until a real signed and
-notarized release artifact is published. Do not advertise a successful binary
-download before that release exists.
+`/api/v1/latest` is served by the GKE registry only when its
+`TOKEN_METER_LATEST_*` variables describe a real signed and notarized release.
+The download route then redirects to the immutable release asset, whose bytes
+installed clients verify against the published SHA-256. If release metadata is
+removed, both surfaces intentionally return `404` rather than advertising an
+unverifiable package.

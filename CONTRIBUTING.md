@@ -1,4 +1,4 @@
-# Contributing to Token Meter
+# Contributing to Token Widget
 
 Thank you for helping make agent token usage easier to understand.
 
@@ -11,7 +11,7 @@ Thank you for helping make agent token usage easier to understand.
 
 ## Development setup
 
-Token Meter development requires Git and Node.js 22.12 or newer. Building the native Claude companion also requires macOS 13 or newer and Xcode Command Line Tools with Swift.
+Token Widget development requires Git and Node.js 22.12 or newer. Building the native Claude companion also requires macOS 13 or newer and Xcode Command Line Tools with Swift.
 
 ```bash
 git clone https://github.com/SergioChan/token-meter.git

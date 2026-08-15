@@ -790,6 +790,12 @@ export class RegistryServer {
           nowMs,
         });
         if (!result.claimed) {
+          if (result.reason === "not-profile-owner") {
+            return json(403, {
+              error: "only the active Profile owner can claim its handle",
+              claimed: false,
+            });
+          }
           return json(409, { error: "handle already claimed", claimed: false });
         }
         return json(200, { ok: true, claimed: true, handle });

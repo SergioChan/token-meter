@@ -67,6 +67,35 @@ test("profile reads fail closed until the additive migration exists", async () =
   await store.close();
 });
 
+test("Profile reads preserve browser pairing for an unreported local-only identity", async () => {
+  const store = await createProfileStore();
+  try {
+    assert.deepEqual(await store.createBrowserPairing({
+      ...alice,
+      codeHash: "7".repeat(64),
+      nowMs: 100,
+      expiresAtMs: 500,
+    }), { created: true });
+    assert.equal((await store.exchangeBrowserPairing({
+      codeHash: "7".repeat(64),
+      sessionTokenHash: "6".repeat(64),
+      nowMs: 110,
+      sessionExpiresAtMs: 1_000,
+    })).exchanged, true);
+    const viewer = await store.viewerForBrowserSession({
+      sessionTokenHash: "6".repeat(64),
+      nowMs: 120,
+    });
+    assert.equal(viewer.meterId, alice.meterId);
+    assert.equal(viewer.profileId, null);
+    assert.equal(viewer.handle, null);
+    assert.equal(viewer.rank, null);
+    assert.equal(viewer.sharingReported, false);
+  } finally {
+    await store.close();
+  }
+});
+
 test("v1 claim and report dual-write an identical one-device profile", async () => {
   const store = await createProfileStore();
   try {
@@ -254,6 +283,36 @@ test("Postgres owner invitations, revocation, replacement, and transfer stay tra
       role: "member",
       deviceCount: 2,
     });
+    assert.deepEqual(
+      await store.claim({ ...bob, handle: "member-picked", nowMs: 301 }),
+      { claimed: false, reason: "not-profile-owner" },
+    );
+    assert.deepEqual(await store.createBrowserPairing({
+      ...alice,
+      codeHash: "e".repeat(64),
+      nowMs: 320,
+      expiresAtMs: 900,
+    }), { created: true });
+    assert.deepEqual(await store.exchangeBrowserPairing({
+      codeHash: "e".repeat(64),
+      sessionTokenHash: "f".repeat(64),
+      nowMs: 330,
+      sessionExpiresAtMs: 1_000,
+    }), {
+      exchanged: true,
+      meterId: alice.meterId,
+      expiresAtMs: 1_000,
+    });
+    assert.notEqual(await store.viewerForBrowserSession({
+      sessionTokenHash: "f".repeat(64),
+      nowMs: 340,
+    }), null);
+    assert.deepEqual(await store.createBrowserPairing({
+      ...alice,
+      codeHash: "9".repeat(64),
+      nowMs: 350,
+      expiresAtMs: 900,
+    }), { created: true });
     assert.deepEqual(await store.joinProfile({
       meterId: "TM-2222-3333-4444",
       publicKey: "third-key",
@@ -325,6 +384,16 @@ test("Postgres owner invitations, revocation, replacement, and transfer stay tra
       nowMs: 600,
     }), { revoked: true, alreadyRevoked: false });
     assert.equal(await store.profileMembership(alice), null);
+    assert.equal(await store.viewerForBrowserSession({
+      sessionTokenHash: "f".repeat(64),
+      nowMs: 601,
+    }), null);
+    assert.deepEqual(await store.exchangeBrowserPairing({
+      codeHash: "9".repeat(64),
+      sessionTokenHash: "8".repeat(64),
+      nowMs: 601,
+      sessionExpiresAtMs: 1_000,
+    }), { exchanged: false, reason: "invalid-or-expired" });
   } finally {
     await store.close();
   }

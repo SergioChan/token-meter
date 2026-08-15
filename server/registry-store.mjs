@@ -226,6 +226,15 @@ export class FileRegistryStore {
     return changed;
   }
 
+  #removeBrowserAuthForMeter(meterId) {
+    for (const [codeHash, pairing] of Object.entries(this.data.browserPairings)) {
+      if (pairing.meterId === meterId) delete this.data.browserPairings[codeHash];
+    }
+    for (const [tokenHash, session] of Object.entries(this.data.browserSessions)) {
+      if (session.meterId === meterId) delete this.data.browserSessions[tokenHash];
+    }
+  }
+
   #pruneDeviceInvites(nowMs) {
     let changed = false;
     for (const [tokenHash, invite] of Object.entries(this.data.deviceInvites)) {
@@ -253,6 +262,17 @@ export class FileRegistryStore {
   }
 
   async claim({ handle, meterId, publicKey, nowMs }) {
+    const membership = this.data.profileDevices[meterId];
+    if (membership) {
+      const profile = this.data.profiles[membership.profileId];
+      if (
+        membership.revokedAtMs != null ||
+        membership.role !== "owner" ||
+        profile?.ownerMeterId !== meterId
+      ) {
+        return { claimed: false, reason: "not-profile-owner" };
+      }
+    }
     const existingHandle = this.data.handles[handle];
     if (existingHandle && existingHandle.meterId !== meterId) {
       return { claimed: false, reason: "handle-taken" };
@@ -366,6 +386,11 @@ export class FileRegistryStore {
       }
       return { exchanged: false, reason: "invalid-or-expired" };
     }
+    if (this.data.profileDevices[pairing.meterId]?.revokedAtMs != null) {
+      delete this.data.browserPairings[codeHash];
+      this.#save();
+      return { exchanged: false, reason: "device-revoked" };
+    }
     pairing.consumedAtMs = nowMs;
     this.data.browserSessions[sessionTokenHash] = {
       meterId: pairing.meterId,
@@ -388,6 +413,7 @@ export class FileRegistryStore {
     if (!session) return null;
     const meter = this.data.meters[session.meterId] ?? null;
     if (meter?.publicKey && meter.publicKey !== session.publicKey) return null;
+    if (this.data.profileDevices[session.meterId]?.revokedAtMs != null) return null;
     if (this.profileReads) {
       const device = this.data.profileDevices[session.meterId];
       const profile = device ? this.data.profiles[device.profileId] : null;
@@ -594,6 +620,7 @@ export class FileRegistryStore {
       target.revokedAtMs = nowMs;
       target.sharingEnabled = false;
       target.replacedByMeterId = meterId;
+      this.#removeBrowserAuthForMeter(invite.replaceMeterId);
     }
     meter.publicKey = publicKey;
     meter.updatedAtMs = nowMs;
@@ -674,6 +701,7 @@ export class FileRegistryStore {
     if (target.revokedAtMs != null) return { revoked: true, alreadyRevoked: true };
     target.revokedAtMs = nowMs;
     target.sharingEnabled = false;
+    this.#removeBrowserAuthForMeter(targetMeterId);
     this.#recomputeProfile(membership.profileId, nowMs);
     this.#save();
     return { revoked: true, alreadyRevoked: false };
@@ -904,6 +932,32 @@ export class PostgresRegistryStore {
       if (meter.rows[0]?.public_key !== publicKey) {
         await client.query("ROLLBACK");
         return { claimed: false, reason: "identity-collision" };
+      }
+      if (this.profileSchemaAvailable) {
+        const membership = await client.query(
+          `SELECT profile_id, role, revoked_at_ms
+           FROM registry_profile_devices
+           WHERE meter_id = $1
+           FOR UPDATE`,
+          [meterId],
+        );
+        if (membership.rowCount > 0) {
+          const profile = await client.query(
+            `SELECT owner_meter_id
+             FROM registry_profiles
+             WHERE profile_id = $1
+             FOR UPDATE`,
+            [membership.rows[0].profile_id],
+          );
+          if (
+            membership.rows[0].revoked_at_ms != null ||
+            membership.rows[0].role !== "owner" ||
+            profile.rows[0]?.owner_meter_id !== meterId
+          ) {
+            await client.query("ROLLBACK");
+            return { claimed: false, reason: "not-profile-owner" };
+          }
+        }
       }
       await client.query(
         `INSERT INTO registry_handles (handle, meter_id, public_key, claimed_at_ms)
@@ -1139,6 +1193,26 @@ export class PostgresRegistryStore {
         await client.query("COMMIT");
         return { exchanged: false, reason: "invalid-or-expired" };
       }
+      if (this.profileSchemaAvailable) {
+        const device = await client.query(
+          `SELECT d.revoked_at_ms, m.public_key
+           FROM registry_profile_devices AS d
+           JOIN registry_meters AS m ON m.meter_id = d.meter_id
+           WHERE d.meter_id = $1`,
+          [pairing.meter_id],
+        );
+        if (
+          device.rows[0]?.revoked_at_ms != null ||
+          (device.rows[0] && device.rows[0].public_key !== pairing.public_key)
+        ) {
+          await client.query(
+            "DELETE FROM registry_browser_pairings WHERE code_hash = $1",
+            [codeHash],
+          );
+          await client.query("COMMIT");
+          return { exchanged: false, reason: "device-revoked" };
+        }
+      }
       await client.query(
         "UPDATE registry_browser_pairings SET consumed_at_ms = $2 WHERE code_hash = $1",
         [codeHash, nowMs],
@@ -1184,6 +1258,15 @@ export class PostgresRegistryStore {
       );
       return null;
     }
+    if (this.profileSchemaAvailable) {
+      const device = await this.pool.query(
+        `SELECT revoked_at_ms
+         FROM registry_profile_devices
+         WHERE meter_id = $1`,
+        [session.meter_id],
+      );
+      if (device.rows[0]?.revoked_at_ms != null) return null;
+    }
     if (this.profileReadsRequested) {
       const profileResult = await this.pool.query(
         `SELECT d.profile_id, p.handle, p.week_tokens, p.stats,
@@ -1197,10 +1280,29 @@ export class PostgresRegistryStore {
         [session.meter_id, session.public_key],
       );
       const profile = profileResult.rows[0];
-      if (!profile) return null;
       const totalResult = await this.pool.query(
         "SELECT COUNT(*)::bigint AS total FROM registry_profiles WHERE generated_at_ms IS NOT NULL",
       );
+      // Browser pairing is allowed before a local-only identity has claimed a
+      // handle or uploaded a report. Such an identity has no Profile row yet,
+      // but still receives an authenticated, unranked viewer just as it did in
+      // the legacy Meter read path.
+      if (!profile) {
+        return {
+          meterId: session.meter_id,
+          profileId: null,
+          rowId: registryRowId(session.meter_id),
+          name: displayName(session.meter_id, null),
+          handle: null,
+          rank: null,
+          totalMeters: Number(totalResult.rows[0].total),
+          tokens: 0,
+          sessions: null,
+          sessionWindowDays: 7,
+          sharingReported: false,
+          expiresAtMs: Number(session.expires_at_ms),
+        };
+      }
       let rank = null;
       if (profile.generated_at_ms != null) {
         const rankResult = await this.pool.query(
@@ -1598,6 +1700,14 @@ export class PostgresRegistryStore {
            WHERE profile_id = $1 AND meter_id = $4`,
           [invite.profile_id, meterId, nowMs, invite.replace_meter_id],
         );
+        await client.query(
+          "DELETE FROM registry_browser_pairings WHERE meter_id = $1",
+          [invite.replace_meter_id],
+        );
+        await client.query(
+          "DELETE FROM registry_browser_sessions WHERE meter_id = $1",
+          [invite.replace_meter_id],
+        );
       }
       if (existing.rowCount === 0) {
         await client.query(
@@ -1758,6 +1868,14 @@ export class PostgresRegistryStore {
          SET revoked_at_ms = $3, sharing_enabled = FALSE
          WHERE profile_id = $1 AND meter_id = $2`,
         [membership.rows[0].profile_id, targetMeterId, nowMs],
+      );
+      await client.query(
+        "DELETE FROM registry_browser_pairings WHERE meter_id = $1",
+        [targetMeterId],
+      );
+      await client.query(
+        "DELETE FROM registry_browser_sessions WHERE meter_id = $1",
+        [targetMeterId],
       );
       await this.#recomputeProfile(client, membership.rows[0].profile_id, nowMs);
       await client.query("COMMIT");
