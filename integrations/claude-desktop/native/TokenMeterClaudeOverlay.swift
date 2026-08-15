@@ -1,6 +1,8 @@
 import AppKit
 import ApplicationServices
+import CryptoKit
 import Foundation
+import Security
 import WebKit
 
 private let claudeBundleID = "com.anthropic.claudefordesktop"
@@ -866,6 +868,8 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
             bootout.arguments = ["bootout", "gui/\(getuid())/com.sergiochan.token-meter.claude-desktop"]
             try? bootout.run()
             bootout.waitUntilExit()
+            // Same reason as the updater: the bridge outlives a bare exit.
+            snapshotBridge.stop()
             exit(0)
         case "set-sharing":
             let enabled = body["enabled"] as? Bool ?? false
@@ -884,46 +888,193 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
                       let version = payload["version"] as? String,
                       version.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+$"#, options: .regularExpression) != nil
                 else { return }
-                self.downloadAndOpenUpdate(url: url, version: version)
+                let digest = payload["sha256"] as? String
+                self.downloadAndInstallUpdate(url: url, version: version, sha256: digest)
             }
         default:
             break
         }
     }
 
-    // Downloads the release DMG into ~/Downloads and opens it once Gatekeeper's
-    // assessment passes, landing the user directly on the drag-to-install window.
-    private func downloadAndOpenUpdate(url: URL, version: String) {
-        let task = URLSession.shared.downloadTask(with: url) { temporary, _, error in
-            guard error == nil, let temporary else { return }
-            let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-            let destination = downloads.appendingPathComponent("TokenWidget-\(version).dmg")
+    // Pushes install progress to the banner. States come from string literals
+    // in this file only, so they are safe to interpolate into the page.
+    private func postUpdateState(_ state: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.pageReady else { return }
+            self.webView.evaluateJavaScript(
+                "window.__tokenMeter?.setUpdateState({state:'\(state)'})"
+            )
+        }
+    }
+
+    @discardableResult
+    private func runTool(_ path: String, _ arguments: [String]) -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = arguments
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return -1 }
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
+
+    // A replacement may only carry the signature this build already carries.
+    // Comparing against our own designated requirement pins the team and the
+    // bundle identifier without hard-coding either, and an ad hoc development
+    // build (whose requirement is its own hash) can never satisfy it.
+    private func signedLikeUs(_ bundle: URL) -> Bool {
+        var selfCode: SecCode?
+        guard SecCodeCopySelf(SecCSFlags(), &selfCode) == errSecSuccess,
+              let selfCode else { return false }
+        var selfStatic: SecStaticCode?
+        guard SecCodeCopyStaticCode(selfCode, SecCSFlags(), &selfStatic) == errSecSuccess,
+              let selfStatic else { return false }
+        var requirement: SecRequirement?
+        guard SecCodeCopyDesignatedRequirement(selfStatic, SecCSFlags(), &requirement) == errSecSuccess,
+              let requirement else { return false }
+        var candidate: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(bundle as CFURL, SecCSFlags(), &candidate) == errSecSuccess,
+              let candidate else { return false }
+        return SecStaticCodeCheckValidity(candidate, SecCSFlags(), requirement) == errSecSuccess
+    }
+
+    private func bundleVersion(at bundle: URL) -> String? {
+        let plist = bundle.appendingPathComponent("Contents/Info.plist")
+        guard let data = try? Data(contentsOf: plist),
+              let info = try? PropertyListSerialization.propertyList(from: data, format: nil)
+                as? [String: Any] else { return nil }
+        return info["CFBundleShortVersionString"] as? String
+    }
+
+    // Last resort when the bundle cannot be replaced in place — an /Applications
+    // the user cannot write to, mostly. Restores the old behaviour: a verified
+    // disk image in ~/Downloads, opened on the drag-to-install window.
+    private func fallBackToManualInstall(image: URL, version: String) {
+        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        let destination = downloads.appendingPathComponent("TokenWidget-\(version).dmg")
+        try? FileManager.default.removeItem(at: destination)
+        guard (try? FileManager.default.moveItem(at: image, to: destination)) != nil,
+              runTool("/usr/sbin/spctl", ["--assess", "--type", "install", destination.path]) == 0
+        else {
+            try? FileManager.default.removeItem(at: destination)
+            postUpdateState("failed")
+            return
+        }
+        postUpdateState("manual")
+        DispatchQueue.main.async { NSWorkspace.shared.open(destination) }
+    }
+
+    // Downloads the release, proves it is ours three ways — registry digest,
+    // Gatekeeper, our own code signature — swaps the bundle in place and exits.
+    // KeepAlive in the LaunchAgent relaunches us from the same path, so the new
+    // version comes back on its own without the user touching anything.
+    private func downloadAndInstallUpdate(url: URL, version: String, sha256: String?) {
+        postUpdateState("downloading")
+        let task = URLSession.shared.downloadTask(with: url) { [weak self] temporary, response, error in
+            guard let self else { return }
+            guard error == nil, let temporary,
+                  (response as? HTTPURLResponse)?.statusCode == 200 else {
+                self.postUpdateState("failed")
+                return
+            }
+            let work = FileManager.default.temporaryDirectory
+                .appendingPathComponent("token-widget-update-\(UUID().uuidString)")
+            let image = work.appendingPathComponent("TokenWidget-\(version).dmg")
             do {
-                try? FileManager.default.removeItem(at: destination)
-                try FileManager.default.moveItem(at: temporary, to: destination)
+                try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+                try FileManager.default.moveItem(at: temporary, to: image)
             } catch {
+                self.postUpdateState("failed")
                 return
             }
-            // Refuse to open anything that is not a notarized Developer ID disk
-            // image; a compromised download source must not reach the user.
-            let assess = Process()
-            assess.executableURL = URL(fileURLWithPath: "/usr/sbin/spctl")
-            assess.arguments = ["--assess", "--type", "install", destination.path]
-            assess.standardOutput = FileHandle.nullDevice
-            assess.standardError = FileHandle.nullDevice
-            do {
-                try assess.run()
-                assess.waitUntilExit()
-            } catch {
-                return
-            }
-            guard assess.terminationStatus == 0 else {
-                try? FileManager.default.removeItem(at: destination)
-                return
-            }
-            DispatchQueue.main.async { NSWorkspace.shared.open(destination) }
+            self.installVerifiedImage(image: image, work: work, version: version, sha256: sha256)
+            try? FileManager.default.removeItem(at: work)
         }
         task.resume()
+    }
+
+    private func installVerifiedImage(image: URL, work: URL, version: String, sha256: String?) {
+        postUpdateState("verifying")
+
+        // 1. The digest the registry published alongside the release.
+        guard let expected = sha256?.lowercased(), expected.count == 64,
+              let bytes = try? Data(contentsOf: image, options: .mappedIfSafe) else {
+            fallBackToManualInstall(image: image, version: version)
+            return
+        }
+        let actual = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        guard actual == expected else {
+            postUpdateState("failed")
+            return
+        }
+
+        // 2. Gatekeeper: notarized Developer ID disk image, or nothing.
+        guard runTool("/usr/sbin/spctl", ["--assess", "--type", "install", image.path]) == 0 else {
+            postUpdateState("failed")
+            return
+        }
+
+        // An explicit mount point keeps us off /Volumes, where an already
+        // mounted "Token Widget" would push this one to a suffixed name.
+        let mount = work.appendingPathComponent("mnt")
+        guard (try? FileManager.default.createDirectory(at: mount, withIntermediateDirectories: true)) != nil,
+              runTool("/usr/bin/hdiutil", [
+                  "attach", image.path, "-mountpoint", mount.path,
+                  "-nobrowse", "-readonly", "-noautoopen", "-quiet",
+              ]) == 0 else {
+            fallBackToManualInstall(image: image, version: version)
+            return
+        }
+        defer { runTool("/usr/bin/hdiutil", ["detach", mount.path, "-force", "-quiet"]) }
+
+        // 3. Our own signature, and the version the registry promised.
+        let replacement = mount.appendingPathComponent("Token Widget.app")
+        guard FileManager.default.fileExists(atPath: replacement.path),
+              signedLikeUs(replacement),
+              bundleVersion(at: replacement) == version else {
+            postUpdateState("failed")
+            return
+        }
+
+        let installed = Bundle.main.bundleURL
+        guard installed.pathExtension == "app" else {
+            fallBackToManualInstall(image: image, version: version)
+            return
+        }
+
+        postUpdateState("installing")
+        // ditto keeps the signature intact; cp would strip extended attributes.
+        // Staging next to the installed bundle keeps the swap on one volume.
+        let staging = installed.deletingLastPathComponent()
+            .appendingPathComponent(".TokenWidget-update-\(version).app")
+        try? FileManager.default.removeItem(at: staging)
+        guard runTool("/usr/bin/ditto", [replacement.path, staging.path]) == 0 else {
+            try? FileManager.default.removeItem(at: staging)
+            fallBackToManualInstall(image: image, version: version)
+            return
+        }
+        do {
+            var swapped: NSURL?
+            try FileManager.default.replaceItem(
+                at: installed, withItemAt: staging,
+                backupItemName: nil, options: [], resultingItemURL: &swapped,
+            )
+        } catch {
+            try? FileManager.default.removeItem(at: staging)
+            fallBackToManualInstall(image: image, version: version)
+            return
+        }
+
+        // Replacing our own bundle is safe while running — this process keeps
+        // the old image mapped until it exits, and launchd starts the new one.
+        postUpdateState("restarting")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            // Take the Node bridge down first: it is a child running from the
+            // bundle we just replaced, and exiting without this strands it.
+            self?.snapshotBridge.stop()
+            exit(0)
+        }
     }
 
     private func beginDrag() {

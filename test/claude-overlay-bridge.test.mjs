@@ -99,3 +99,14 @@ test("Claude overlay bridge asks the registry for a signed browser pairing URL",
   assert.match(source, /cachedUsageHistory\.collectCached\(\)/);
   assert.match(source, /await createLeaderboardUrl\(identity\)/);
 });
+
+test("Claude overlay bridge hands the installer the release digest", async () => {
+  const source = await readFile(
+    "integrations/claude-desktop/src/overlay-bridge.mjs",
+    "utf8",
+  );
+  assert.match(source, /request\?\.command === "update-info"/);
+  // Without the digest the native side refuses to swap the bundle and falls
+  // back to the manual installer, so it has to survive the reply.
+  assert.match(source, /sha256: updateInfo\.sha256 \?\? null/);
+});

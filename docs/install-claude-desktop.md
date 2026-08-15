@@ -181,6 +181,21 @@ The integration deliberately shows nothing rather than guessing another Session.
 
 ### Update
 
+The packaged app updates itself. The widget checks the registry at startup and
+hourly; when a newer release exists, a banner offers it. Clicking the banner
+downloads the DMG, checks it against the digest published at `/api/v1/latest`,
+runs Gatekeeper's assessment, and confirms the replacement bundle satisfies this
+build's own designated code-signing requirement — same team, same identifier.
+Only then is the bundle swapped in place, and the widget exits so its LaunchAgent
+(`KeepAlive`) restarts it on the new version a few seconds later. No download
+page, no drag, no reopening.
+
+If any check fails, or `/Applications` is not writable by this user, the
+verified DMG lands in `~/Downloads` and opens on the drag-to-install window
+instead — the previous behaviour, so an update is never a dead end.
+
+Updating a source install still goes through the installer:
+
 ```bash
 git pull --ff-only
 ./scripts/install-claude-meter-macos.sh
