@@ -82,7 +82,7 @@ spec:
               type: RuntimeDefault
       containers:
         - name: registry
-          image: us-west1-docker.pkg.dev/tworld-473700/token-widget/registry@sha256:3569986ba099e8966a071ed07cc87a306040b97fca709552b18eb8b08005aa1d
+          image: us-west1-docker.pkg.dev/tworld-473700/token-widget/registry@sha256:af52b66df6b6ee0a958f08aa6b285517815c8d27b779d953be969e386e46f0f3
           imagePullPolicy: IfNotPresent
           env:
             - name: DATABASE_URL
@@ -94,6 +94,17 @@ spec:
               value: 0.0.0.0
             - name: TOKEN_METER_REGISTRY_PORT
               value: "8787"
+            # Published release: /api/v1/latest serves this metadata and the
+            # download route redirects to the immutable GitHub asset. Installed
+            # widgets verify the bytes against this digest before installing.
+            - name: TOKEN_METER_LATEST_VERSION
+              value: "0.2.5"
+            - name: TOKEN_METER_LATEST_SHA256
+              value: "95c982fda29ce950e50929df838f7556653dbcb3a4ba76fd4719a965712efee1"
+            - name: TOKEN_METER_LATEST_SIZE
+              value: "37539158"
+            - name: TOKEN_METER_LATEST_URL
+              value: "https://github.com/SergioChan/token-meter/releases/download/v0.2.5/TokenWidget-0.2.5.dmg"
           ports:
             - name: http
               containerPort: 8787
