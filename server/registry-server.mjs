@@ -2,7 +2,11 @@ import { createServer } from "node:http";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { verifySignedPayload, isValidHandle } from "../src/core/identity.mjs";
+import {
+  isMeterId,
+  isValidHandle,
+  verifySignedPayload,
+} from "../src/core/identity.mjs";
 import { FileRegistryStore } from "./registry-store.mjs";
 
 const MAX_BODY_BYTES = 512 * 1024;
@@ -10,6 +14,7 @@ const MAX_REPORT_AGE_MS = 15 * 60 * 1_000;
 const MAX_REPORT_FUTURE_MS = 5 * 60 * 1_000;
 const BROWSER_PAIRING_TTL_MS = 5 * 60 * 1_000;
 const BROWSER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+const DEVICE_INVITE_TTL_MS = 10 * 60 * 1_000;
 export const BROWSER_SESSION_COOKIE = "__Host-token_widget_session";
 
 function hashSecret(value) {
@@ -63,6 +68,16 @@ function timelySignedRequest(payload, nowMs) {
     payload.generatedAtMs >= nowMs - MAX_REPORT_AGE_MS &&
     payload.generatedAtMs <= nowMs + MAX_REPORT_FUTURE_MS
   );
+}
+
+function normalizeDeviceLabel(value) {
+  if (value == null) return null;
+  if (typeof value !== "string") return undefined;
+  const label = value.trim();
+  if (label.length < 1 || label.length > 80 || /[\u0000-\u001f\u007f]/.test(label)) {
+    return undefined;
+  }
+  return label;
 }
 
 // Optional aggregate fields a v0.3+ client may attach to `stats`. Older
@@ -412,6 +427,9 @@ export class RegistryServer {
         if (result.reason === "identity-collision") {
           return json(409, { error: "identity collision" });
         }
+        if (result.reason === "device-revoked") {
+          return json(403, { error: "this device was revoked from its Profile" });
+        }
       }
       return json(503, { error: "could not allocate pairing" });
     }
@@ -459,6 +477,167 @@ export class RegistryServer {
         await this.store.revokeBrowserSession(hashSecret(token));
       }
       return json(200, { ok: true }, { "Set-Cookie": clearedSessionCookie() });
+    }
+
+    if (request.method === "POST" && path.startsWith("/api/v2/")) {
+      let signed;
+      try {
+        signed = await readBody();
+      } catch (error) {
+        return json(400, { error: String(error.message) });
+      }
+      if (!verifySignedPayload(signed)) return json(401, { error: "invalid signature" });
+      const payload = signed.payload;
+      const nowMs = this.now();
+      if (!timelySignedRequest(payload, nowMs)) {
+        return json(422, { error: "stale or invalid signed request" });
+      }
+
+      if (path === "/api/v2/profile-invites") {
+        const mode = payload.mode ?? "add";
+        if (
+          payload.kind !== "profile-invite" ||
+          !["add", "replace"].includes(mode) ||
+          (mode === "replace" && !isMeterId(payload.replaceMeterId)) ||
+          (mode === "add" && payload.replaceMeterId != null)
+        ) {
+          return json(422, { error: "invalid device invitation" });
+        }
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const token = randomBytes(32).toString("base64url");
+          const expiresAtMs = nowMs + DEVICE_INVITE_TTL_MS;
+          const result = await this.store.createDeviceInvite({
+            tokenHash: hashSecret(token),
+            meterId: payload.meterId,
+            publicKey: payload.publicKey,
+            mode,
+            replaceMeterId: mode === "replace" ? payload.replaceMeterId : null,
+            nowMs,
+            expiresAtMs,
+          });
+          if (result.created) {
+            return json(201, {
+              token,
+              profileId: result.profileId,
+              handle: result.handle,
+              mode,
+              expiresAtMs,
+            });
+          }
+          if (result.reason === "token-collision") continue;
+          if (result.reason === "feature-unavailable") {
+            return json(503, { error: "multi-device profiles are not enabled" });
+          }
+          if (result.reason === "not-owner" || result.reason === "not-a-member") {
+            return json(403, { error: "only the active Profile owner can invite devices" });
+          }
+          if (result.reason === "invalid-replacement-target") {
+            return json(409, { error: "replacement target is not an active member device" });
+          }
+          return json(409, { error: "could not create device invitation" });
+        }
+        return json(503, { error: "could not allocate device invitation" });
+      }
+
+      if (path === "/api/v2/profile-join") {
+        const deviceLabel = normalizeDeviceLabel(payload.deviceLabel);
+        if (
+          payload.kind !== "profile-join" ||
+          typeof payload.inviteToken !== "string" ||
+          !/^[A-Za-z0-9_-]{43}$/.test(payload.inviteToken) ||
+          deviceLabel === undefined
+        ) {
+          return json(422, { error: "invalid Profile join request" });
+        }
+        const result = await this.store.joinProfile({
+          tokenHash: hashSecret(payload.inviteToken),
+          meterId: payload.meterId,
+          publicKey: payload.publicKey,
+          deviceLabel,
+          nowMs,
+        });
+        if (result.joined) return json(200, { ok: true, ...result });
+        if (result.reason === "invalid-or-expired") {
+          return json(410, { error: "device invitation is invalid, expired, or already used" });
+        }
+        if (result.reason === "invite-no-longer-authorized") {
+          return json(403, { error: "the inviting device is no longer the Profile owner" });
+        }
+        if (result.reason === "feature-unavailable") {
+          return json(503, { error: "multi-device profiles are not enabled" });
+        }
+        if (result.reason === "identity-collision") {
+          return json(409, { error: "identity collision" });
+        }
+        if (result.reason === "device-already-linked") {
+          return json(409, { error: "this device already belongs to another Profile" });
+        }
+        return json(409, { error: "device could not join this Profile" });
+      }
+
+      if (path === "/api/v2/profile-membership") {
+        if (payload.kind !== "profile-membership") {
+          return json(422, { error: "invalid membership request" });
+        }
+        const membership = await this.store.profileMembership({
+          meterId: payload.meterId,
+          publicKey: payload.publicKey,
+        });
+        return json(200, membership ? { member: true, ...membership } : { member: false });
+      }
+
+      if (path === "/api/v2/profile-devices") {
+        if (payload.kind !== "profile-devices") {
+          return json(422, { error: "invalid device-list request" });
+        }
+        const result = await this.store.listProfileDevices({
+          meterId: payload.meterId,
+          publicKey: payload.publicKey,
+        });
+        if (!result.authorized) return json(403, { error: "Profile owner access required" });
+        return json(200, result);
+      }
+
+      if (path === "/api/v2/profile-devices/revoke") {
+        if (payload.kind !== "profile-device-revoke" || !isMeterId(payload.targetMeterId)) {
+          return json(422, { error: "invalid device revocation" });
+        }
+        const result = await this.store.revokeProfileDevice({
+          meterId: payload.meterId,
+          publicKey: payload.publicKey,
+          targetMeterId: payload.targetMeterId,
+          nowMs,
+        });
+        if (result.revoked) return json(200, { ok: true, ...result });
+        if (result.reason === "not-owner") return json(403, { error: "Profile owner access required" });
+        if (result.reason === "cannot-revoke-owner") {
+          return json(409, { error: "transfer Profile ownership before revoking the owner device" });
+        }
+        if (result.reason === "feature-unavailable") {
+          return json(503, { error: "multi-device profiles are not enabled" });
+        }
+        return json(404, { error: "unknown Profile device" });
+      }
+
+      if (path === "/api/v2/profile-devices/transfer-owner") {
+        if (payload.kind !== "profile-owner-transfer" || !isMeterId(payload.targetMeterId)) {
+          return json(422, { error: "invalid ownership transfer" });
+        }
+        const result = await this.store.transferProfileOwner({
+          meterId: payload.meterId,
+          publicKey: payload.publicKey,
+          targetMeterId: payload.targetMeterId,
+          nowMs,
+        });
+        if (result.transferred) return json(200, { ok: true, ...result });
+        if (result.reason === "not-owner") return json(403, { error: "Profile owner access required" });
+        if (result.reason === "feature-unavailable") {
+          return json(503, { error: "multi-device profiles are not enabled" });
+        }
+        return json(409, { error: "ownership target must be an active member device" });
+      }
+
+      return json(404, { error: "unknown v2 endpoint" });
     }
 
     if (request.method === "POST" && path === "/api/v1/withdraw") {
@@ -533,6 +712,9 @@ export class RegistryServer {
         nowMs,
       });
       if (!result.accepted) {
+        if (result.reason === "device-revoked") {
+          return json(403, { error: "this device was revoked from its Profile" });
+        }
         return json(409, { error: "identity collision" });
       }
       return json(200, { ok: true, ignored: result.ignored });

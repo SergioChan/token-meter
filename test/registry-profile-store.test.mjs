@@ -228,3 +228,166 @@ test("file registry dual-writes and reads the same one-device profile", async ()
     updatedAtMs: 201,
   });
 });
+
+test("Postgres owner invitations, revocation, replacement, and transfer stay transactional", async () => {
+  const store = await createProfileStore();
+  try {
+    await store.claim({ ...alice, handle: "sergio", nowMs: 100 });
+    const invite = await store.createDeviceInvite({
+      ...alice,
+      tokenHash: "a".repeat(64),
+      mode: "add",
+      replaceMeterId: null,
+      nowMs: 200,
+      expiresAtMs: 800,
+    });
+    assert.equal(invite.created, true);
+    assert.deepEqual(await store.joinProfile({
+      ...bob,
+      tokenHash: "a".repeat(64),
+      deviceLabel: "Studio Mac",
+      nowMs: 300,
+    }), {
+      joined: true,
+      profileId: alice.meterId,
+      handle: "sergio",
+      role: "member",
+      deviceCount: 2,
+    });
+    assert.deepEqual(await store.joinProfile({
+      meterId: "TM-2222-3333-4444",
+      publicKey: "third-key",
+      tokenHash: "a".repeat(64),
+      deviceLabel: null,
+      nowMs: 301,
+    }), { joined: false, reason: "invalid-or-expired" });
+    assert.deepEqual(await store.profileMembership(bob), {
+      profileId: alice.meterId,
+      handle: "sergio",
+      role: "member",
+      sharingEnabled: false,
+      deviceLabel: "Studio Mac",
+      joinedAtMs: 300,
+      lastReportedAtMs: null,
+    });
+    assert.deepEqual(await store.createDeviceInvite({
+      ...bob,
+      tokenHash: "b".repeat(64),
+      mode: "add",
+      replaceMeterId: null,
+      nowMs: 400,
+      expiresAtMs: 900,
+    }), { created: false, reason: "not-owner" });
+
+    const listed = await store.listProfileDevices(alice);
+    assert.equal(listed.authorized, true);
+    assert.equal(listed.devices.length, 2);
+    assert.deepEqual(await store.transferProfileOwner({
+      ...alice,
+      targetMeterId: bob.meterId,
+      nowMs: 500,
+    }), {
+      transferred: true,
+      profileId: alice.meterId,
+      ownerMeterId: bob.meterId,
+    });
+    assert.deepEqual(await store.createDeviceInvite({
+      ...alice,
+      tokenHash: "c".repeat(64),
+      mode: "add",
+      replaceMeterId: null,
+      nowMs: 510,
+      expiresAtMs: 900,
+    }), { created: false, reason: "not-owner" });
+    assert.equal((await store.createDeviceInvite({
+      ...bob,
+      tokenHash: "d".repeat(64),
+      mode: "add",
+      replaceMeterId: null,
+      nowMs: 520,
+      expiresAtMs: 900,
+    })).created, true);
+    const owner = await store.pool.query(
+      `SELECT p.owner_meter_id, h.meter_id, h.public_key
+       FROM registry_profiles AS p
+       JOIN registry_handles AS h ON h.profile_id = p.profile_id
+       WHERE p.profile_id = $1`,
+      [alice.meterId],
+    );
+    assert.deepEqual(owner.rows[0], {
+      owner_meter_id: bob.meterId,
+      meter_id: bob.meterId,
+      public_key: bob.publicKey,
+    });
+    assert.deepEqual(await store.revokeProfileDevice({
+      ...bob,
+      targetMeterId: alice.meterId,
+      nowMs: 600,
+    }), { revoked: true, alreadyRevoked: false });
+    assert.equal(await store.profileMembership(alice), null);
+  } finally {
+    await store.close();
+  }
+});
+
+test("Postgres replacement removes the old contribution before admitting the new device", async () => {
+  const store = await createProfileStore();
+  const replacement = {
+    meterId: "TM-2222-3333-4444",
+    publicKey: "replacement-key",
+  };
+  try {
+    await store.claim({ ...alice, handle: "replace", nowMs: 100 });
+    await store.report(snapshot(alice, {
+      handle: "replace",
+      total: 100,
+      generatedAtMs: 150,
+      nowMs: 151,
+    }));
+    await store.createDeviceInvite({
+      ...alice,
+      tokenHash: "1".repeat(64),
+      mode: "add",
+      replaceMeterId: null,
+      nowMs: 200,
+      expiresAtMs: 1_000,
+    });
+    await store.joinProfile({
+      ...bob,
+      tokenHash: "1".repeat(64),
+      deviceLabel: "Old Mac",
+      nowMs: 250,
+    });
+    await store.report(snapshot(bob, {
+      total: 500,
+      generatedAtMs: 300,
+      nowMs: 301,
+    }));
+    assert.equal((await store.profile("replace")).weekTokens, 600);
+
+    assert.equal((await store.createDeviceInvite({
+      ...alice,
+      tokenHash: "2".repeat(64),
+      mode: "replace",
+      replaceMeterId: bob.meterId,
+      nowMs: 400,
+      expiresAtMs: 1_000,
+    })).created, true);
+    assert.equal((await store.joinProfile({
+      ...replacement,
+      tokenHash: "2".repeat(64),
+      deviceLabel: "New Mac",
+      nowMs: 450,
+    })).joined, true);
+    assert.equal((await store.profile("replace")).weekTokens, 100);
+    assert.equal(await store.profileMembership(bob), null);
+    assert.equal((await store.profileMembership(replacement)).deviceLabel, "New Mac");
+    assert.deepEqual(await store.report(snapshot(bob, {
+      total: 999,
+      generatedAtMs: 500,
+      nowMs: 501,
+    })), { accepted: false, reason: "device-revoked" });
+  } finally {
+    await store.close();
+  }
+});

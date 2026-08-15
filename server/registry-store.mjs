@@ -220,6 +220,24 @@ export class FileRegistryStore {
     return changed;
   }
 
+  #pruneDeviceInvites(nowMs) {
+    let changed = false;
+    for (const [tokenHash, invite] of Object.entries(this.data.deviceInvites)) {
+      if (invite.expiresAtMs <= nowMs || invite.consumedAtMs != null) {
+        delete this.data.deviceInvites[tokenHash];
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  #activeMembership(meterId, publicKey) {
+    const meter = this.data.meters[meterId];
+    if (!meter || meter.publicKey !== publicKey) return null;
+    const device = this.data.profileDevices[meterId];
+    return device && device.revokedAtMs == null ? device : null;
+  }
+
   async health() {
     return { meters: Object.keys(this.data.meters).length };
   }
@@ -270,6 +288,10 @@ export class FileRegistryStore {
     nowMs,
   }) {
     const meter = (this.data.meters[meterId] ??= {});
+    const existingDevice = this.data.profileDevices[meterId];
+    if (existingDevice?.revokedAtMs != null) {
+      return { accepted: false, reason: "device-revoked" };
+    }
     if (meter.publicKey && meter.publicKey !== publicKey) {
       return { accepted: false, reason: "identity-collision" };
     }
@@ -306,6 +328,9 @@ export class FileRegistryStore {
     const meter = this.data.meters[meterId];
     if (meter?.publicKey && meter.publicKey !== publicKey) {
       return { created: false, reason: "identity-collision" };
+    }
+    if (this.data.profileDevices[meterId]?.revokedAtMs != null) {
+      return { created: false, reason: "device-revoked" };
     }
     if (this.data.browserPairings[codeHash]) {
       return { created: false, reason: "code-collision" };
@@ -468,6 +493,216 @@ export class FileRegistryStore {
       weekTokens: meter.weekTokens ?? 0,
       updatedAtMs: meter.updatedAtMs,
     };
+  }
+
+  async createDeviceInvite({
+    tokenHash,
+    meterId,
+    publicKey,
+    mode,
+    replaceMeterId,
+    nowMs,
+    expiresAtMs,
+  }) {
+    const pruned = this.#pruneDeviceInvites(nowMs);
+    const membership = this.#activeMembership(meterId, publicKey);
+    if (!membership) {
+      if (pruned) this.#save();
+      return { created: false, reason: "not-a-member" };
+    }
+    const profile = this.data.profiles[membership.profileId];
+    if (membership.role !== "owner" || profile?.ownerMeterId !== meterId) {
+      if (pruned) this.#save();
+      return { created: false, reason: "not-owner" };
+    }
+    if (this.data.deviceInvites[tokenHash]) {
+      return { created: false, reason: "token-collision" };
+    }
+    if (mode === "replace") {
+      const target = this.data.profileDevices[replaceMeterId];
+      if (
+        !target ||
+        target.profileId !== membership.profileId ||
+        target.revokedAtMs != null ||
+        target.role === "owner"
+      ) {
+        return { created: false, reason: "invalid-replacement-target" };
+      }
+    }
+    this.data.deviceInvites[tokenHash] = {
+      profileId: membership.profileId,
+      createdByMeterId: meterId,
+      mode,
+      replaceMeterId: mode === "replace" ? replaceMeterId : null,
+      createdAtMs: nowMs,
+      expiresAtMs,
+      consumedAtMs: null,
+      joinedMeterId: null,
+    };
+    this.#save();
+    return {
+      created: true,
+      profileId: membership.profileId,
+      handle: profile.handle ?? null,
+      expiresAtMs,
+    };
+  }
+
+  async joinProfile({ tokenHash, meterId, publicKey, deviceLabel, nowMs }) {
+    const invite = this.data.deviceInvites[tokenHash];
+    if (!invite || invite.consumedAtMs != null || invite.expiresAtMs <= nowMs) {
+      if (invite) {
+        delete this.data.deviceInvites[tokenHash];
+        this.#save();
+      }
+      return { joined: false, reason: "invalid-or-expired" };
+    }
+    const profile = this.data.profiles[invite.profileId];
+    const creator = this.data.profileDevices[invite.createdByMeterId];
+    if (
+      !profile ||
+      profile.ownerMeterId !== invite.createdByMeterId ||
+      creator?.role !== "owner" ||
+      creator.revokedAtMs != null
+    ) {
+      return { joined: false, reason: "invite-no-longer-authorized" };
+    }
+    const meter = (this.data.meters[meterId] ??= {});
+    if (meter.publicKey && meter.publicKey !== publicKey) {
+      return { joined: false, reason: "identity-collision" };
+    }
+    const existing = this.data.profileDevices[meterId];
+    if (existing && existing.profileId !== invite.profileId) {
+      return { joined: false, reason: "device-already-linked" };
+    }
+    if (invite.mode === "replace") {
+      const target = this.data.profileDevices[invite.replaceMeterId];
+      if (
+        !target ||
+        target.profileId !== invite.profileId ||
+        target.revokedAtMs != null ||
+        target.role === "owner"
+      ) {
+        return { joined: false, reason: "invalid-replacement-target" };
+      }
+      target.revokedAtMs = nowMs;
+      target.sharingEnabled = false;
+      target.replacedByMeterId = meterId;
+    }
+    meter.publicKey = publicKey;
+    meter.updatedAtMs = nowMs;
+    this.data.profileDevices[meterId] = {
+      profileId: invite.profileId,
+      role: existing?.role === "owner" ? "owner" : "member",
+      sharingEnabled: existing?.sharingEnabled ?? false,
+      joinedAtMs: existing?.joinedAtMs ?? nowMs,
+      lastReportedAtMs: existing?.lastReportedAtMs ?? null,
+      revokedAtMs: null,
+      replacedByMeterId: null,
+      deviceLabel,
+    };
+    invite.consumedAtMs = nowMs;
+    invite.joinedMeterId = meterId;
+    if (invite.mode === "replace") this.#recomputeProfile(invite.profileId, nowMs);
+    const deviceCount = Object.values(this.data.profileDevices).filter(
+      (device) => device.profileId === invite.profileId && device.revokedAtMs == null,
+    ).length;
+    this.#save();
+    return {
+      joined: true,
+      profileId: invite.profileId,
+      handle: profile.handle ?? null,
+      role: this.data.profileDevices[meterId].role,
+      deviceCount,
+    };
+  }
+
+  async profileMembership({ meterId, publicKey }) {
+    const membership = this.#activeMembership(meterId, publicKey);
+    if (!membership) return null;
+    const profile = this.data.profiles[membership.profileId];
+    return {
+      profileId: membership.profileId,
+      handle: profile?.handle ?? null,
+      role: membership.role,
+      sharingEnabled: membership.sharingEnabled,
+      deviceLabel: membership.deviceLabel,
+      joinedAtMs: membership.joinedAtMs,
+      lastReportedAtMs: membership.lastReportedAtMs,
+    };
+  }
+
+  async listProfileDevices({ meterId, publicKey }) {
+    const membership = this.#activeMembership(meterId, publicKey);
+    const profile = membership ? this.data.profiles[membership.profileId] : null;
+    if (!membership || membership.role !== "owner" || profile?.ownerMeterId !== meterId) {
+      return { authorized: false, reason: "not-owner" };
+    }
+    const devices = Object.entries(this.data.profileDevices)
+      .filter(([, device]) => device.profileId === membership.profileId)
+      .map(([deviceMeterId, device]) => ({
+        meterId: deviceMeterId,
+        role: device.role,
+        sharingEnabled: device.sharingEnabled,
+        joinedAtMs: device.joinedAtMs,
+        lastReportedAtMs: device.lastReportedAtMs,
+        revokedAtMs: device.revokedAtMs,
+        replacedByMeterId: device.replacedByMeterId,
+        deviceLabel: device.deviceLabel,
+      }))
+      .sort((left, right) => left.joinedAtMs - right.joinedAtMs || left.meterId.localeCompare(right.meterId));
+    return { authorized: true, profileId: membership.profileId, devices };
+  }
+
+  async revokeProfileDevice({ meterId, publicKey, targetMeterId, nowMs }) {
+    const membership = this.#activeMembership(meterId, publicKey);
+    const profile = membership ? this.data.profiles[membership.profileId] : null;
+    if (!membership || membership.role !== "owner" || profile?.ownerMeterId !== meterId) {
+      return { revoked: false, reason: "not-owner" };
+    }
+    if (targetMeterId === meterId) return { revoked: false, reason: "cannot-revoke-owner" };
+    const target = this.data.profileDevices[targetMeterId];
+    if (!target || target.profileId !== membership.profileId) {
+      return { revoked: false, reason: "unknown-device" };
+    }
+    if (target.revokedAtMs != null) return { revoked: true, alreadyRevoked: true };
+    target.revokedAtMs = nowMs;
+    target.sharingEnabled = false;
+    this.#recomputeProfile(membership.profileId, nowMs);
+    this.#save();
+    return { revoked: true, alreadyRevoked: false };
+  }
+
+  async transferProfileOwner({ meterId, publicKey, targetMeterId, nowMs }) {
+    const membership = this.#activeMembership(meterId, publicKey);
+    const profile = membership ? this.data.profiles[membership.profileId] : null;
+    if (!membership || membership.role !== "owner" || profile?.ownerMeterId !== meterId) {
+      return { transferred: false, reason: "not-owner" };
+    }
+    const target = this.data.profileDevices[targetMeterId];
+    const targetMeter = this.data.meters[targetMeterId];
+    if (
+      !target ||
+      !targetMeter ||
+      target.profileId !== membership.profileId ||
+      target.revokedAtMs != null ||
+      targetMeterId === meterId
+    ) {
+      return { transferred: false, reason: "invalid-target" };
+    }
+    membership.role = "member";
+    target.role = "owner";
+    profile.ownerMeterId = targetMeterId;
+    const handle = profile.handle;
+    if (handle) {
+      this.data.handles[handle].meterId = targetMeterId;
+      this.data.handles[handle].publicKey = targetMeter.publicKey;
+      delete this.data.meters[meterId].handle;
+      targetMeter.handle = handle;
+    }
+    profile.updatedAtMs = Math.max(profile.updatedAtMs ?? 0, nowMs);
+    this.#save();
+    return { transferred: true, profileId: membership.profileId, ownerMeterId: targetMeterId };
   }
 
   async close() {}
@@ -744,6 +979,16 @@ export class PostgresRegistryStore {
         await client.query("ROLLBACK");
         return { accepted: false, reason: "identity-collision" };
       }
+      if (this.profileSchemaAvailable) {
+        const membership = await client.query(
+          "SELECT revoked_at_ms FROM registry_profile_devices WHERE meter_id = $1",
+          [meterId],
+        );
+        if (membership.rows[0]?.revoked_at_ms != null) {
+          await client.query("ROLLBACK");
+          return { accepted: false, reason: "device-revoked" };
+        }
+      }
       if (
         meter.generated_at_ms != null &&
         generatedAtMs < Number(meter.generated_at_ms)
@@ -817,6 +1062,16 @@ export class PostgresRegistryStore {
       if (meter.rows[0]?.public_key && meter.rows[0].public_key !== publicKey) {
         await client.query("ROLLBACK");
         return { created: false, reason: "identity-collision" };
+      }
+      if (this.profileSchemaAvailable) {
+        const membership = await client.query(
+          "SELECT revoked_at_ms FROM registry_profile_devices WHERE meter_id = $1",
+          [meterId],
+        );
+        if (membership.rows[0]?.revoked_at_ms != null) {
+          await client.query("ROLLBACK");
+          return { created: false, reason: "device-revoked" };
+        }
       }
       await client.query(
         "DELETE FROM registry_browser_pairings WHERE expires_at_ms <= $1 OR consumed_at_ms IS NOT NULL",
@@ -1144,6 +1399,448 @@ export class PostgresRegistryStore {
       weekTokens: asNumber(meter.week_tokens) ?? 0,
       updatedAtMs: asNumber(meter.updated_at_ms),
     };
+  }
+
+  async createDeviceInvite({
+    tokenHash,
+    meterId,
+    publicKey,
+    mode,
+    replaceMeterId,
+    nowMs,
+    expiresAtMs,
+  }) {
+    if (!this.profileSchemaAvailable) {
+      return { created: false, reason: "feature-unavailable" };
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "DELETE FROM registry_device_invites WHERE expires_at_ms <= $1 OR consumed_at_ms IS NOT NULL",
+        [nowMs],
+      );
+      const meter = await client.query(
+        "SELECT public_key FROM registry_meters WHERE meter_id = $1 FOR UPDATE",
+        [meterId],
+      );
+      if (meter.rows[0]?.public_key !== publicKey) {
+        await client.query("ROLLBACK");
+        return { created: false, reason: "not-a-member" };
+      }
+      const membership = await client.query(
+        `SELECT profile_id, role
+         FROM registry_profile_devices
+         WHERE meter_id = $1 AND revoked_at_ms IS NULL`,
+        [meterId],
+      );
+      if (membership.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return { created: false, reason: "not-a-member" };
+      }
+      const profile = await client.query(
+        `SELECT owner_meter_id, handle
+         FROM registry_profiles
+         WHERE profile_id = $1
+         FOR UPDATE`,
+        [membership.rows[0].profile_id],
+      );
+      if (
+        membership.rows[0].role !== "owner" ||
+        profile.rows[0]?.owner_meter_id !== meterId
+      ) {
+        await client.query("ROLLBACK");
+        return { created: false, reason: "not-owner" };
+      }
+      if (mode === "replace") {
+        const target = await client.query(
+          `SELECT role
+           FROM registry_profile_devices
+           WHERE profile_id = $1 AND meter_id = $2 AND revoked_at_ms IS NULL`,
+          [membership.rows[0].profile_id, replaceMeterId],
+        );
+        if (target.rowCount !== 1 || target.rows[0].role === "owner") {
+          await client.query("ROLLBACK");
+          return { created: false, reason: "invalid-replacement-target" };
+        }
+      }
+      const created = await client.query(
+        `INSERT INTO registry_device_invites
+           (token_hash, profile_id, created_by_meter_id, mode, replace_meter_id,
+            created_at_ms, expires_at_ms)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (token_hash) DO NOTHING`,
+        [
+          tokenHash,
+          membership.rows[0].profile_id,
+          meterId,
+          mode,
+          mode === "replace" ? replaceMeterId : null,
+          nowMs,
+          expiresAtMs,
+        ],
+      );
+      if (created.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return { created: false, reason: "token-collision" };
+      }
+      await client.query("COMMIT");
+      return {
+        created: true,
+        profileId: membership.rows[0].profile_id,
+        handle: profile.rows[0].handle ?? null,
+        expiresAtMs,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async joinProfile({ tokenHash, meterId, publicKey, deviceLabel, nowMs }) {
+    if (!this.profileSchemaAvailable) {
+      return { joined: false, reason: "feature-unavailable" };
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const inviteResult = await client.query(
+        `SELECT profile_id, created_by_meter_id, mode, replace_meter_id,
+                expires_at_ms, consumed_at_ms
+         FROM registry_device_invites
+         WHERE token_hash = $1
+         FOR UPDATE`,
+        [tokenHash],
+      );
+      const invite = inviteResult.rows[0];
+      if (
+        !invite ||
+        invite.consumed_at_ms != null ||
+        Number(invite.expires_at_ms) <= nowMs
+      ) {
+        if (invite) {
+          await client.query("DELETE FROM registry_device_invites WHERE token_hash = $1", [tokenHash]);
+        }
+        await client.query("COMMIT");
+        return { joined: false, reason: "invalid-or-expired" };
+      }
+      const profileResult = await client.query(
+        `SELECT owner_meter_id, handle
+         FROM registry_profiles
+         WHERE profile_id = $1
+         FOR UPDATE`,
+        [invite.profile_id],
+      );
+      const profile = profileResult.rows[0];
+      const creator = await client.query(
+        `SELECT role
+         FROM registry_profile_devices
+         WHERE profile_id = $1 AND meter_id = $2 AND revoked_at_ms IS NULL`,
+        [invite.profile_id, invite.created_by_meter_id],
+      );
+      if (
+        !profile ||
+        profile.owner_meter_id !== invite.created_by_meter_id ||
+        creator.rows[0]?.role !== "owner"
+      ) {
+        await client.query("ROLLBACK");
+        return { joined: false, reason: "invite-no-longer-authorized" };
+      }
+      await client.query(
+        `INSERT INTO registry_meters (meter_id, public_key, updated_at_ms)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (meter_id) DO NOTHING`,
+        [meterId, publicKey, nowMs],
+      );
+      const meter = await client.query(
+        "SELECT public_key FROM registry_meters WHERE meter_id = $1 FOR UPDATE",
+        [meterId],
+      );
+      if (meter.rows[0]?.public_key !== publicKey) {
+        await client.query("ROLLBACK");
+        return { joined: false, reason: "identity-collision" };
+      }
+      const existing = await client.query(
+        `SELECT profile_id, role, sharing_enabled, joined_at_ms, last_reported_at_ms
+         FROM registry_profile_devices
+         WHERE meter_id = $1`,
+        [meterId],
+      );
+      if (existing.rowCount > 0 && existing.rows[0].profile_id !== invite.profile_id) {
+        await client.query("ROLLBACK");
+        return { joined: false, reason: "device-already-linked" };
+      }
+      if (invite.mode === "replace") {
+        const target = await client.query(
+          `SELECT role
+           FROM registry_profile_devices
+           WHERE profile_id = $1 AND meter_id = $2 AND revoked_at_ms IS NULL
+           FOR UPDATE`,
+          [invite.profile_id, invite.replace_meter_id],
+        );
+        if (target.rowCount !== 1 || target.rows[0].role === "owner") {
+          await client.query("ROLLBACK");
+          return { joined: false, reason: "invalid-replacement-target" };
+        }
+        await client.query(
+          `UPDATE registry_profile_devices
+           SET revoked_at_ms = $3,
+               sharing_enabled = FALSE,
+               replaced_by_meter_id = $2
+           WHERE profile_id = $1 AND meter_id = $4`,
+          [invite.profile_id, meterId, nowMs, invite.replace_meter_id],
+        );
+      }
+      if (existing.rowCount === 0) {
+        await client.query(
+          `INSERT INTO registry_profile_devices
+             (profile_id, meter_id, role, sharing_enabled, joined_at_ms, device_label)
+           VALUES ($1, $2, 'member', FALSE, $3, $4)`,
+          [invite.profile_id, meterId, nowMs, deviceLabel],
+        );
+      } else {
+        await client.query(
+          `UPDATE registry_profile_devices
+           SET revoked_at_ms = NULL,
+               replaced_by_meter_id = NULL,
+               device_label = $2
+           WHERE meter_id = $1`,
+          [meterId, deviceLabel],
+        );
+      }
+      await client.query(
+        `UPDATE registry_device_invites
+         SET consumed_at_ms = $2, joined_meter_id = $3
+         WHERE token_hash = $1`,
+        [tokenHash, nowMs, meterId],
+      );
+      if (invite.mode === "replace") {
+        await this.#recomputeProfile(client, invite.profile_id, nowMs);
+      }
+      const count = await client.query(
+        `SELECT COUNT(*)::bigint AS count
+         FROM registry_profile_devices
+         WHERE profile_id = $1 AND revoked_at_ms IS NULL`,
+        [invite.profile_id],
+      );
+      await client.query("COMMIT");
+      return {
+        joined: true,
+        profileId: invite.profile_id,
+        handle: profile.handle ?? null,
+        role: existing.rows[0]?.role === "owner" ? "owner" : "member",
+        deviceCount: Number(count.rows[0].count),
+      };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async profileMembership({ meterId, publicKey }) {
+    if (!this.profileSchemaAvailable) return null;
+    const result = await this.pool.query(
+      `SELECT d.profile_id, d.role, d.sharing_enabled, d.device_label,
+              d.joined_at_ms, d.last_reported_at_ms, p.handle
+       FROM registry_profile_devices AS d
+       JOIN registry_profiles AS p ON p.profile_id = d.profile_id
+       JOIN registry_meters AS m ON m.meter_id = d.meter_id
+       WHERE d.meter_id = $1 AND m.public_key = $2 AND d.revoked_at_ms IS NULL`,
+      [meterId, publicKey],
+    );
+    const membership = result.rows[0];
+    return membership ? {
+      profileId: membership.profile_id,
+      handle: membership.handle ?? null,
+      role: membership.role,
+      sharingEnabled: membership.sharing_enabled,
+      deviceLabel: membership.device_label ?? null,
+      joinedAtMs: Number(membership.joined_at_ms),
+      lastReportedAtMs:
+        membership.last_reported_at_ms == null ? null : Number(membership.last_reported_at_ms),
+    } : null;
+  }
+
+  async listProfileDevices({ meterId, publicKey }) {
+    const membership = await this.profileMembership({ meterId, publicKey });
+    if (!membership || membership.role !== "owner") {
+      return { authorized: false, reason: "not-owner" };
+    }
+    const profile = await this.pool.query(
+      "SELECT owner_meter_id FROM registry_profiles WHERE profile_id = $1",
+      [membership.profileId],
+    );
+    if (profile.rows[0]?.owner_meter_id !== meterId) {
+      return { authorized: false, reason: "not-owner" };
+    }
+    const result = await this.pool.query(
+      `SELECT meter_id, role, sharing_enabled, joined_at_ms, last_reported_at_ms,
+              revoked_at_ms, replaced_by_meter_id, device_label
+       FROM registry_profile_devices
+       WHERE profile_id = $1
+       ORDER BY joined_at_ms ASC, meter_id ASC`,
+      [membership.profileId],
+    );
+    return {
+      authorized: true,
+      profileId: membership.profileId,
+      devices: result.rows.map((device) => ({
+        meterId: device.meter_id,
+        role: device.role,
+        sharingEnabled: device.sharing_enabled,
+        joinedAtMs: Number(device.joined_at_ms),
+        lastReportedAtMs:
+          device.last_reported_at_ms == null ? null : Number(device.last_reported_at_ms),
+        revokedAtMs: device.revoked_at_ms == null ? null : Number(device.revoked_at_ms),
+        replacedByMeterId: device.replaced_by_meter_id ?? null,
+        deviceLabel: device.device_label ?? null,
+      })),
+    };
+  }
+
+  async revokeProfileDevice({ meterId, publicKey, targetMeterId, nowMs }) {
+    if (!this.profileSchemaAvailable) {
+      return { revoked: false, reason: "feature-unavailable" };
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const meter = await client.query(
+        "SELECT public_key FROM registry_meters WHERE meter_id = $1 FOR UPDATE",
+        [meterId],
+      );
+      const membership = await client.query(
+        `SELECT d.profile_id, d.role, p.owner_meter_id
+         FROM registry_profile_devices AS d
+         JOIN registry_profiles AS p ON p.profile_id = d.profile_id
+         WHERE d.meter_id = $1 AND d.revoked_at_ms IS NULL`,
+        [meterId],
+      );
+      if (
+        meter.rows[0]?.public_key !== publicKey ||
+        membership.rows[0]?.role !== "owner" ||
+        membership.rows[0]?.owner_meter_id !== meterId
+      ) {
+        await client.query("ROLLBACK");
+        return { revoked: false, reason: "not-owner" };
+      }
+      if (targetMeterId === meterId) {
+        await client.query("ROLLBACK");
+        return { revoked: false, reason: "cannot-revoke-owner" };
+      }
+      const target = await client.query(
+        `SELECT revoked_at_ms
+         FROM registry_profile_devices
+         WHERE profile_id = $1 AND meter_id = $2
+         FOR UPDATE`,
+        [membership.rows[0].profile_id, targetMeterId],
+      );
+      if (target.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return { revoked: false, reason: "unknown-device" };
+      }
+      if (target.rows[0].revoked_at_ms != null) {
+        await client.query("COMMIT");
+        return { revoked: true, alreadyRevoked: true };
+      }
+      await client.query(
+        `UPDATE registry_profile_devices
+         SET revoked_at_ms = $3, sharing_enabled = FALSE
+         WHERE profile_id = $1 AND meter_id = $2`,
+        [membership.rows[0].profile_id, targetMeterId, nowMs],
+      );
+      await this.#recomputeProfile(client, membership.rows[0].profile_id, nowMs);
+      await client.query("COMMIT");
+      return { revoked: true, alreadyRevoked: false };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async transferProfileOwner({ meterId, publicKey, targetMeterId, nowMs }) {
+    if (!this.profileSchemaAvailable) {
+      return { transferred: false, reason: "feature-unavailable" };
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const ownerMeter = await client.query(
+        "SELECT public_key FROM registry_meters WHERE meter_id = $1 FOR UPDATE",
+        [meterId],
+      );
+      const membership = await client.query(
+        `SELECT d.profile_id, d.role, p.owner_meter_id, p.handle
+         FROM registry_profile_devices AS d
+         JOIN registry_profiles AS p ON p.profile_id = d.profile_id
+         WHERE d.meter_id = $1 AND d.revoked_at_ms IS NULL
+         FOR UPDATE`,
+        [meterId],
+      );
+      if (
+        ownerMeter.rows[0]?.public_key !== publicKey ||
+        membership.rows[0]?.role !== "owner" ||
+        membership.rows[0]?.owner_meter_id !== meterId
+      ) {
+        await client.query("ROLLBACK");
+        return { transferred: false, reason: "not-owner" };
+      }
+      const target = await client.query(
+        `SELECT d.role, m.public_key
+         FROM registry_profile_devices AS d
+         JOIN registry_meters AS m ON m.meter_id = d.meter_id
+         WHERE d.profile_id = $1 AND d.meter_id = $2 AND d.revoked_at_ms IS NULL
+         FOR UPDATE`,
+        [membership.rows[0].profile_id, targetMeterId],
+      );
+      if (target.rowCount !== 1 || targetMeterId === meterId) {
+        await client.query("ROLLBACK");
+        return { transferred: false, reason: "invalid-target" };
+      }
+      await client.query(
+        `UPDATE registry_profile_devices
+         SET role = CASE WHEN meter_id = $2 THEN 'owner' ELSE 'member' END
+         WHERE profile_id = $1 AND meter_id IN ($2, $3)`,
+        [membership.rows[0].profile_id, targetMeterId, meterId],
+      );
+      await client.query(
+        `UPDATE registry_profiles
+         SET owner_meter_id = $2,
+             updated_at_ms = CASE WHEN updated_at_ms > $3 THEN updated_at_ms ELSE $3 END
+         WHERE profile_id = $1`,
+        [membership.rows[0].profile_id, targetMeterId, nowMs],
+      );
+      if (membership.rows[0].handle) {
+        await client.query("UPDATE registry_meters SET handle = NULL WHERE meter_id = $1", [meterId]);
+        await client.query(
+          "UPDATE registry_meters SET handle = $2 WHERE meter_id = $1",
+          [targetMeterId, membership.rows[0].handle],
+        );
+        await client.query(
+          `UPDATE registry_handles
+           SET meter_id = $2, public_key = $3
+           WHERE handle = $1`,
+          [membership.rows[0].handle, targetMeterId, target.rows[0].public_key],
+        );
+      }
+      await client.query("COMMIT");
+      return {
+        transferred: true,
+        profileId: membership.rows[0].profile_id,
+        ownerMeterId: targetMeterId,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async close() {
