@@ -94,11 +94,12 @@ spec:
               value: 0.0.0.0
             - name: TOKEN_METER_REGISTRY_PORT
               value: "8787"
-            # Keep Profile-backed public reads disabled through migration,
-            # reconciliation, and the shadow dual-write observation window.
-            # Follow docs/multi-device-migration.md before changing this to 1.
+            # Profile migration, reconciliation, and the shadow dual-write
+            # observation window completed successfully on 2026-08-15.
+            # Set this back to 0 for an immediate read-path rollback; the
+            # additive Profile tables and dual writes remain intact.
             - name: TOKEN_WIDGET_PROFILE_READS
-              value: "0"
+              value: "1"
             # Published release: /api/v1/latest serves this metadata and the
             # download route redirects to the immutable GitHub asset. Installed
             # widgets verify the bytes against this digest before installing.
