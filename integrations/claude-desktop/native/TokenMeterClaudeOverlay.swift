@@ -185,6 +185,10 @@ private func parseCommand(_ arguments: [String]) throws -> AppCommand {
         sessionsDirectoryURL: try absoluteURL(sessionsPath, option: "--sessions-dir"),
         projectsDirectoryURL: try absoluteURL(projectsPath, option: "--projects-dir")
     )
+    // The Claude model catalog (app.asar) is intentionally not required: the
+    // overlay also serves Codex windows on machines without Claude installed,
+    // and ClaudeContextWindowResolver already degrades to nil when it is
+    // absent. Codex context windows come from the rollout snapshot instead.
     let requiredFiles = [
         configuration.rootURL.appendingPathComponent("src/cli.mjs"),
         configuration.rootURL.appendingPathComponent("runtime/token-meter-ui.js"),
@@ -192,7 +196,6 @@ private func parseCommand(_ arguments: [String]) throws -> AppCommand {
         configuration.rootURL.appendingPathComponent(
             "integrations/claude-desktop/src/overlay-bridge.mjs"
         ),
-        configuration.modelCatalogURL,
     ]
     for fileURL in requiredFiles where !fileManager.fileExists(atPath: fileURL.path) {
         throw CommandError(description: "Required file is missing: \(fileURL.path)")

@@ -140,3 +140,66 @@ test(
     assert.equal(existsSync(claudeExecutable), true);
   },
 );
+
+test(
+  "overlay installs on a Codex-only machine without Claude.app",
+  { skip: process.platform !== "darwin" },
+  async (context) => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), "token-meter-codex-install-"),
+    );
+    context.after(() => rm(directory, { recursive: true, force: true }));
+    const installRoot = path.join(directory, "Application Support", "Codex Meter");
+    const stateDirectory = path.join(directory, "Application Support", "State");
+    const launchAgentsDirectory = path.join(directory, "LaunchAgents");
+    const logDirectory = path.join(directory, "Logs");
+    // Deliberately never created: this machine has no Claude.app.
+    const absentClaudeApp = path.join(directory, "Claude.app");
+    const launchctl = path.join(directory, "launchctl");
+    await writeFile(launchctl, "#!/bin/bash\nexit 1\n");
+    await chmod(launchctl, 0o755);
+    const nodePath = existsSync("/opt/homebrew/bin/node")
+      ? "/opt/homebrew/bin/node"
+      : process.execPath;
+
+    const installResult = await execFileAsync(
+      "/bin/bash",
+      [
+        "integrations/claude-desktop/scripts/install.sh",
+        "--node",
+        nodePath,
+        "--claude-app",
+        absentClaudeApp,
+        "--no-load",
+        "--no-prompt",
+      ],
+      {
+        env: {
+          ...process.env,
+          TOKEN_METER_CLAUDE_INSTALL_ROOT: installRoot,
+          TOKEN_METER_CLAUDE_STATE_DIR: stateDirectory,
+          TOKEN_METER_LAUNCH_AGENTS_DIR: launchAgentsDirectory,
+          TOKEN_METER_CLAUDE_LOG_DIR: logDirectory,
+          TOKEN_METER_LAUNCHCTL: launchctl,
+        },
+      },
+    );
+    // The install explains the Codex-only path rather than failing.
+    assert.match(installResult.stderr, /Codex support only/i);
+
+    const app = path.join(installRoot, "Token Widget for Claude.app");
+    await Promise.all([
+      access(path.join(app, "Contents", "MacOS", "TokenMeterClaudeOverlay")),
+      access(
+        path.join(
+          installRoot,
+          "integrations",
+          "codex-desktop",
+          "src",
+          "snapshot-runtime.mjs",
+        ),
+      ),
+    ]);
+    assert.equal(existsSync(absentClaudeApp), false);
+  },
+);
