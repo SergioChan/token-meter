@@ -64,6 +64,68 @@ test("usage uploads sign the rolling seven-day session count", async () => {
   }
 });
 
+test("v2 usage reconciles total-only telemetry into the input-side bucket", async () => {
+  const previousRegistry = process.env.TOKEN_METER_REGISTRY_URL;
+  const previousFetch = globalThis.fetch;
+  const identity = createIdentity(1_000);
+  let signed = null;
+  try {
+    process.env.TOKEN_METER_REGISTRY_URL = "https://registry.example";
+    globalThis.fetch = async (_url, options) => {
+      signed = JSON.parse(options.body);
+      return new Response(JSON.stringify({ ok: true, ignored: false }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    await uploadUsage(identity, {
+      generatedAtMs: Date.now(),
+      days: [{
+        date: "2026-08-15",
+        total: 100,
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+      }],
+      hours: [100, ...Array(23).fill(0)],
+      stats: {
+        lifetimeTokens: 100,
+        currentStreakDays: 1,
+        longestStreakDays: 1,
+        sessionCount: 1,
+        sessionsLast7Days: 1,
+        peakDay: { date: "2026-08-15", tokens: 100 },
+        medianSessionTokens: 100,
+        sessionTokenHistogram: [1, ...Array(7).fill(0)],
+        byPlatform: {
+          claudeCode: { tokens: 0, sessions: 0 },
+          codex: { tokens: 100, sessions: 1 },
+          cline: { tokens: 0, sessions: 0 },
+        },
+      },
+    });
+    assert.equal(verifySignedPayload(signed), true);
+    assert.deepEqual(signed.payload.merge.tokenBreakdown, {
+      input: 100,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    });
+    assert.equal(
+      Object.values(signed.payload.merge.tokenBreakdown).reduce(
+        (total, value) => total + value,
+        0,
+      ),
+      signed.payload.stats.lifetimeTokens,
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousRegistry == null) delete process.env.TOKEN_METER_REGISTRY_URL;
+    else process.env.TOKEN_METER_REGISTRY_URL = previousRegistry;
+  }
+});
+
 test("usage upload falls back to v1 only when a registry has no v2 route", async () => {
   const previousRegistry = process.env.TOKEN_METER_REGISTRY_URL;
   const previousFetch = globalThis.fetch;

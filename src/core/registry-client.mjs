@@ -12,6 +12,24 @@ import { SESSION_TOKEN_BUCKET_MAXIMA } from "./usage-merge.mjs";
 
 const FETCH_TIMEOUT_MS = 10_000;
 
+function reconcileTokenBreakdown(tokenBreakdown, lifetimeTokens) {
+  const classifiedTokens = Object.values(tokenBreakdown).reduce(
+    (total, value) => total + value,
+    0,
+  );
+  const unclassifiedInput = lifetimeTokens - classifiedTokens;
+  if (!Number.isSafeInteger(unclassifiedInput) || unclassifiedInput < 0) {
+    throw new Error("usage token breakdown exceeds the lifetime total");
+  }
+  // Some Codex resume/recomputation events report only total_tokens while all
+  // category fields are zero. Preserve that confirmed workload and reconcile
+  // the unknown positive remainder into the conservative input-side bucket.
+  return {
+    ...tokenBreakdown,
+    input: tokenBreakdown.input + unclassifiedInput,
+  };
+}
+
 export function registryEnabled() {
   return registryBase() != null;
 }
@@ -166,7 +184,7 @@ function buildUsagePayload(identity, collected, { version }) {
       .reduce((sum, day) => sum + day.total, 0),
   };
   if (version === 2) {
-    const tokenBreakdown = collected.days.reduce(
+    const rawTokenBreakdown = collected.days.reduce(
       (totals, day) => ({
         input: totals.input + (day.input ?? 0),
         output: totals.output + (day.output ?? 0),
@@ -174,6 +192,10 @@ function buildUsagePayload(identity, collected, { version }) {
         cacheWrite: totals.cacheWrite + (day.cacheWrite ?? 0),
       }),
       { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    );
+    const tokenBreakdown = reconcileTokenBreakdown(
+      rawTokenBreakdown,
+      stats.lifetimeTokens,
     );
     const weekdayTokens = Array(7).fill(0);
     for (const day of collected.days) {
