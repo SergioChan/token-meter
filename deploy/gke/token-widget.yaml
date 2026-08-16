@@ -104,13 +104,13 @@ spec:
             # download route redirects to the immutable GitHub asset. Installed
             # widgets verify the bytes against this digest before installing.
             - name: TOKEN_METER_LATEST_VERSION
-              value: "0.3.0"
+              value: "0.3.1"
             - name: TOKEN_METER_LATEST_SHA256
-              value: "202f07fb665e791cb7d807ce7c6fec15a818203819ecb82fef483a954ac8aae3"
+              value: "84938169f426784ed6bf59fcd83e6a9385f26188584f3a7644615d06bad0960e"
             - name: TOKEN_METER_LATEST_SIZE
-              value: "37556044"
+              value: "37556299"
             - name: TOKEN_METER_LATEST_URL
-              value: "https://github.com/SergioChan/token-meter/releases/download/v0.3.0/TokenWidget-0.3.0.dmg"
+              value: "https://github.com/SergioChan/token-meter/releases/download/v0.3.1/TokenWidget-0.3.1.dmg"
           ports:
             - name: http
               containerPort: 8787
