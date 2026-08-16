@@ -15,11 +15,13 @@ sw_vers -productVersion | awk -F. '{ exit ($1 < 13) }' \
 xcode-select -p >/dev/null 2>&1 \
   || fail "Xcode Command Line Tools are required." "Run:  xcode-select --install   then re-run this installer."
 command -v node >/dev/null 2>&1 \
-  || fail "Node.js 22.12+ is required." "Install with:  brew install node   (or https://nodejs.org) then re-run."
+  || fail "Node.js 22.13+ is required." "Install with:  brew install node   (or https://nodejs.org) then re-run."
 command -v git >/dev/null 2>&1 \
   || fail "Git is required." "Install the Xcode Command Line Tools, then re-run this installer."
-node -e 'const [maj, min] = process.versions.node.split(".").map(Number); process.exit(maj > 22 || (maj === 22 && min >= 12) ? 0 : 1)' \
-  || fail "Node.js 22.12+ is required (found $(node --version))." "Upgrade with:  brew upgrade node   or via nvm."
+node -e 'const [maj, min] = process.versions.node.split(".").map(Number); process.exit(maj > 22 || (maj === 22 && min >= 13) ? 0 : 1)' \
+  || fail "Node.js 22.13+ is required (found $(node --version))." "Upgrade with:  brew upgrade node   or via nvm."
+node -e 'import("node:sqlite")' >/dev/null 2>&1 \
+  || fail "This Node.js build does not provide node:sqlite." "Install an official Node.js 22.13+ release, then re-run."
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

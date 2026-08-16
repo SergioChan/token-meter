@@ -9,7 +9,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 VERSION="$(node -p "require('$ROOT/package.json').version")"
 DIST="$ROOT/dist"
-NODE_VERSION="v22.22.0"
+NODE_VERSION="v$(/bin/cat "$ROOT/.node-version")"
 NODE_TAR="$DIST/node-$NODE_VERSION-darwin-arm64.tar.gz"
 IDENTITY="${TOKEN_METER_CODESIGN_IDENTITY:?set TOKEN_METER_CODESIGN_IDENTITY}"
 

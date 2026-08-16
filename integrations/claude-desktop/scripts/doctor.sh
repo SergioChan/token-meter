@@ -82,7 +82,7 @@ else
   printf 'Swift compiler: %s\n' "$SWIFT_COMPILER"
   printf 'Code-signing tools: %s\n' "$CODE_SIGNING_TOOLS"
   printf 'Git: %s\n' "$GIT_AVAILABLE"
-  printf 'Node.js 22.12 or newer: %s' "$NODE_COMPATIBLE"
+  printf 'Node.js 22.13 or newer with node:sqlite: %s' "$NODE_COMPATIBLE"
   [ -n "$RESOLVED_NODE" ] && printf ' (%s)' "$RESOLVED_NODE"
   printf '\nReady for source install: %s\n' "$READY"
 fi

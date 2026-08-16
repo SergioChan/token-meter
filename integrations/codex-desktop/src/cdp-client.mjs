@@ -34,7 +34,7 @@ export class CdpClient {
       throw new Error("Refusing a non-loopback CDP WebSocket URL");
     }
     if (typeof WebSocket !== "function") {
-      throw new Error("Token Meter requires Node.js 22.12 or newer for WebSocket support");
+      throw new Error("Token Meter requires Node.js 22.13 or newer for WebSocket support");
     }
 
     const socket = new WebSocket(webSocketUrl);

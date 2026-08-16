@@ -13,7 +13,7 @@
   <a href="https://github.com/SergioChan/token-meter/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/SergioChan/token-meter/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-2f6f52"></a>
   <img alt="macOS" src="https://img.shields.io/badge/platform-macOS-555">
-  <img alt="Node.js 22.12+" src="https://img.shields.io/badge/node-%3E%3D22.12-43853d">
+  <img alt="Node.js 22.13+" src="https://img.shields.io/badge/node-%3E%3D22.13-43853d">
 </p>
 
 <p align="center">
@@ -205,7 +205,7 @@ Requirements:
 
 - macOS 13 or newer;
 - Git;
-- Node.js 22.12 or newer;
+- Node.js 22.13 or newer;
 - Xcode Command Line Tools and Swift only when building the Claude native companion;
 - the official Codex Desktop and/or Claude Desktop application.
 

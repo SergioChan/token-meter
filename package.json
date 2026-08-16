@@ -27,7 +27,7 @@
     "darwin"
   ],
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.13.0"
   },
   "dependencies": {
     "pg": "^8.16.3"
