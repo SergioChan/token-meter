@@ -4,7 +4,7 @@ The top entry is the current source version. Binary release metadata appears at
 `/api/v1/latest` only after a signed and notarized DMG has actually been
 published.
 
-## Unreleased
+## 0.3.0 — 2026-08-15
 
 - Community handles now belong to a durable Profile instead of one computer.
   Each Mac keeps its own Ed25519 key and Meter ID; an owner can link another
