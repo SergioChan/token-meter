@@ -21,9 +21,13 @@ export class CodexSnapshotRuntime {
     now = Date.now,
     rolloutStore = null,
     metricsEngine = null,
+    // Path to the Codex state database; defaults inside readActiveCodexThread.
+    stateDatabasePath = undefined,
     // Injected in tests; in production the active thread is read from the
     // Codex state database each snapshot.
-    resolveActiveThread = readActiveCodexThread,
+    resolveActiveThread = stateDatabasePath
+      ? () => readActiveCodexThread(stateDatabasePath)
+      : readActiveCodexThread,
     identity = undefined,
     identityDir = undefined,
     usageHistory = undefined,
