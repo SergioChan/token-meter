@@ -4,6 +4,16 @@ The top entry is the current source version. Binary release metadata appears at
 `/api/v1/latest` only after a signed and notarized DMG has actually been
 published.
 
+## Unreleased
+
+- The Token Widget overlay now meters Codex natively. It reads the active thread
+  from Codex's local state database and its rollout files, so a frontmost Codex
+  window gets a bound face without a CDP debugging port, launch flags, or any
+  quit/relaunch of Codex. The overlay installs and runs on machines without
+  Claude installed, and the app is now named "Token Widget".
+- Deprecated the Codex CDP adapter (`scripts/install-token-meter-macos.sh`). It
+  still works but will be removed in a future release; prefer the app.
+
 ## 0.3.1 — 2026-08-15
 
 - Fixed the first aggregate sync for installations whose local Codex history

@@ -31,9 +31,9 @@ The signed and Apple-notarized DMG is the primary release channel:
 - [Download Token Widget for macOS](https://www.tokenwidget.app/download/token-widget.dmg)
 - [Latest GitHub release](https://github.com/SergioChan/token-meter/releases/latest)
 
-Open the DMG, drag **Token Widget.app** to **Applications**, and open it once. The app contains its own compatible Node.js runtime. The Claude Desktop overlay requires macOS Accessibility permission for **Token Widget**; it never asks for permission on behalf of Claude.
+Open the DMG, drag **Token Widget.app** to **Applications**, and open it once. The app contains its own compatible Node.js runtime. The overlay requires macOS Accessibility permission for **Token Widget**; it never asks for permission on behalf of Claude or Codex. The same app meters both Claude Code and Codex — it follows the frontmost host window and reads each host's local telemetry.
 
-The Codex Desktop adapter currently uses its per-user source installer described below. The repository also remains the development and recovery installation path for both hosts.
+The legacy Codex CDP adapter (the per-user source installer described below) is deprecated in favor of this overlay and will be removed in a future release. The repository also remains the development and recovery installation path for both hosts.
 
 > **Multi-device release gate:** this source tree contains the next-release Profile/device model and v2 aggregate sync protocol. Do not enable multi-device Profile reads in production until the additive database migration, reconciliation, and verification gates in [the migration runbook](docs/multi-device-migration.md) have all passed. Older v1 clients remain compatible during the rollout.
 
@@ -219,6 +219,13 @@ npm run ci
 Or attach [INSTALL_WITH_AGENT.md](INSTALL_WITH_AGENT.md) to a capable local coding Agent. It defines the host checks, restart approval boundary, Accessibility handoff, installation, and runtime verification requirements.
 
 ### Codex Desktop
+
+The recommended way to meter Codex is the **Token Widget** app above — it now
+supports Codex natively, reading the active thread from Codex's local state with
+no loopback debugging port, no launch flags, and no quit/relaunch of Codex.
+
+> **Deprecated:** the CDP adapter below is kept for now and will be removed in a
+> future release. Prefer the app.
 
 ```bash
 ./scripts/install-token-meter-macos.sh
