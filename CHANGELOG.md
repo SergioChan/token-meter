@@ -4,6 +4,16 @@ The top entry is the current source version. Binary release metadata appears at
 `/api/v1/latest` only after a signed and notarized DMG has actually been
 published.
 
+## 0.3.1 — 2026-08-15
+
+- Fixed the first aggregate sync for installations whose local Codex history
+  contains resume or recomputation events that report only `total_tokens`.
+  The confirmed positive remainder is now reconciled into the conservative
+  input-side bucket, so the signed v2 breakdown equals the lifetime total and
+  the registry no longer rejects an otherwise valid report with HTTP 422.
+  This also lets a newly invited Device complete its initial Profile upload
+  immediately after joining.
+
 ## 0.3.0 — 2026-08-15
 
 - Community handles now belong to a durable Profile instead of one computer.
