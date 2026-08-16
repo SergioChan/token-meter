@@ -32,5 +32,5 @@ npm run claude:install
 echo
 bold "Installed."
 echo "One-time step: System Settings > Privacy & Security > Accessibility"
-echo "  -> enable 'Token Widget for Claude'."
+echo "  -> enable 'Token Widget'."
 echo "Then focus a Claude Code session and the meter appears."

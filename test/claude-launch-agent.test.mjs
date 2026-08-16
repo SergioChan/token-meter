@@ -15,7 +15,7 @@ test("Claude LaunchAgent starts only the native companion", async (context) => {
   context.after(() => rm(directory, { recursive: true, force: true }));
   const output = path.join(directory, "claude-meter.plist");
   const root = path.join(directory, "Token & Meter");
-  const app = path.join(root, "Token Widget for Claude.app");
+  const app = path.join(root, "Token Widget.app");
 
   await execFileAsync(process.execPath, [
     "integrations/claude-desktop/scripts/render-launch-agent.mjs",
@@ -52,7 +52,7 @@ test("Claude LaunchAgent starts only the native companion", async (context) => {
 
 test("Claude readiness requires an exact executable command boundary", async () => {
   const helper = "integrations/claude-desktop/scripts/process-identity.sh";
-  const executable = "/Applications/Token Widget for Claude.app/Contents/MacOS/Overlay";
+  const executable = "/Applications/Token Widget.app/Contents/MacOS/Overlay";
   await execFileAsync("/bin/bash", [
     "-c",
     'source "$1"; token_meter_command_matches_executable "$2 --root /tmp" "$2"',

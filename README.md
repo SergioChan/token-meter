@@ -244,7 +244,7 @@ Check local build prerequisites and install without quitting Claude:
 ./scripts/status-claude-meter-macos.sh --json
 ```
 
-If the status reports `accessibilityGranted: false`, enable **Token Widget for Claude** in **System Settings → Privacy & Security → Accessibility**. `bridgeHealthy` and `sessionBound` may correctly remain false while Claude is hidden or no Code Session is focused.
+If the status reports `accessibilityGranted: false`, enable **Token Widget** in **System Settings → Privacy & Security → Accessibility**. `bridgeHealthy` and `sessionBound` may correctly remain false while Claude is hidden or no Code Session is focused.
 
 Use a specific compatible Node binary when required:
 

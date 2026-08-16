@@ -68,7 +68,7 @@ test(
     );
     assert.doesNotMatch(installResult.stderr, /grep:/i);
 
-    const app = path.join(installRoot, "Token Widget for Claude.app");
+    const app = path.join(installRoot, "Token Widget.app");
     await Promise.all([
       access(path.join(app, "Contents", "MacOS", "TokenMeterClaudeOverlay")),
       access(path.join(installRoot, "src", "cli.mjs")),
@@ -89,7 +89,7 @@ test(
       ),
       "utf8",
     );
-    assert.match(plist, /Token Widget for Claude\.app/);
+    assert.match(plist, /Token Widget\.app/);
     assert.match(plist, new RegExp(nodePath.replaceAll("/", "\\/")));
     assert.equal(existsSync(stateDirectory), true);
 
@@ -187,7 +187,7 @@ test(
     // The install explains the Codex-only path rather than failing.
     assert.match(installResult.stderr, /Codex support only/i);
 
-    const app = path.join(installRoot, "Token Widget for Claude.app");
+    const app = path.join(installRoot, "Token Widget.app");
     await Promise.all([
       access(path.join(app, "Contents", "MacOS", "TokenMeterClaudeOverlay")),
       access(
