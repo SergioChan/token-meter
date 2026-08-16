@@ -5,12 +5,13 @@ import readline from "node:readline";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { ClaudeSnapshotRuntime } from "./snapshot-runtime.mjs";
-import { CodexSnapshotRuntime } from "../../codex-desktop/src/snapshot-runtime.mjs";
 
 // The Codex host path reads state_5.sqlite through node:sqlite, whose
 // experimental warning would otherwise repeat into the LaunchAgent log on
-// every process start. Replace Node's default warning printer with one that
-// drops only that warning and prints everything else unchanged.
+// every process start. Install the filter before dynamically loading that
+// runtime; static dependencies are evaluated before this module body. Replace
+// Node's default warning printer with one that drops only that warning and
+// prints everything else unchanged.
 process.removeAllListeners("warning");
 process.on("warning", (warning) => {
   if (warning.name === "ExperimentalWarning" && /SQLite/i.test(warning.message)) {
@@ -18,6 +19,9 @@ process.on("warning", (warning) => {
   }
   process.stderr.write(`${warning.name}: ${warning.message}\n`);
 });
+const { CodexSnapshotRuntime } = await import(
+  "../../codex-desktop/src/snapshot-runtime.mjs",
+);
 import { runCommunitySyncWorker } from "../../../src/core/community-sync.mjs";
 import {
   loadOrCreateIdentity,

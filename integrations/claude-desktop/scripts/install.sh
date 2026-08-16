@@ -33,7 +33,7 @@ Install the native Token Meter companion for Claude Code inside Claude Desktop.
 This installer does not quit, relaunch, modify, patch, or re-sign Claude.app.
 
 Options:
-  --node PATH         Absolute Node.js 22.12+ executable path
+  --node PATH         Absolute Node.js 22.13+ executable path
   --claude-app PATH   Claude.app path (default: /Applications/Claude.app)
   --no-load           Install files and LaunchAgent without loading it
   --no-prompt         Do not request macOS Accessibility permission

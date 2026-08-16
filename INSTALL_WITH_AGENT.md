@@ -28,7 +28,7 @@ Finish only when each selected host is installed and its real runtime status has
 3. Confirm the operating system is macOS and record the installed host paths:
    - Codex: `/Applications/ChatGPT.app`
    - Claude: `/Applications/Claude.app`
-4. Run `./scripts/doctor-claude-meter-macos.sh` before a Claude installation. It checks Git, Node.js 22.12+, Xcode Command Line Tools, Swift, and code-signing tools. If a prerequisite is missing, ask before changing package-manager or Xcode state. Do not silently install or upgrade dependencies.
+4. Run `./scripts/doctor-claude-meter-macos.sh` before a Claude installation. It checks Git, Node.js 22.13+ with `node:sqlite`, Xcode Command Line Tools, Swift, and code-signing tools. If a prerequisite is missing, ask before changing package-manager or Xcode state. Do not silently install or upgrade dependencies.
 5. Run the repository verification suite:
 
    ```bash

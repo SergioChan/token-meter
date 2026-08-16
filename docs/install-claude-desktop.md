@@ -12,7 +12,7 @@ The signed and Apple-notarized DMG is the normal installation path. Source build
 - The official signed Claude Desktop application at `/Applications/Claude.app`.
 - Permission to enable **Token Widget** in System Settings > Privacy & Security > Accessibility.
 
-The DMG contains its own compatible Node.js runtime. Building from source additionally requires Git, Node.js 22.12 or newer, and Xcode Command Line Tools with Swift.
+The DMG contains its own compatible Node.js runtime. Building from source additionally requires Git, Node.js 22.13 or newer with `node:sqlite`, and Xcode Command Line Tools with Swift.
 
 ## Install the release DMG
 

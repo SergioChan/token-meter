@@ -17,13 +17,30 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
+      - name: Set up minimum supported Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22.12.0
+          node-version: 22.13.0
+
+      - name: Verify required Node.js capabilities
+        run: node --no-warnings -e 'import("node:sqlite")'
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify minimum supported runtime
+        run: >-
+          node --test
+          test/claude-runtime-selection.test.mjs
+          test/claude-overlay-bridge.test.mjs
+          test/codex-overlay-bridge.test.mjs
+          test/codex-snapshot-runtime.test.mjs
+          test/codex-thread-state.test.mjs
+
+      - name: Set up packaged Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
 
       - name: Run checks and tests
         run: npm run ci

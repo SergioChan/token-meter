@@ -1,14 +1,31 @@
 #!/bin/bash
 
+token_meter_node_version_is_compatible() {
+  if [ "$#" -ne 1 ]; then return 2; fi
+  local version="${1#v}"
+  local major="${version%%.*}"
+  local remainder="${version#*.}"
+  [ "$remainder" != "$version" ] || return 1
+  local minor="${remainder%%.*}"
+  case "$major" in ''|*[!0-9]*) return 1 ;; esac
+  case "$minor" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$major" -gt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 13 ]; }
+}
+
 token_meter_node_is_compatible() {
   if [ "$#" -ne 1 ]; then return 2; fi
   local candidate="$1"
   [ -n "$candidate" ] || return 1
   [ "${candidate#/}" != "$candidate" ] || return 1
   [ -x "$candidate" ] || return 1
+  local version
+  version="$("$candidate" --version 2>/dev/null)" || return 1
+  token_meter_node_version_is_compatible "$version" || return 1
   "$candidate" -e '
-    const [major, minor] = process.versions.node.split(".").map(Number);
-    process.exit(major > 22 || (major === 22 && minor >= 12) ? 0 : 1);
+    import("node:sqlite").then(
+      ({ DatabaseSync }) => process.exit(typeof DatabaseSync === "function" ? 0 : 1),
+      () => process.exit(1),
+    );
   ' >/dev/null 2>&1
 }
 
@@ -53,14 +70,14 @@ token_meter_resolve_node() {
       printf '%s\n' "$explicit"
       return 0
     fi
-    printf 'Node.js 22.12 or newer is required: %s\n' "$explicit" >&2
+    printf 'Node.js 22.13 or newer with node:sqlite is required: %s\n' "$explicit" >&2
     return 1
   fi
 
   local selected
   selected="$(token_meter_find_compatible_node || true)"
   if [ -z "$selected" ]; then
-    printf 'Node.js 22.12 or newer was not found. Run the Claude source-install doctor for details.\n' >&2
+    printf 'Node.js 22.13 or newer with node:sqlite was not found. Run the Claude source-install doctor for details.\n' >&2
     return 1
   fi
   printf '%s\n' "$selected"
