@@ -618,6 +618,9 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
     private var showingGlobalFace = false
     private var globalSnapshotInFlight = false
     private var lastGlobalSnapshotAt = Date.distantPast
+    private var showingCodexFace = false
+    private var codexSnapshotInFlight = false
+    private var lastCodexSnapshotAt = Date.distantPast
     private var dragTimer: Timer?
     private var dragStartMouse = CGPoint.zero
     private var dragStartPanel = CGPoint.zero
@@ -737,9 +740,11 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
             return
         }
         // A frontmost Claude window with a Claude Code session gets the bound
-        // session face; a frontmost Claude (no session) or Codex window gets
-        // the machine-wide face pinned to that window; with neither in front,
-        // the machine-wide face parks on the desktop when the user wants it.
+        // session face; a frontmost Codex window gets the bound Codex face
+        // (thread resolved from the Codex state database by the bridge); a
+        // frontmost Claude with no session gets the machine-wide face pinned to
+        // that window; with none in front, the machine-wide face parks on the
+        // desktop when the user wants it.
         if let window = frontmostHostWindow(bundleID: claudeBundleID),
            let position = axPoint(window, kAXPositionAttribute),
            let size = axSize(window, kAXSizeAttribute) {
@@ -753,7 +758,7 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         if let window = frontmostHostWindow(bundleID: codexBundleID),
            let position = axPoint(window, kAXPositionAttribute),
            let size = axSize(window, kAXSizeAttribute) {
-            showGlobalFace(hostPosition: position, hostSize: size)
+            showCodexFace(hostPosition: position, hostSize: size)
             return
         }
         if preferences.alwaysVisible {
@@ -775,6 +780,7 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         panel.orderOut(nil)
         currentSessionID = nil
         showingGlobalFace = false
+        showingCodexFace = false
         health.update(sessionBound: false)
     }
 
@@ -783,8 +789,9 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
     ) {
         let identifier = surface.sessionID
 
-        if showingGlobalFace {
+        if showingGlobalFace || showingCodexFace {
             showingGlobalFace = false
+            showingCodexFace = false
             publishUnbound()
         }
         positionPanel(hostPosition: hostPosition, hostSize: hostSize)
@@ -814,8 +821,9 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
     // Shared face for Codex windows and the bare desktop: the bridge's
     // machine-wide usage totals instead of a bound Claude session.
     private func showGlobalFace(hostPosition: CGPoint?, hostSize: CGSize?) {
-        if currentSessionID != nil || !showingGlobalFace {
+        if currentSessionID != nil || showingCodexFace || !showingGlobalFace {
             currentSessionID = nil
+            showingCodexFace = false
             visibleContextWindowTokens = nil
             contextScanCadence.reset()
             lastGlobalSnapshotAt = .distantPast
@@ -848,6 +856,48 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
                 return
             }
             self.health.update(bridgeHealthy: true)
+            let json = String(decoding: data, as: UTF8.self)
+            self.webView.evaluateJavaScript("window.__tokenMeter?.update(\(json))")
+        }
+    }
+
+    // Bound face for a frontmost Codex window. The bridge resolves which Codex
+    // thread is active from the state database, so — unlike the Claude session
+    // face — the native side supplies no session identifier and reads no
+    // Accessibility tree; it only pins the panel to the window and polls.
+    private func showCodexFace(hostPosition: CGPoint, hostSize: CGSize) {
+        if currentSessionID != nil || showingGlobalFace || !showingCodexFace {
+            currentSessionID = nil
+            showingGlobalFace = false
+            visibleContextWindowTokens = nil
+            contextScanCadence.reset()
+            lastCodexSnapshotAt = .distantPast
+            publishUnbound()
+        }
+        showingCodexFace = true
+        positionPanel(hostPosition: hostPosition, hostSize: hostSize)
+        panel.orderFrontRegardless()
+        if Date().timeIntervalSince(lastCodexSnapshotAt) >= 0.8 {
+            fetchCodexSnapshot()
+        }
+    }
+
+    private func fetchCodexSnapshot() {
+        guard !codexSnapshotInFlight, pageReady else { return }
+        codexSnapshotInFlight = true
+        lastCodexSnapshotAt = Date()
+        snapshotBridge.command(["command": "codex-snapshot"]) { [weak self] result in
+            guard let self else { return }
+            self.codexSnapshotInFlight = false
+            guard self.showingCodexFace else { return }
+            guard case .success(let snapshot) = result,
+                  let data = try? JSONSerialization.data(withJSONObject: snapshot) else {
+                self.health.update(bridgeHealthy: false, sessionBound: false)
+                self.publishUnbound()
+                return
+            }
+            let bound = (snapshot["binding"] as? [String: Any])?["exact"] as? Bool ?? false
+            self.health.update(bridgeHealthy: true, sessionBound: bound)
             let json = String(decoding: data, as: UTF8.self)
             self.webView.evaluateJavaScript("window.__tokenMeter?.update(\(json))")
         }
