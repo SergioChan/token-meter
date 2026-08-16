@@ -1,5 +1,12 @@
 # Codex Desktop integration
 
+> **Deprecated.** This CDP adapter is superseded by the native Token Widget
+> overlay, which meters Codex by reading the active thread from Codex's local
+> state (`~/.codex/state_5.sqlite`) and its rollout files — with no loopback
+> debugging port, no launch flags, and no quit/relaunch of Codex. The adapter
+> here still works but will be removed in a future release. See the repository
+> README for the app install.
+
 This integration injects the shared Token Widget runtime into the verified Codex Desktop renderer on macOS.
 
 ## Interface

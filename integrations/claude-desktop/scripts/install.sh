@@ -106,10 +106,16 @@ if [ ! -x "$VERIFIER" ]; then
   printf 'Claude verifier is not executable: %s\n' "$VERIFIER" >&2
   exit 1
 fi
-"$VERIFIER" "$CLAUDE_APP_PATH" >/dev/null
-if [ ! -f "$CLAUDE_APP_PATH/Contents/Resources/app.asar" ]; then
-  printf 'Claude model catalog is missing from %s\n' "$CLAUDE_APP_PATH" >&2
-  exit 1
+# The overlay also serves Codex windows, so Claude.app is no longer required.
+# When it is present we still verify it is the genuine, unmodified app before
+# reading its model catalog; when it is absent we install Codex-only support.
+if [ -e "$CLAUDE_APP_PATH" ]; then
+  "$VERIFIER" "$CLAUDE_APP_PATH" >/dev/null
+  if [ ! -f "$CLAUDE_APP_PATH/Contents/Resources/app.asar" ]; then
+    printf 'Claude model catalog is missing from %s; context-window sizing falls back to live readings.\n' "$CLAUDE_APP_PATH" >&2
+  fi
+else
+  printf 'Claude.app not found at %s; installing without the Claude model catalog (Codex support only).\n' "$CLAUDE_APP_PATH" >&2
 fi
 
 /bin/mkdir -p \
@@ -169,9 +175,9 @@ trap cleanup EXIT
 /usr/bin/install -m 600 "$ROOT/LICENSE" "$STAGING/LICENSE"
 token_meter_mark_installation_directory "$STAGING" "$LABEL"
 "$ROOT/integrations/claude-desktop/scripts/build-app.sh" \
-  --output "$STAGING/Token Widget for Claude.app"
+  --output "$STAGING/Token Widget.app"
 
-EXECUTABLE="$INSTALL_ROOT/Token Widget for Claude.app/Contents/MacOS/TokenMeterClaudeOverlay"
+EXECUTABLE="$INSTALL_ROOT/Token Widget.app/Contents/MacOS/TokenMeterClaudeOverlay"
 "$NODE_PATH" "$ROOT/integrations/claude-desktop/scripts/render-launch-agent.mjs" \
   --output "$PLIST_TEMP" \
   --label "$LABEL" \
@@ -211,7 +217,7 @@ fi
 /bin/mv "$PLIST_TEMP" "$PLIST"
 ACTIVATED=true
 
-APP_BUNDLE="$INSTALL_ROOT/Token Widget for Claude.app"
+APP_BUNDLE="$INSTALL_ROOT/Token Widget.app"
 if [ "$PROMPT" = true ]; then
   /usr/bin/open -n -a "$APP_BUNDLE" --args --prompt-accessibility >/dev/null 2>&1 || true
   /bin/sleep 1
@@ -299,7 +305,7 @@ fi
 if [ "$ACCESSIBILITY_GRANTED" = true ]; then
   printf 'Accessibility permission: granted.\n'
 else
-  printf 'Accessibility permission: required. Enable Token Widget for Claude in System Settings > Privacy & Security > Accessibility.\n'
+  printf 'Accessibility permission: required. Enable Token Widget in System Settings > Privacy & Security > Accessibility.\n'
 fi
 printf 'Logs: %s\n' "$LOG_DIR"
 trap - EXIT

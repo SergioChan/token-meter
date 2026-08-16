@@ -71,7 +71,8 @@ test("Claude overlay bridge serves multiple snapshots in one process", async (co
   child.stderr.on("data", (chunk) => (stderr += chunk));
   child.stdin.end(
     `${JSON.stringify({ requestId: 1, desktopSessionId })}\n` +
-      `${JSON.stringify({ requestId: 2, desktopSessionId: "invalid" })}\n`,
+      `${JSON.stringify({ requestId: 2, desktopSessionId: "invalid" })}\n` +
+      `${JSON.stringify({ requestId: 3, command: "global-snapshot" })}\n`,
   );
   const exitCode = await new Promise((resolve, reject) => {
     child.once("error", reject);
@@ -80,12 +81,20 @@ test("Claude overlay bridge serves multiple snapshots in one process", async (co
 
   assert.equal(exitCode, 0, stderr);
   const responses = stdout.trim().split("\n").map(JSON.parse);
-  assert.equal(responses.length, 2);
+  assert.equal(responses.length, 3);
   assert.equal(responses[0].requestId, 1);
   assert.equal(responses[0].snapshot.status, "bound");
   assert.equal(responses[0].snapshot.session.totalTokens, 10);
   assert.equal(responses[1].requestId, 2);
   assert.equal(responses[1].snapshot.status, "unbound");
+  // The machine-wide face for the desktop widget and non-Claude hosts: no
+  // session binding, identity plus usage-history totals only.
+  assert.equal(responses[2].requestId, 3);
+  assert.equal(responses[2].snapshot.status, "global");
+  assert.equal(responses[2].snapshot.binding.exact, false);
+  assert.equal(typeof responses[2].snapshot.meterId, "string");
+  assert.equal(typeof responses[2].snapshot.todayTokens, "number");
+  assert.equal(typeof responses[2].snapshot.meterStats.lifetimeTokens, "number");
 });
 
 test("Claude overlay bridge asks the registry for a signed browser pairing URL", async () => {

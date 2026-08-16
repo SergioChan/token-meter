@@ -98,7 +98,7 @@ test(
     const launchAgentsDirectory = path.join(directory, "agents");
     const executable = path.join(
       installRoot,
-      "Token Widget for Claude.app",
+      "Token Widget.app",
       "Contents",
       "MacOS",
       "TokenMeterClaudeOverlay",

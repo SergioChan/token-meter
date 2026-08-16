@@ -172,7 +172,7 @@ It does not read static text or conversation content to find the ratio. The mode
 The installer and runtime enforce these constraints:
 
 1. Verify official Claude.app before installation.
-2. Build a separate `Token Widget for Claude.app` with its own bundle identifier.
+2. Build a separate `Token Widget.app` with its own bundle identifier.
 3. Require Accessibility permission for that companion application itself.
 4. Inspect only roles and URLs during the shallow focused-window identity scan; read only exact Context-window button titles inside the selected web area for optional numerical enrichment.
 5. Keep local transcript and cloud event-cache parsing content-discarding.

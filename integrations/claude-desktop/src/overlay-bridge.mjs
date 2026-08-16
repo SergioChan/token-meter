@@ -5,6 +5,19 @@ import readline from "node:readline";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { ClaudeSnapshotRuntime } from "./snapshot-runtime.mjs";
+import { CodexSnapshotRuntime } from "../../codex-desktop/src/snapshot-runtime.mjs";
+
+// The Codex host path reads state_5.sqlite through node:sqlite, whose
+// experimental warning would otherwise repeat into the LaunchAgent log on
+// every process start. Replace Node's default warning printer with one that
+// drops only that warning and prints everything else unchanged.
+process.removeAllListeners("warning");
+process.on("warning", (warning) => {
+  if (warning.name === "ExperimentalWarning" && /SQLite/i.test(warning.message)) {
+    return;
+  }
+  process.stderr.write(`${warning.name}: ${warning.message}\n`);
+});
 import { runCommunitySyncWorker } from "../../../src/core/community-sync.mjs";
 import {
   loadOrCreateIdentity,
@@ -90,6 +103,8 @@ function parseArguments(argv) {
     const value = argv[index];
     if (value === "--sessions-dir") options.sessionsDirectory = argv[++index];
     else if (value === "--projects-dir") options.projectsDirectory = argv[++index];
+    else if (value === "--codex-sessions-dir") options.codexSessionsDirectory = argv[++index];
+    else if (value === "--codex-state-db") options.codexStateDatabase = argv[++index];
     else if (value === "--help" || value === "-h") options.help = true;
     else throw new Error(`Unknown argument: ${value}`);
   }
@@ -115,6 +130,54 @@ if (options.help) {
 }
 
 const cachedUsageHistory = new UsageHistory();
+
+// Aggregate face for the always-on desktop widget and non-Claude hosts: no
+// session binding, just machine-wide totals from the usage-history cache.
+// Memoized because the native layer polls it on a steady cadence.
+let globalSnapshotMemo = null;
+function globalSnapshot() {
+  const nowMs = Date.now();
+  if (globalSnapshotMemo && nowMs - globalSnapshotMemo.atMs < 60_000) {
+    return globalSnapshotMemo.value;
+  }
+  let identity = null;
+  try {
+    identity = loadOrCreateIdentity();
+  } catch {
+    identity = null;
+  }
+  let meterStats = null;
+  let todayTokens = null;
+  try {
+    const collected = cachedUsageHistory.collectCached();
+    meterStats = {
+      lifetimeTokens: collected.stats.lifetimeTokens,
+      currentStreakDays: collected.stats.currentStreakDays,
+    };
+    const today = new Date(nowMs);
+    const todayKey = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, "0"),
+      String(today.getDate()).padStart(2, "0"),
+    ].join("-");
+    todayTokens = collected.days.find((day) => day.date === todayKey)?.total ?? 0;
+  } catch {
+    meterStats = null;
+    todayTokens = null;
+  }
+  const value = {
+    status: "global",
+    binding: { exact: false },
+    meterId: identity?.meterId ?? null,
+    meterHandle: identity?.handle ?? null,
+    sharingEnabled: identity?.sharing?.enabled ?? false,
+    handlePrompted: identity?.handlePromptedAtMs != null,
+    meterStats,
+    todayTokens,
+  };
+  globalSnapshotMemo = { atMs: nowMs, value };
+  return value;
+}
 const runtime = new ClaudeSnapshotRuntime({
   sessionsDirectory:
     options.sessionsDirectory ??
@@ -129,6 +192,20 @@ const runtime = new ClaudeSnapshotRuntime({
     options.projectsDirectory ?? path.join(os.homedir(), ".claude", "projects"),
   usageHistory: { collect: () => cachedUsageHistory.collectCached() },
 });
+
+// The same overlay serves Codex windows. Constructed lazily so a Claude-only
+// session never opens the Codex state database or scans ~/.codex.
+let codexRuntime = null;
+function ensureCodexRuntime() {
+  if (codexRuntime == null) {
+    codexRuntime = new CodexSnapshotRuntime({
+      sessionsDirectory: options.codexSessionsDirectory,
+      stateDatabasePath: options.codexStateDatabase,
+      usageHistory: { collect: () => cachedUsageHistory.collectCached() },
+    });
+  }
+  return codexRuntime;
+}
 let dashboardServer = null;
 const input = readline.createInterface({
   input: process.stdin,
@@ -181,6 +258,20 @@ for await (const line of input) {
         sharingEnabled: identity.sharing.enabled,
       });
       if (identity.sharing.enabled) void syncCommunity("consent");
+      continue;
+    }
+    if (request?.command === "global-snapshot") {
+      const snapshot = { ...globalSnapshot() };
+      snapshot.appVersion = installedVersion;
+      if (updateInfo) snapshot.updateInfo = { version: updateInfo.version };
+      await writeLine({ requestId, snapshot });
+      continue;
+    }
+    if (request?.command === "codex-snapshot") {
+      const snapshot = await ensureCodexRuntime().snapshot();
+      snapshot.appVersion = installedVersion;
+      if (updateInfo) snapshot.updateInfo = { version: updateInfo.version };
+      await writeLine({ requestId, snapshot });
       continue;
     }
     if (request?.command === "update-info") {

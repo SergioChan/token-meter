@@ -478,3 +478,79 @@ test("opening settings closes the stats view and shows the installed version", a
     "Token Widget v9.9.9 · v9.9.10 available",
   );
 });
+
+test("the global face renders machine-wide totals without a session", async () => {
+  const source = (
+    await readFile(new URL("../runtime/token-meter-ui.js", import.meta.url), "utf8")
+  ).replace("__TOKEN_METER_CSS_JSON__", JSON.stringify(""));
+  const created = [];
+  const documentElement = new FakeElement("html");
+  documentElement.isConnected = true;
+  const window = {
+    innerWidth: 1_200,
+    innerHeight: 800,
+    addEventListener() {},
+    localStorage: { getItem() { return null; }, setItem() {} },
+    webkit: {
+      messageHandlers: {
+        tokenMeterAction: { postMessage() {} },
+      },
+    },
+  };
+  const context = vm.createContext({
+    document: {
+      createElement(tagName) {
+        const element = new FakeElement(tagName);
+        created.push(element);
+        return element;
+      },
+      documentElement,
+    },
+    window,
+    MutationObserver: class {
+      observe() {}
+      disconnect() {}
+    },
+    performance: { now: () => 0 },
+    requestAnimationFrame() {},
+    clearTimeout() {},
+    setTimeout() {},
+  });
+
+  vm.runInContext(source, context);
+  const card = created.find((element) => element.tagName === "section");
+  const sessionId = card.querySelector(".session-id");
+  const dayLabel = card.querySelector(".day-label");
+  const dayTotal = card.querySelector(".day-total");
+  const lifetime = card.querySelector(".lifetime");
+  const streak = card.querySelector(".streak");
+  const rate = card.querySelector(".rate");
+  const unbound = card.querySelector(".unbound");
+
+  window.__tokenMeter.update({
+    status: "global",
+    binding: { exact: false },
+    meterId: "TM-TEST-0000-0000",
+    meterHandle: "chandler",
+    sharingEnabled: false,
+    todayTokens: 500,
+    meterStats: { lifetimeTokens: 2_000_000, currentStreakDays: 3 },
+    appVersion: "9.9.9",
+  });
+
+  assert.equal(card.dataset.mode, "global");
+  assert.equal(unbound.hidden, true);
+  assert.equal(sessionId.textContent, "@chandler");
+  assert.equal(dayLabel.textContent, "TODAY");
+  assert.equal(dayTotal.textContent, "500");
+  assert.equal(lifetime.textContent, "2.000M");
+  assert.equal(streak.textContent, "3 days");
+  assert.equal(rate.textContent, "Idle");
+
+  // Losing the bridge falls back to the honest unknown-session face.
+  window.__tokenMeter.update({ status: "unbound", binding: { exact: false } });
+  assert.equal(card.dataset.mode, "unbound");
+  assert.equal(unbound.hidden, false);
+  assert.equal(dayLabel.textContent, "24H TOTAL");
+  assert.equal(sessionId.textContent, "UNBOUND");
+});

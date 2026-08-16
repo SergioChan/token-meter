@@ -43,6 +43,22 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+# The CDP adapter is deprecated: the native Token Widget overlay now meters
+# Codex without a loopback debugging port, without launch flags, and without
+# ever quitting or relaunching Codex. This source installer is kept working for
+# now but will be removed in a future release. Set TOKEN_METER_CODEX_CDP_ACK=1
+# to silence this notice in existing automation.
+if [ "${TOKEN_METER_CODEX_CDP_ACK:-}" != "1" ]; then
+  cat >&2 <<'EOF'
+NOTICE: The Codex CDP adapter is deprecated.
+  The Token Widget app (the notarized DMG) now supports Codex natively — it
+  reads the active thread from Codex's local state and never touches the running
+  Codex process. Prefer installing that app instead of this CDP adapter.
+  This installer still works for now and will be removed in a future release.
+  Set TOKEN_METER_CODEX_CDP_ACK=1 to silence this notice.
+EOF
+fi
+
 case "$PORT" in
   ''|*[!0-9]*)
     printf 'Port must be numeric.\n' >&2

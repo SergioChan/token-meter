@@ -6,7 +6,9 @@ import Security
 import WebKit
 
 private let claudeBundleID = "com.anthropic.claudefordesktop"
+private let codexBundleID = "com.openai.codex"
 private let defaultClaudeAppPath = "/Applications/Claude.app"
+private let launchAgentLabel = "com.sergiochan.token-meter.claude-desktop"
 private let fileManager = FileManager.default
 
 private func accessibilityTrusted() -> Bool {
@@ -69,7 +71,7 @@ private func absoluteURL(_ value: String, option: String) throws -> URL {
 // The freshly bootstrapped agent instance takes over; callers keep running
 // only for this session (KeepAlive restarts us on quit or next login).
 private func selfInstallLaunchAgent(rootPath: String, nodePath: String, statePath: String) throws {
-    let label = "com.sergiochan.token-meter.claude-desktop"
+    let label = launchAgentLabel
     let executable = Bundle.main.executablePath ?? CommandLine.arguments[0]
     let logDir = fileManager.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/Token Meter/Claude Desktop").path
@@ -183,6 +185,10 @@ private func parseCommand(_ arguments: [String]) throws -> AppCommand {
         sessionsDirectoryURL: try absoluteURL(sessionsPath, option: "--sessions-dir"),
         projectsDirectoryURL: try absoluteURL(projectsPath, option: "--projects-dir")
     )
+    // The Claude model catalog (app.asar) is intentionally not required: the
+    // overlay also serves Codex windows on machines without Claude installed,
+    // and ClaudeContextWindowResolver already degrades to nil when it is
+    // absent. Codex context windows come from the rollout snapshot instead.
     let requiredFiles = [
         configuration.rootURL.appendingPathComponent("src/cli.mjs"),
         configuration.rootURL.appendingPathComponent("runtime/token-meter-ui.js"),
@@ -190,7 +196,6 @@ private func parseCommand(_ arguments: [String]) throws -> AppCommand {
         configuration.rootURL.appendingPathComponent(
             "integrations/claude-desktop/src/overlay-bridge.mjs"
         ),
-        configuration.modelCatalogURL,
     ]
     for fileURL in requiredFiles where !fileManager.fileExists(atPath: fileURL.path) {
         throw CommandError(description: "Required file is missing: \(fileURL.path)")
@@ -207,6 +212,140 @@ private func parseCommand(_ arguments: [String]) throws -> AppCommand {
 final class OverlayPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+}
+
+// Unregisters the LaunchAgent (so KeepAlive stops resurrecting us) ahead of a
+// deliberate quit. Shared by the settings power button and the menu-bar item.
+private func bootOutOverlayLaunchAgent() {
+    let bootout = Process()
+    bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    bootout.arguments = ["bootout", "gui/\(getuid())/\(launchAgentLabel)"]
+    try? bootout.run()
+    bootout.waitUntilExit()
+}
+
+// User-facing visibility switches, shared by the status-bar menu and the
+// overlay tick loop. Persisted so relaunches keep the user's choice.
+private final class WidgetPreferences {
+    private let url: URL
+    var widgetVisible: Bool { didSet { save() } }
+    var alwaysVisible: Bool { didSet { save() } }
+
+    init(stateDirectoryURL: URL) {
+        url = stateDirectoryURL.appendingPathComponent("visibility.json")
+        widgetVisible = true
+        alwaysVisible = true
+        guard let data = try? Data(contentsOf: url),
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Bool] else {
+            return
+        }
+        widgetVisible = value["widgetVisible"] ?? true
+        alwaysVisible = value["alwaysVisible"] ?? true
+    }
+
+    private func save() {
+        let value = ["widgetVisible": widgetVisible, "alwaysVisible": alwaysVisible]
+        guard let data = try? JSONSerialization.data(withJSONObject: value) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+}
+
+// Menu-bar presence: the app is a Dock-less LaunchAgent accessory, so the
+// status item is the one place the user can always find the widget — show or
+// hide it, keep it on the desktop, open the dashboard, or quit.
+private final class StatusBarController: NSObject, NSMenuDelegate {
+    private let preferences: WidgetPreferences
+    private let openDashboardHandler: () -> Void
+    private let quitHandler: () -> Void
+    private let statusItem: NSStatusItem
+    private let showItem: NSMenuItem
+    private let alwaysItem: NSMenuItem
+    private let dashboardItem: NSMenuItem
+    private let accessibilityItem: NSMenuItem
+
+    init(
+        preferences: WidgetPreferences,
+        openDashboard: @escaping () -> Void,
+        quit: @escaping () -> Void
+    ) {
+        self.preferences = preferences
+        openDashboardHandler = openDashboard
+        quitHandler = quit
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        showItem = NSMenuItem(title: "Show Widget", action: nil, keyEquivalent: "")
+        alwaysItem = NSMenuItem(
+            title: "Always Show on Desktop", action: nil, keyEquivalent: ""
+        )
+        dashboardItem = NSMenuItem(title: "Open Dashboard…", action: nil, keyEquivalent: "")
+        accessibilityItem = NSMenuItem(
+            title: "Grant Accessibility Access…", action: nil, keyEquivalent: ""
+        )
+        super.init()
+        if let button = statusItem.button {
+            if let image = NSImage(
+                systemSymbolName: "gauge.medium", accessibilityDescription: "Token Widget"
+            ) ?? NSImage(systemSymbolName: "gauge", accessibilityDescription: "Token Widget") {
+                image.isTemplate = true
+                button.image = image
+            } else {
+                button.title = "TW"
+            }
+            button.toolTip = "Token Widget"
+        }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.delegate = self
+        let quitItem = NSMenuItem(
+            title: "Quit Token Widget", action: #selector(quitAction), keyEquivalent: "q"
+        )
+        let actions: [(NSMenuItem, Selector)] = [
+            (showItem, #selector(toggleShow)),
+            (alwaysItem, #selector(toggleAlways)),
+            (dashboardItem, #selector(openDashboardAction)),
+            (accessibilityItem, #selector(openAccessibilitySettings)),
+            (quitItem, #selector(quitAction)),
+        ]
+        for (item, action) in actions {
+            item.target = self
+            item.action = action
+        }
+        accessibilityItem.toolTip =
+            "The widget needs Accessibility access to find Claude and Codex windows."
+        alwaysItem.toolTip =
+            "Keep the widget on the desktop when Claude or Codex is not in front."
+        menu.addItem(showItem)
+        menu.addItem(alwaysItem)
+        menu.addItem(.separator())
+        menu.addItem(dashboardItem)
+        menu.addItem(accessibilityItem)
+        menu.addItem(.separator())
+        menu.addItem(quitItem)
+        statusItem.menu = menu
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        showItem.state = preferences.widgetVisible ? .on : .off
+        alwaysItem.state = preferences.alwaysVisible ? .on : .off
+        alwaysItem.isEnabled = preferences.widgetVisible
+        let trusted = accessibilityTrusted()
+        accessibilityItem.isHidden = trusted
+        dashboardItem.isEnabled = trusted
+    }
+
+    @objc private func toggleShow() { preferences.widgetVisible.toggle() }
+    @objc private func toggleAlways() { preferences.alwaysVisible.toggle() }
+    @objc private func openDashboardAction() { openDashboardHandler() }
+    @objc private func openAccessibilitySettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+        ) else { return }
+        NSWorkspace.shared.open(url)
+    }
+    @objc private func quitAction() { quitHandler() }
+
+    deinit {
+        NSStatusBar.system.removeStatusItem(statusItem)
+    }
 }
 
 private struct SnapshotBridgeError: Error, CustomStringConvertible {
@@ -460,6 +599,7 @@ private final class SnapshotBridge {
 private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
     private let configuration: AppConfiguration
     private let health: RuntimeHealth
+    private let preferences: WidgetPreferences
     private let snapshotBridge: SnapshotBridge
     private let contextWindowResolver: ClaudeContextWindowResolver
     private let expandedPanelSize = CGSize(width: 320, height: 250)
@@ -476,6 +616,14 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
     private var visibleContextWindowTokens: Int?
     private var defaultPanelOrigin = CGPoint.zero
     private var userOffset = CGPoint.zero
+    private var desktopOffset = CGPoint.zero
+    private var desktopPositioned = false
+    private var showingGlobalFace = false
+    private var globalSnapshotInFlight = false
+    private var lastGlobalSnapshotAt = Date.distantPast
+    private var showingCodexFace = false
+    private var codexSnapshotInFlight = false
+    private var lastCodexSnapshotAt = Date.distantPast
     private var dragTimer: Timer?
     private var dragStartMouse = CGPoint.zero
     private var dragStartPanel = CGPoint.zero
@@ -484,9 +632,14 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
     private var lastHostPosition: CGPoint?
     private var lastHostSize: CGSize?
 
-    init(configuration: AppConfiguration, health: RuntimeHealth) {
+    init(
+        configuration: AppConfiguration,
+        health: RuntimeHealth,
+        preferences: WidgetPreferences
+    ) {
         self.configuration = configuration
         self.health = health
+        self.preferences = preferences
         snapshotBridge = SnapshotBridge(configuration: configuration)
         contextWindowResolver = ClaudeContextWindowResolver(
             modelCatalogURL: configuration.modelCatalogURL
@@ -585,36 +738,66 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
     }
 
     private func tick() {
-        guard let claude = NSRunningApplication.runningApplications(
-            withBundleIdentifier: claudeBundleID
-        ).first else {
-            panel.orderOut(nil)
-            currentSessionID = nil
-            health.update(sessionBound: false)
+        guard preferences.widgetVisible else {
+            hidePanel()
             return
         }
+        // A frontmost Claude window with a Claude Code session gets the bound
+        // session face; a frontmost Codex window gets the bound Codex face
+        // (thread resolved from the Codex state database by the bridge); a
+        // frontmost Claude with no session gets the machine-wide face pinned to
+        // that window; with none in front, the machine-wide face parks on the
+        // desktop when the user wants it.
+        if let window = frontmostHostWindow(bundleID: claudeBundleID),
+           let position = axPoint(window, kAXPositionAttribute),
+           let size = axSize(window, kAXSizeAttribute) {
+            if let surface = resolveClaudeCodeSurface(in: window) {
+                showSessionFace(surface: surface, hostPosition: position, hostSize: size)
+            } else {
+                showGlobalFace(hostPosition: position, hostSize: size)
+            }
+            return
+        }
+        if let window = frontmostHostWindow(bundleID: codexBundleID),
+           let position = axPoint(window, kAXPositionAttribute),
+           let size = axSize(window, kAXSizeAttribute) {
+            showCodexFace(hostPosition: position, hostSize: size)
+            return
+        }
+        if preferences.alwaysVisible {
+            showGlobalFace(hostPosition: nil, hostSize: nil)
+            return
+        }
+        hidePanel()
+    }
 
-        let appElement = AXUIElementCreateApplication(claude.processIdentifier)
-        guard claude.isActive,
-              let window = axElement(appElement, kAXFocusedWindowAttribute),
-              let position = axPoint(window, kAXPositionAttribute),
-              let size = axSize(window, kAXSizeAttribute) else {
-            panel.orderOut(nil)
-            health.update(sessionBound: false)
-            return
-        }
+    private func frontmostHostWindow(bundleID: String) -> AXUIElement? {
+        guard let app = NSRunningApplication.runningApplications(
+            withBundleIdentifier: bundleID
+        ).first(where: { $0.isActive }) else { return nil }
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        return axElement(appElement, kAXFocusedWindowAttribute)
+    }
 
-        guard let surface = resolveClaudeCodeSurface(in: window) else {
-            panel.orderOut(nil)
-            currentSessionID = nil
-            visibleContextWindowTokens = nil
-            health.update(bridgeHealthy: false, sessionBound: false)
-            publishUnbound()
-            return
-        }
+    private func hidePanel() {
+        panel.orderOut(nil)
+        currentSessionID = nil
+        showingGlobalFace = false
+        showingCodexFace = false
+        health.update(sessionBound: false)
+    }
+
+    private func showSessionFace(
+        surface: ClaudeCodeSurface, hostPosition: CGPoint, hostSize: CGSize
+    ) {
         let identifier = surface.sessionID
 
-        positionPanel(hostPosition: position, hostSize: size)
+        if showingGlobalFace || showingCodexFace {
+            showingGlobalFace = false
+            showingCodexFace = false
+            publishUnbound()
+        }
+        positionPanel(hostPosition: hostPosition, hostSize: hostSize)
         panel.orderFrontRegardless()
 
         if identifier != currentSessionID {
@@ -638,7 +821,93 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         }
     }
 
+    // Shared face for Codex windows and the bare desktop: the bridge's
+    // machine-wide usage totals instead of a bound Claude session.
+    private func showGlobalFace(hostPosition: CGPoint?, hostSize: CGSize?) {
+        if currentSessionID != nil || showingCodexFace || !showingGlobalFace {
+            currentSessionID = nil
+            showingCodexFace = false
+            visibleContextWindowTokens = nil
+            contextScanCadence.reset()
+            lastGlobalSnapshotAt = .distantPast
+            health.update(sessionBound: false)
+        }
+        showingGlobalFace = true
+        if let hostPosition, let hostSize {
+            positionPanel(hostPosition: hostPosition, hostSize: hostSize)
+        } else {
+            positionPanelOnDesktop()
+        }
+        panel.orderFrontRegardless()
+        if Date().timeIntervalSince(lastGlobalSnapshotAt) >= 5 {
+            fetchGlobalSnapshot()
+        }
+    }
+
+    private func fetchGlobalSnapshot() {
+        guard !globalSnapshotInFlight, pageReady else { return }
+        globalSnapshotInFlight = true
+        lastGlobalSnapshotAt = Date()
+        snapshotBridge.command(["command": "global-snapshot"]) { [weak self] result in
+            guard let self else { return }
+            self.globalSnapshotInFlight = false
+            guard self.showingGlobalFace else { return }
+            guard case .success(let snapshot) = result,
+                  let data = try? JSONSerialization.data(withJSONObject: snapshot) else {
+                self.health.update(bridgeHealthy: false)
+                self.publishUnbound()
+                return
+            }
+            self.health.update(bridgeHealthy: true)
+            let json = String(decoding: data, as: UTF8.self)
+            self.webView.evaluateJavaScript("window.__tokenMeter?.update(\(json))")
+        }
+    }
+
+    // Bound face for a frontmost Codex window. The bridge resolves which Codex
+    // thread is active from the state database, so — unlike the Claude session
+    // face — the native side supplies no session identifier and reads no
+    // Accessibility tree; it only pins the panel to the window and polls.
+    private func showCodexFace(hostPosition: CGPoint, hostSize: CGSize) {
+        if currentSessionID != nil || showingGlobalFace || !showingCodexFace {
+            currentSessionID = nil
+            showingGlobalFace = false
+            visibleContextWindowTokens = nil
+            contextScanCadence.reset()
+            lastCodexSnapshotAt = .distantPast
+            publishUnbound()
+        }
+        showingCodexFace = true
+        positionPanel(hostPosition: hostPosition, hostSize: hostSize)
+        panel.orderFrontRegardless()
+        if Date().timeIntervalSince(lastCodexSnapshotAt) >= 0.8 {
+            fetchCodexSnapshot()
+        }
+    }
+
+    private func fetchCodexSnapshot() {
+        guard !codexSnapshotInFlight, pageReady else { return }
+        codexSnapshotInFlight = true
+        lastCodexSnapshotAt = Date()
+        snapshotBridge.command(["command": "codex-snapshot"]) { [weak self] result in
+            guard let self else { return }
+            self.codexSnapshotInFlight = false
+            guard self.showingCodexFace else { return }
+            guard case .success(let snapshot) = result,
+                  let data = try? JSONSerialization.data(withJSONObject: snapshot) else {
+                self.health.update(bridgeHealthy: false, sessionBound: false)
+                self.publishUnbound()
+                return
+            }
+            let bound = (snapshot["binding"] as? [String: Any])?["exact"] as? Bool ?? false
+            self.health.update(bridgeHealthy: true, sessionBound: bound)
+            let json = String(decoding: data, as: UTF8.self)
+            self.webView.evaluateJavaScript("window.__tokenMeter?.update(\(json))")
+        }
+    }
+
     private func positionPanel(hostPosition: CGPoint, hostSize: CGSize) {
+        desktopPositioned = false
         lastHostPosition = hostPosition
         lastHostSize = hostSize
         let hostCenter = CGPoint(
@@ -673,6 +942,35 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
                 y: defaultPanelOrigin.y + userOffset.y
             ))
         }
+    }
+
+    // With no host window to follow, the widget parks in the bottom-right
+    // corner of the primary screen (screens.first is deterministic; .main
+    // follows other apps' key windows across displays). Its drag offset is
+    // remembered separately from the window-following offset.
+    private func positionPanelOnDesktop() {
+        desktopPositioned = true
+        lastHostPosition = nil
+        lastHostSize = nil
+        guard let screen = NSScreen.screens.first else { return }
+        let frame = screen.visibleFrame
+        defaultPanelOrigin = CGPoint(
+            x: frame.maxX - currentPanelSize.width - 24,
+            y: frame.minY + 24
+        )
+        guard !dragging else { return }
+        var origin = CGPoint(
+            x: defaultPanelOrigin.x + desktopOffset.x,
+            y: defaultPanelOrigin.y + desktopOffset.y
+        )
+        // A stale drag offset can point at a display that is no longer
+        // attached; fall back to the default corner instead of parking the
+        // widget somewhere invisible.
+        let target = CGRect(origin: origin, size: currentPanelSize)
+        if !NSScreen.screens.contains(where: { $0.visibleFrame.intersects(target) }) {
+            origin = defaultPanelOrigin
+        }
+        panel.setFrameOrigin(origin)
     }
 
     private func fetchSnapshot(for identifier: String, contextWindowTokens: Int?) {
@@ -779,6 +1077,8 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         resizePanel()
         if let position = lastHostPosition, let size = lastHostSize {
             positionPanel(hostPosition: position, hostSize: size)
+        } else if desktopPositioned {
+            positionPanelOnDesktop()
         }
         saveCollapsedState()
     }
@@ -829,22 +1129,7 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
     private func handleAction(type: String, body: [String: Any]) {
         switch type {
         case "open-dashboard":
-            // The dashboard is served by the bridge's loopback server so the
-            // page can read the profile and claim a handle. Only a loopback
-            // URL returned by our own bridge is ever opened. The optional
-            // view ("share" / "withdraw") selects the consent wizard page.
-            var command: [String: Any] = ["command": "dashboard-url"]
-            if let view = body["view"] as? String, view == "share" || view == "withdraw" {
-                command["view"] = view
-            }
-            snapshotBridge.command(command) { result in
-                guard case .success(let payload) = result,
-                      let urlString = payload["url"] as? String,
-                      let url = URL(string: urlString),
-                      url.scheme == "http",
-                      url.host == "127.0.0.1" else { return }
-                DispatchQueue.main.async { NSWorkspace.shared.open(url) }
-            }
+            openDashboard(view: body["view"] as? String)
         case "open-leaderboard":
             snapshotBridge.command(["command": "leaderboard-url"]) { result in
                 guard case .success(let payload) = result,
@@ -863,14 +1148,7 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
         case "quit-widget":
-            let bootout = Process()
-            bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-            bootout.arguments = ["bootout", "gui/\(getuid())/com.sergiochan.token-meter.claude-desktop"]
-            try? bootout.run()
-            bootout.waitUntilExit()
-            // Same reason as the updater: the bridge outlives a bare exit.
-            snapshotBridge.stop()
-            exit(0)
+            quitWidget()
         case "set-sharing":
             let enabled = body["enabled"] as? Bool ?? false
             snapshotBridge.command(["command": "set-sharing", "enabled": enabled]) { _ in }
@@ -894,6 +1172,35 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         default:
             break
         }
+    }
+
+    // The dashboard is served by the bridge's loopback server so the page can
+    // read the profile and claim a handle. Only a loopback URL returned by our
+    // own bridge is ever opened. The optional view ("share" / "withdraw")
+    // selects the consent wizard page. Reached from the overlay's settings
+    // panel and from the status-bar menu.
+    func openDashboard(view: String? = nil) {
+        var command: [String: Any] = ["command": "dashboard-url"]
+        if let view, view == "share" || view == "withdraw" {
+            command["view"] = view
+        }
+        snapshotBridge.command(command) { result in
+            guard case .success(let payload) = result,
+                  let urlString = payload["url"] as? String,
+                  let url = URL(string: urlString),
+                  url.scheme == "http",
+                  url.host == "127.0.0.1" else { return }
+            DispatchQueue.main.async { NSWorkspace.shared.open(url) }
+        }
+    }
+
+    // Deliberate, user-initiated quit: unregister the LaunchAgent so KeepAlive
+    // does not resurrect the widget, then take the bridge down — it outlives a
+    // bare exit otherwise.
+    func quitWidget() -> Never {
+        bootOutOverlayLaunchAgent()
+        snapshotBridge.stop()
+        exit(0)
     }
 
     // Pushes install progress to the banner. States come from string literals
@@ -1104,29 +1411,44 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         dragging = false
         dragTimer?.invalidate()
         dragTimer = nil
-        userOffset = CGPoint(
+        let offset = CGPoint(
             x: panel.frame.origin.x - defaultPanelOrigin.x,
             y: panel.frame.origin.y - defaultPanelOrigin.y
         )
-        saveOffset()
+        if desktopPositioned {
+            desktopOffset = offset
+            saveOffset(offset, to: desktopOffsetURL)
+        } else {
+            userOffset = offset
+            saveOffset(offset, to: offsetURL)
+        }
     }
 
     private var offsetURL: URL {
         configuration.stateDirectoryURL.appendingPathComponent("position.json")
     }
 
-    private func loadOffset() {
-        guard let data = try? Data(contentsOf: offsetURL),
-              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Double] else {
-            return
-        }
-        userOffset = CGPoint(x: value["x"] ?? 0, y: value["y"] ?? 0)
+    private var desktopOffsetURL: URL {
+        configuration.stateDirectoryURL.appendingPathComponent("position-desktop.json")
     }
 
-    private func saveOffset() {
-        let value = ["x": userOffset.x, "y": userOffset.y]
+    private func loadOffset() {
+        userOffset = readOffset(from: offsetURL)
+        desktopOffset = readOffset(from: desktopOffsetURL)
+    }
+
+    private func readOffset(from url: URL) -> CGPoint {
+        guard let data = try? Data(contentsOf: url),
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Double] else {
+            return .zero
+        }
+        return CGPoint(x: value["x"] ?? 0, y: value["y"] ?? 0)
+    }
+
+    private func saveOffset(_ offset: CGPoint, to url: URL) {
+        let value = ["x": offset.x, "y": offset.y]
         guard let data = try? JSONSerialization.data(withJSONObject: value) else { return }
-        try? data.write(to: offsetURL, options: .atomic)
+        try? data.write(to: url, options: .atomic)
     }
 }
 
@@ -1134,14 +1456,30 @@ private final class CompanionRuntime {
     private let configuration: AppConfiguration
     private var permissionTimer: Timer?
     private let health: RuntimeHealth
+    private let preferences: WidgetPreferences
+    private var statusBar: StatusBarController?
     private var meterController: MeterController?
 
     init(configuration: AppConfiguration) throws {
         self.configuration = configuration
         health = try RuntimeHealth(stateDirectoryURL: configuration.stateDirectoryURL)
+        preferences = WidgetPreferences(stateDirectoryURL: configuration.stateDirectoryURL)
     }
 
     func start() {
+        // The status item exists even while Accessibility is missing, so the
+        // user can always find the widget, grant access, or quit.
+        statusBar = StatusBarController(
+            preferences: preferences,
+            openDashboard: { [weak self] in self?.meterController?.openDashboard() },
+            quit: { [weak self] in
+                if let controller = self?.meterController {
+                    controller.quitWidget()
+                }
+                bootOutOverlayLaunchAgent()
+                exit(0)
+            }
+        )
         reconcileAccessibility(logWaiting: true)
         permissionTimer = Timer.scheduledTimer(
             withTimeInterval: 2,
@@ -1169,7 +1507,11 @@ private final class CompanionRuntime {
             return
         }
         guard meterController == nil else { return }
-        let controller = MeterController(configuration: configuration, health: health)
+        let controller = MeterController(
+            configuration: configuration,
+            health: health,
+            preferences: preferences
+        )
         meterController = controller
         controller.start()
     }

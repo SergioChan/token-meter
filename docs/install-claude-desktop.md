@@ -10,7 +10,7 @@ The signed and Apple-notarized DMG is the normal installation path. Source build
 
 - macOS 13 or newer.
 - The official signed Claude Desktop application at `/Applications/Claude.app`.
-- Permission to enable **Token Widget for Claude** in System Settings > Privacy & Security > Accessibility.
+- Permission to enable **Token Widget** in System Settings > Privacy & Security > Accessibility.
 
 The DMG contains its own compatible Node.js runtime. Building from source additionally requires Git, Node.js 22.12 or newer, and Xcode Command Line Tools with Swift.
 
@@ -48,7 +48,7 @@ Or select Node.js explicitly:
 The installer performs these operations:
 
 1. Verifies the canonical Claude.app path, bundle identifier, Anthropic Team ID, code signature, executable, and packaged model catalog.
-2. Builds and signs `Token Widget for Claude.app` as a separate background application. Source builds use ad-hoc signing unless a stable identity is supplied.
+2. Builds and signs `Token Widget.app` as a separate background application. Source builds use ad-hoc signing unless a stable identity is supplied.
 3. Copies the numerical collector, shared metrics core, and shared meter runtime into an isolated install root.
 4. Writes and loads `com.sergiochan.token-meter.claude-desktop` as a per-user LaunchAgent.
 5. Requests Accessibility permission for the companion application itself.
@@ -57,7 +57,7 @@ To build only the local app bundle for inspection:
 
 ```bash
 ./integrations/claude-desktop/scripts/build-app.sh \
-  --output "$PWD/local-artifacts/Token Widget for Claude.app"
+  --output "$PWD/local-artifacts/Token Widget.app"
 ```
 
 That bundle still expects the repository runtime and a compatible local Node.js path. Run the installer for the complete runtime copy and LaunchAgent configuration.
@@ -77,13 +77,13 @@ If installation reports `Accessibility permission: required`:
 
 1. Open System Settings.
 2. Go to **Privacy & Security > Accessibility**.
-3. Enable **Token Widget for Claude**.
+3. Enable **Token Widget**.
 4. Wait up to two seconds for the already-running companion to observe the new permission.
 
 If the application is not listed, request the system prompt again:
 
 ```bash
-open -n -a "$HOME/Library/Application Support/Token Meter/Claude Desktop/Token Widget for Claude.app" \
+open -n -a "$HOME/Library/Application Support/Token Meter/Claude Desktop/Token Widget.app" \
   --args --prompt-accessibility
 ```
 
