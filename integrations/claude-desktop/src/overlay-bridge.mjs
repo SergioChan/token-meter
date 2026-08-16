@@ -115,6 +115,54 @@ if (options.help) {
 }
 
 const cachedUsageHistory = new UsageHistory();
+
+// Aggregate face for the always-on desktop widget and non-Claude hosts: no
+// session binding, just machine-wide totals from the usage-history cache.
+// Memoized because the native layer polls it on a steady cadence.
+let globalSnapshotMemo = null;
+function globalSnapshot() {
+  const nowMs = Date.now();
+  if (globalSnapshotMemo && nowMs - globalSnapshotMemo.atMs < 60_000) {
+    return globalSnapshotMemo.value;
+  }
+  let identity = null;
+  try {
+    identity = loadOrCreateIdentity();
+  } catch {
+    identity = null;
+  }
+  let meterStats = null;
+  let todayTokens = null;
+  try {
+    const collected = cachedUsageHistory.collectCached();
+    meterStats = {
+      lifetimeTokens: collected.stats.lifetimeTokens,
+      currentStreakDays: collected.stats.currentStreakDays,
+    };
+    const today = new Date(nowMs);
+    const todayKey = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, "0"),
+      String(today.getDate()).padStart(2, "0"),
+    ].join("-");
+    todayTokens = collected.days.find((day) => day.date === todayKey)?.total ?? 0;
+  } catch {
+    meterStats = null;
+    todayTokens = null;
+  }
+  const value = {
+    status: "global",
+    binding: { exact: false },
+    meterId: identity?.meterId ?? null,
+    meterHandle: identity?.handle ?? null,
+    sharingEnabled: identity?.sharing?.enabled ?? false,
+    handlePrompted: identity?.handlePromptedAtMs != null,
+    meterStats,
+    todayTokens,
+  };
+  globalSnapshotMemo = { atMs: nowMs, value };
+  return value;
+}
 const runtime = new ClaudeSnapshotRuntime({
   sessionsDirectory:
     options.sessionsDirectory ??
@@ -181,6 +229,13 @@ for await (const line of input) {
         sharingEnabled: identity.sharing.enabled,
       });
       if (identity.sharing.enabled) void syncCommunity("consent");
+      continue;
+    }
+    if (request?.command === "global-snapshot") {
+      const snapshot = { ...globalSnapshot() };
+      snapshot.appVersion = installedVersion;
+      if (updateInfo) snapshot.updateInfo = { version: updateInfo.version };
+      await writeLine({ requestId, snapshot });
       continue;
     }
     if (request?.command === "update-info") {

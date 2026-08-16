@@ -63,7 +63,7 @@
       </div>
     </div>
     <div class="metric-row bottom-toggle" title="Click for session details">
-      <span><small>24H TOTAL</small><b class="day-total">—</b></span>
+      <span><small class="day-label">24H TOTAL</small><b class="day-total">—</b></span>
       <span><small>CURRENT STREAK</small><b class="streak">—</b></span>
     </div>
     <div class="context-row bottom-toggle" title="Click for session details">
@@ -147,6 +147,7 @@
     gauge: card.querySelector(".gauge"),
     sessionId: card.querySelector(".session-id"),
     sessionTotal: card.querySelector(".session-total"),
+    dayLabel: card.querySelector(".day-label"),
     dayTotal: card.querySelector(".day-total"),
     streak: card.querySelector(".streak"),
     lifetime: card.querySelector(".lifetime"),
@@ -533,26 +534,79 @@
       !wanted || !elements.warning.hidden || !elements.updateBanner.hidden;
   };
 
+  // Settings-panel identity, version line, and privacy toggle are shared by
+  // the session face and the machine-wide global face.
+  const renderSettingsIdentity = (snapshot) => {
+    if (snapshot?.meterHandle) {
+      elements.settingsIdentityLink.hidden = false;
+      elements.settingsIdentityLink.textContent = `@${snapshot.meterHandle}`;
+      elements.settingsAnon.hidden = true;
+    } else {
+      elements.settingsIdentityLink.hidden = true;
+      elements.settingsAnon.hidden = false;
+    }
+    elements.settingsClaim.hidden =
+      Boolean(snapshot?.meterHandle) || !snapshot?.meterId;
+    versionLabel = snapshot?.appVersion
+      ? `Token Widget v${snapshot.appVersion}` +
+        (snapshot.updateInfo?.version ? ` · v${snapshot.updateInfo.version} available` : "")
+      : "";
+    const tipText = elements.settingsTip.textContent;
+    if (!tipText || tipText.startsWith("Token Widget v")) {
+      elements.settingsTip.textContent = versionLabel;
+    }
+    if (Date.now() - sharingToggledAtMs > 3000) {
+      setPrivacyUI(Boolean(snapshot?.sharingEnabled));
+    }
+  };
+
   const update = (snapshot) => {
     ensureMounted();
     const bound = snapshot?.status === "bound" && snapshot?.binding?.exact;
+    const global = !bound && snapshot?.status === "global";
     card.dataset.bound = String(bound);
-    elements.unbound.hidden = bound;
+    card.dataset.mode = bound ? "session" : global ? "global" : "unbound";
+    elements.unbound.hidden = bound || global;
+    elements.dayLabel.textContent = global ? "TODAY" : "24H TOTAL";
     if (!bound) {
       elements.warning.hidden = true;
       renderUpdateBanner(snapshot);
       renderHandlePrompt(snapshot);
-      elements.sessionId.textContent = "UNBOUND";
+      if (global) {
+        // Desktop / non-Claude host face: identity plus machine-wide totals
+        // from the usage history; no live session, so the gauge idles.
+        renderSettingsIdentity(snapshot);
+        const identityLabel = snapshot.meterHandle
+          ? `@${snapshot.meterHandle}`
+          : snapshot.meterId;
+        elements.sessionId.textContent = identityLabel ?? "ALL AGENTS";
+        elements.sessionId.title =
+          "Machine-wide usage across Claude Code, Codex, and Cline" +
+          (nativeActions() ? " · Click to open your dashboard" : "");
+        elements.dayTotal.textContent =
+          snapshot.todayTokens == null ? "—" : format(snapshot.todayTokens);
+        const stats = snapshot.meterStats;
+        elements.streak.textContent =
+          stats?.currentStreakDays == null
+            ? "—"
+            : `${stats.currentStreakDays} day${stats.currentStreakDays === 1 ? "" : "s"}`;
+        elements.lifetime.textContent =
+          stats?.lifetimeTokens == null ? "—" : format(stats.lifetimeTokens);
+        elements.rate.textContent = "Idle";
+      } else {
+        elements.sessionId.textContent = "UNBOUND";
+        elements.sessionId.title = "";
+        elements.dayTotal.textContent = "—";
+        elements.streak.textContent = "—";
+        elements.lifetime.textContent = "—";
+        elements.rate.textContent = "Awaiting session";
+      }
       elements.sessionTotal.textContent = "—";
-      elements.dayTotal.textContent = "—";
-      elements.streak.textContent = "—";
-      elements.lifetime.textContent = "—";
       elements.turnTotal.textContent = "—";
       elements.contextTotal.textContent = "—";
       elements.contextExtra.textContent = "";
       elements.compactionCount.textContent = "—";
       elements.accountHour.textContent = "—";
-      elements.rate.textContent = "Awaiting session";
       elements.baseline.textContent = "—";
       elements.agentCount.textContent = "";
       elements.usageDelta.textContent = "";
@@ -588,26 +642,7 @@
         ? `Meter ${snapshot.meterId} · Session ${snapshot.sessionId}`
         : `Session ${snapshot.sessionId}`) +
       (nativeActions() ? " · Click to open your dashboard" : "");
-    if (snapshot.meterHandle) {
-      elements.settingsIdentityLink.hidden = false;
-      elements.settingsIdentityLink.textContent = `@${snapshot.meterHandle}`;
-      elements.settingsAnon.hidden = true;
-    } else {
-      elements.settingsIdentityLink.hidden = true;
-      elements.settingsAnon.hidden = false;
-    }
-    elements.settingsClaim.hidden = Boolean(snapshot.meterHandle) || !snapshot.meterId;
-    versionLabel = snapshot.appVersion
-      ? `Token Widget v${snapshot.appVersion}` +
-        (snapshot.updateInfo?.version ? ` · v${snapshot.updateInfo.version} available` : "")
-      : "";
-    const tipText = elements.settingsTip.textContent;
-    if (!tipText || tipText.startsWith("Token Widget v")) {
-      elements.settingsTip.textContent = versionLabel;
-    }
-    if (Date.now() - sharingToggledAtMs > 3000) {
-      setPrivacyUI(Boolean(snapshot.sharingEnabled));
-    }
+    renderSettingsIdentity(snapshot);
     const delta = Math.max(0, snapshot.session.totalTokens - lastSessionTotal);
     lastSessionTotal = snapshot.session.totalTokens;
     if (delta > 0 && !sessionChanged) {
