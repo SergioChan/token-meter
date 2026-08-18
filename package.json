@@ -1,6 +1,6 @@
 {
   "name": "token-meter",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "An open-source, session-aware live token meter for Codex Desktop and Claude Code in Claude Desktop.",
   "type": "module",
   "private": true,
