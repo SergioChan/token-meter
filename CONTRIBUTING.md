@@ -34,7 +34,7 @@ Changes must preserve these properties:
 - Child-Agent usage remains visible and explicitly labeled.
 - Renderer scripts are registered only after the target passes semantic verification.
 - Codex CDP remains loopback-only and is accepted only from the verified official Codex process tree.
-- Claude binds only the exact local Session exposed by the focused Accessibility window and never falls back to recency or display name.
+- Claude's Session face binds only the exact local Session exposed by the focused Accessibility window and never falls back to recency or display name. Non-Session Claude surfaces and non-frontmost hosts may show only the machine-wide global face, which has no Session ID, reports a non-exact binding, and never displays Session-scoped numbers.
 - The Claude companion remains independent from Claude.app, waits quietly when permission is absent, and never quits or relaunches Claude.
 - The collector never retains prompt, reasoning, tool, or assistant content.
 - Shutdown removes injected DOM or the native companion panel and never force-quits a host.
@@ -62,7 +62,7 @@ For Claude compatibility changes, also verify:
 
 1. The focused Code Session binds by exact `local_<uuid>`.
 2. Switching Sessions replaces the complete snapshot without retaining previous values.
-3. Chat, Cowork, Settings, auxiliary windows, and non-frontmost Claude hide the panel.
+3. Chat, Cowork, Settings, auxiliary windows, and non-frontmost hosts never show a Session-bound face. With the default visibility preferences they show the machine-wide global face; disabling **Always Visible** hides it when no supported host is frontmost, and disabling the widget hides it everywhere.
 4. Expanded and collapsed layouts both drag and persist correctly.
 5. Active Context uses root input-side usage and an exact model-window source.
 6. Missing Accessibility permission produces no repeated prompt, process churn, or Claude restart.
