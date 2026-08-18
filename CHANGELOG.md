@@ -11,6 +11,12 @@ published.
   window gets a bound face without a CDP debugging port, launch flags, or any
   quit/relaunch of Codex. The overlay installs and runs on machines without
   Claude installed, and the app is now named "Token Widget".
+- The widget and **Always Visible** mode are enabled by default. Claude Chat,
+  Cowork, Settings, auxiliary windows, and periods when neither Claude nor Codex
+  is frontmost now show the machine-wide global face instead of hiding the
+  widget. That face has no Session ID, reports `binding.exact = false`, and
+  never displays another Session's numbers. Both visibility choices remain
+  available from the Token Widget menu-bar menu.
 - Deprecated the Codex CDP adapter (`scripts/install-token-meter-macos.sh`). It
   still works but will be removed in a future release; prefer the app.
 - Hardened live rollout scanning when Codex prunes a JSONL file between
