@@ -4,7 +4,7 @@ The top entry is the current source version. Binary release metadata appears at
 `/api/v1/latest` only after a signed and notarized DMG has actually been
 published.
 
-## Unreleased
+## 0.4.0 — 2026-08-17
 
 - The Token Widget overlay now meters Codex natively. It reads the active thread
   from Codex's local state database and its rollout files, so a frontmost Codex
@@ -13,6 +13,12 @@ published.
   Claude installed, and the app is now named "Token Widget".
 - Deprecated the Codex CDP adapter (`scripts/install-token-meter-macos.sh`). It
   still works but will be removed in a future release; prefer the app.
+- Hardened live rollout scanning when Codex prunes a JSONL file between
+  discovery and reading, so the native overlay keeps running instead of
+  crashing on a transient missing-file race.
+- Standardized the packaged runtime and CI on Node.js 22.22, raised the source
+  minimum to Node.js 22.13, and added direct `node:sqlite` capability checks and
+  minimum-runtime regressions.
 
 ## 0.3.1 — 2026-08-15
 
