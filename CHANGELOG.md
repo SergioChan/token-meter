@@ -4,6 +4,16 @@ The top entry is the current source version. Binary release metadata appears at
 `/api/v1/latest` only after a signed and notarized DMG has actually been
 published.
 
+## Unreleased
+
+- The dashboard's Token activity views are live. Daily, Weekly and Cumulative
+  are now real toggle buttons, each drawn with the encoding that suits it:
+  Daily keeps the day heatmap, Weekly is a bar per calendar week, and
+  Cumulative is a running-total area chart. All three share the same 14px
+  per-week pitch, so the month axis underneath labels every view, and the
+  legend, caption and tooltips change with the selection. The choice is
+  remembered across reloads.
+
 ## 0.4.0 — 2026-08-17
 
 - The Token Widget overlay now meters Codex natively. It reads the active thread

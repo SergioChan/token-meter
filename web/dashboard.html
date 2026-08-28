@@ -163,9 +163,17 @@
 
   .cal-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
   .cal-head h2 { margin: 0; font-size: 1rem; }
-  .tabs { display: flex; gap: 14px; font-size: 0.85rem; }
-  .tabs span { color: var(--text-muted); cursor: default; }
-  .tabs .active { color: var(--text-primary); font-weight: 600; }
+  .tabs { display: flex; gap: 4px; font-size: 0.85rem; }
+  .tabs button {
+    appearance: none; font: inherit; padding: 3px 9px; border-radius: 999px;
+    border: 1px solid transparent; background: none; color: var(--text-muted); cursor: pointer;
+  }
+  .tabs button:hover { color: var(--text-secondary); }
+  .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .tabs button[aria-pressed="true"] {
+    color: var(--text-primary); font-weight: 600;
+    background: var(--surface-2); border-color: var(--border);
+  }
 
   .calendar-wrap { overflow-x: auto; padding-bottom: 6px; }
   .calendar { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 11px); gap: 3px; width: max-content; }
@@ -174,9 +182,32 @@
   .cell[data-l="2"] { background: var(--cell-2); }
   .cell[data-l="3"] { background: var(--cell-3); }
   .cell[data-l="4"] { background: var(--cell-4); }
+
+  /* Weekly and cumulative share the calendar's 14px-per-week pitch, so the
+     month row underneath labels all three views. */
+  .week-chart {
+    display: flex; align-items: flex-end; gap: 3px; height: 95px; width: max-content;
+    border-bottom: 1px solid var(--border);
+  }
+  .week-chart span {
+    flex: 0 0 11px; width: 11px; min-height: 1px;
+    background: var(--accent); border-radius: 2px 2px 0 0; opacity: 0.85;
+  }
+  .week-chart span:hover { opacity: 1; }
+  .cum-host { width: max-content; line-height: 0; border-bottom: 1px solid var(--border); }
+  .cum-area { fill: var(--accent); opacity: 0.16; }
+  .cum-line { fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linejoin: round; }
+  .cum-guide { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 2 3; }
+  .cum-dot { fill: var(--accent); stroke: var(--surface-1); stroke-width: 1.5; }
+  .cum-band { fill: transparent; }
+  /* These display rules outrank the UA [hidden] rule, so restore it by hand. */
+  .calendar[hidden], .week-chart[hidden], .cum-host[hidden], .cal-legend > span[hidden] { display: none; }
+
   .months { display: flex; width: max-content; margin-top: 6px; color: var(--text-muted); font-size: 0.74rem; }
   .cal-legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; color: var(--text-muted); font-size: 0.74rem; }
+  .cal-legend > span { display: flex; align-items: center; gap: 4px; }
   .cal-legend .cell { display: inline-block; }
+  .cal-note { margin: 6px 0 0; color: var(--text-muted); font-size: 0.74rem; }
 
   .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-top: 40px; }
   .columns h3 { margin: 0 0 14px; font-size: 0.95rem; }
@@ -295,21 +326,25 @@
   <section>
     <div class="cal-head">
       <h2>Token activity</h2>
-      <div class="tabs">
-        <span class="active">Daily</span>
-        <span title="Prototype — daily view only">Weekly</span>
-        <span title="Prototype — daily view only">Cumulative</span>
+      <div class="tabs" id="cal-tabs" role="group" aria-label="Token activity view">
+        <button type="button" data-view="daily" aria-controls="calendar" aria-pressed="true">Daily</button>
+        <button type="button" data-view="weekly" aria-controls="calendar" aria-pressed="false">Weekly</button>
+        <button type="button" data-view="cumulative" aria-controls="calendar" aria-pressed="false">Cumulative</button>
       </div>
     </div>
     <div class="calendar-wrap">
-      <div class="calendar" id="calendar"></div>
+      <div class="calendar" id="calendar" role="img"></div>
+      <div class="week-chart" id="week-chart" role="img" hidden></div>
+      <div class="cum-host" id="cum-host" hidden></div>
       <div class="months" id="months"></div>
     </div>
     <div class="cal-legend">
-      Less
-      <span class="cell" data-l="0"></span><span class="cell" data-l="1"></span><span class="cell" data-l="2"></span><span class="cell" data-l="3"></span><span class="cell" data-l="4"></span>
-      More
+      <span id="cal-swatches">Less
+        <span class="cell" data-l="0"></span><span class="cell" data-l="1"></span><span class="cell" data-l="2"></span><span class="cell" data-l="3"></span><span class="cell" data-l="4"></span>
+        More</span>
+      <span id="cal-scale" hidden></span>
     </div>
+    <p class="cal-note" id="cal-note"></p>
   </section>
 
   <section class="columns">
@@ -466,61 +501,222 @@
   }
 
   const tooltip = document.getElementById("tooltip");
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const COL = 14; // one week column: an 11px cell plus the 3px grid gap
+  const CHART_HOSTS = { daily: "calendar", weekly: "week-chart", cumulative: "cum-host" };
+  const CAL_NOTES = {
+    daily: "Each square is one day, shaded against your busiest days.",
+    weekly: "Each bar is one week, Sunday to Saturday; height is that week's total.",
+    cumulative: "Running total over the window — the steeper the climb, the heavier the use.",
+  };
+  let calView = "daily";
+  let lastUsageData = null;
 
-  function renderCalendar(dayTotals) {
-    const calendar = document.getElementById("calendar");
-    const monthsHost = document.getElementById("months");
-    calendar.textContent = "";
-    monthsHost.textContent = "";
-    const now = new Date();
-    const cells = [];
-    for (let i = WINDOW_DAYS - 1; i >= 0; i -= 1) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - i);
-      cells.push({ date: d, tokens: dayTotals[dateKey(d)] || 0 });
-    }
-    const nonzero = cells.map((c) => c.tokens).filter((t) => t > 0).sort((a, b) => a - b);
+  // Quartile shading over the non-empty days, so an idle stretch stays level 0.
+  function levelScale(values) {
+    const nonzero = values.filter((v) => v > 0).sort((a, b) => a - b);
     const q = (p) =>
       nonzero.length === 0 ? Infinity : nonzero[Math.min(nonzero.length - 1, Math.floor(nonzero.length * p))];
     const t1 = q(0.25), t2 = q(0.5), t3 = q(0.75);
-    const level = (t) => (t <= 0 ? 0 : t >= t3 ? 4 : t >= t2 ? 3 : t >= t1 ? 2 : 1);
-    const leading = cells[0].date.getDay();
-    for (let i = 0; i < leading; i += 1) {
+    return (t) => (t <= 0 ? 0 : t >= t3 ? 4 : t >= t2 ? 3 : t >= t1 ? 2 : 1);
+  }
+
+  const shortDate = (d) => d.toDateString().slice(0, 10);
+
+  function showTip(event, html) {
+    tooltip.style.display = "block";
+    tooltip.innerHTML = html;
+    tooltip.style.left = Math.min(event.clientX + 12, window.innerWidth - tooltip.offsetWidth - 12) + "px";
+    tooltip.style.top = (event.clientY - 36) + "px";
+  }
+  const hideTip = () => { tooltip.style.display = "none"; };
+  function onHover(el, html) {
+    el.addEventListener("mousemove", (event) => showTip(event, html));
+    el.addEventListener("mouseleave", hideTip);
+  }
+
+  // The window every view draws: the days, the blank days before the first
+  // Sunday column, and the same days grouped into calendar weeks.
+  function activityWindow(dayTotals) {
+    const now = new Date();
+    const days = [];
+    for (let i = WINDOW_DAYS - 1; i >= 0; i -= 1) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      days.push({ index: WINDOW_DAYS - 1 - i, date: d, tokens: dayTotals[dateKey(d)] || 0 });
+    }
+    const leading = days[0].date.getDay();
+    const weeks = [];
+    for (const day of days) {
+      const w = Math.floor((day.index + leading) / 7);
+      if (!weeks[w]) weeks[w] = { days: [], total: 0 };
+      weeks[w].days.push(day);
+      weeks[w].total += day.tokens;
+    }
+    return { days, leading, weeks, total: days.reduce((sum, d) => sum + d.tokens, 0) };
+  }
+
+  function weekRange(week) {
+    const { days } = week;
+    const span = `${shortDate(days[0].date)} – ${shortDate(days[days.length - 1].date)}`;
+    return days.length < 7 ? `${span} (${days.length} ${days.length === 1 ? "day" : "days"})` : span;
+  }
+
+  // Each renderer fills its host and returns the scale line shown under the chart.
+  function renderDaily(host, win) {
+    const level = levelScale(win.days.map((d) => d.tokens));
+    for (let i = 0; i < win.leading; i += 1) {
       const pad = document.createElement("span");
       pad.className = "cell";
       pad.style.visibility = "hidden";
-      calendar.append(pad);
+      host.append(pad);
     }
-    for (const cell of cells) {
+    for (const day of win.days) {
       const el = document.createElement("span");
       el.className = "cell";
-      el.dataset.l = String(level(cell.tokens));
-      el.addEventListener("mousemove", (event) => {
-        tooltip.style.display = "block";
-        tooltip.innerHTML = `<b>${cell.tokens.toLocaleString()}</b> tokens · ${cell.date.toDateString().slice(0, 10)}`;
-        tooltip.style.left = Math.min(event.clientX + 12, window.innerWidth - tooltip.offsetWidth - 12) + "px";
-        tooltip.style.top = (event.clientY - 36) + "px";
-      });
-      el.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
-      calendar.append(el);
+      el.dataset.l = String(level(day.tokens));
+      onHover(el, `<b>${day.tokens.toLocaleString()}</b> tokens · ${shortDate(day.date)}`);
+      host.append(el);
     }
-    const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    host.setAttribute("aria-label", `Tokens per day over the last ${WINDOW_DAYS} days`);
+    return "";
+  }
+
+  function renderWeekly(host, win) {
+    const peak = Math.max(0, ...win.weeks.map((w) => w.total));
+    const scale = Math.max(1, peak);
+    for (const week of win.weeks) {
+      const bar = document.createElement("span");
+      bar.style.height = (week.total / scale) * 100 + "%";
+      if (week.total === 0) bar.style.opacity = "0.18";
+      onHover(bar, `<b>${week.total.toLocaleString()}</b> tokens · week of ${weekRange(week)}`);
+      host.append(bar);
+    }
+    host.setAttribute("aria-label", `Tokens per week over the last ${win.weeks.length} weeks`);
+    return `Peak week ${fmt(peak)} · ${fmt(Math.round(win.total / win.weeks.length))} weekly average`;
+  }
+
+  function renderCumulative(host, win) {
+    const width = win.weeks.length * COL - 3;
+    const height = 95;
+    const scale = Math.max(1, win.total);
+    const lastDay = win.leading + win.days.length - 1;
+    const xAt = (index) => ((index + win.leading) / lastDay) * width;
+    const yAt = (value) => height - (value / scale) * height;
+    const running = [];
+    let sum = 0;
+    const points = win.days.map((day) => {
+      sum += day.tokens;
+      running.push(sum);
+      return `${xAt(day.index).toFixed(1)},${yAt(sum).toFixed(1)}`;
+    });
+
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("width", String(width));
+    svg.setAttribute("height", String(height));
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", `Cumulative tokens over the last ${WINDOW_DAYS} days, ${fmt(win.total)} in total`);
+    const node = (name, attrs) => {
+      const el = document.createElementNS(SVG_NS, name);
+      for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, String(value));
+      return el;
+    };
+    const first = xAt(0).toFixed(1), last = xAt(win.days.length - 1).toFixed(1);
+    svg.append(
+      node("path", {
+        class: "cum-area",
+        d: `M${first},${height} L${points.join(" L")} L${last},${height} Z`,
+      }),
+      node("path", { class: "cum-line", d: `M${points.join(" L")}` }),
+    );
+    const guide = node("line", { class: "cum-guide", y1: 0, y2: height });
+    const dot = node("circle", { class: "cum-dot", r: 3 });
+    guide.style.display = dot.style.display = "none";
+    svg.append(guide, dot);
+
+    const bandWidth = width / win.weeks.length;
+    win.weeks.forEach((week, w) => {
+      const day = week.days[week.days.length - 1];
+      const value = running[day.index];
+      const share = win.total > 0 ? value / win.total : 0;
+      const px = xAt(day.index), py = yAt(value);
+      const band = node("rect", { class: "cum-band", x: w * bandWidth, y: 0, width: bandWidth, height });
+      band.addEventListener("mousemove", (event) => {
+        guide.setAttribute("x1", String(px));
+        guide.setAttribute("x2", String(px));
+        dot.setAttribute("cx", String(px));
+        dot.setAttribute("cy", String(py));
+        guide.style.display = dot.style.display = "";
+        showTip(event,
+          `<b>${value.toLocaleString()}</b> tokens by ${shortDate(day.date)} · ` +
+          `${(share * 100).toFixed(0)}% of the window` +
+          (week.total > 0 ? ` · +${fmt(week.total)} that week` : ""));
+      });
+      band.addEventListener("mouseleave", () => {
+        guide.style.display = dot.style.display = "none";
+        hideTip();
+      });
+      svg.append(band);
+    });
+    host.append(svg);
+    return `${fmt(win.total)} total over the last ${WINDOW_DAYS} days`;
+  }
+
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  function renderActivity(dayTotals) {
+    const win = activityWindow(dayTotals);
+    for (const [view, id] of Object.entries(CHART_HOSTS)) {
+      const el = document.getElementById(id);
+      el.textContent = "";
+      el.hidden = view !== calView;
+    }
+    const host = document.getElementById(CHART_HOSTS[calView]);
+    const scale =
+      calView === "weekly" ? renderWeekly(host, win)
+        : calView === "cumulative" ? renderCumulative(host, win)
+          : renderDaily(host, win);
+    document.getElementById("cal-swatches").hidden = calView !== "daily";
+    const scaleEl = document.getElementById("cal-scale");
+    scaleEl.hidden = calView === "daily";
+    scaleEl.textContent = scale;
+    document.getElementById("cal-note").textContent = CAL_NOTES[calView];
+
+    const monthsHost = document.getElementById("months");
+    monthsHost.textContent = "";
     let lastMonth = -1;
-    const weeks = Math.ceil((leading + cells.length) / 7);
-    for (let w = 0; w < weeks; w += 1) {
-      const index = Math.min(cells.length - 1, Math.max(0, w * 7 - leading));
-      const month = cells[index].date.getMonth();
+    for (const week of win.weeks) {
+      const month = week.days[0].date.getMonth();
       const label = document.createElement("span");
       label.style.width = "14px";
       label.style.flex = "0 0 14px";
       if (month !== lastMonth) {
-        label.textContent = names[month];
+        label.textContent = MONTHS[month];
         label.style.overflow = "visible";
         lastMonth = month;
       }
       monthsHost.append(label);
     }
   }
+
+  const CAL_VIEW_KEY = "tokenMeter.calView";
+  const calTabs = [...document.querySelectorAll("#cal-tabs button")];
+
+  function setCalView(view, persist) {
+    calView = CHART_HOSTS[view] ? view : "daily";
+    for (const tab of calTabs) tab.setAttribute("aria-pressed", String(tab.dataset.view === calView));
+    if (persist) {
+      try { localStorage.setItem(CAL_VIEW_KEY, calView); } catch { /* private mode */ }
+    }
+    if (lastUsageData) renderActivity(lastUsageData.dayTotals);
+  }
+
+  for (const tab of calTabs) {
+    tab.addEventListener("click", () => setCalView(tab.dataset.view, true));
+  }
+  let storedCalView = null;
+  try { storedCalView = localStorage.getItem(CAL_VIEW_KEY); } catch { /* private mode */ }
+  setCalView(storedCalView || "daily", false);
 
   function renderAll(data) {
     lastUsageData = data;
@@ -572,7 +768,7 @@
       hoursHost.append(bar);
     });
 
-    renderCalendar(data.dayTotals);
+    renderActivity(data.dayTotals);
 
     const topHost = document.getElementById("top-days");
     topHost.textContent = "";
@@ -742,7 +938,6 @@
     return canvas;
   }
 
-  let lastUsageData = null;
   let lastProfileData = null;
 
   function updateShareRow() {
