@@ -230,21 +230,29 @@ private final class WidgetPreferences {
     private let url: URL
     var widgetVisible: Bool { didSet { save() } }
     var alwaysVisible: Bool { didSet { save() } }
+    var meterMode: String { didSet { save() } }
 
     init(stateDirectoryURL: URL) {
         url = stateDirectoryURL.appendingPathComponent("visibility.json")
         widgetVisible = true
         alwaysVisible = true
+        meterMode = "focused"
         guard let data = try? Data(contentsOf: url),
-              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Bool] else {
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return
         }
-        widgetVisible = value["widgetVisible"] ?? true
-        alwaysVisible = value["alwaysVisible"] ?? true
+        widgetVisible = value["widgetVisible"] as? Bool ?? true
+        alwaysVisible = value["alwaysVisible"] as? Bool ?? true
+        let savedMode = value["meterMode"] as? String
+        meterMode = savedMode == "all-active" ? "all-active" : "focused"
     }
 
     private func save() {
-        let value = ["widgetVisible": widgetVisible, "alwaysVisible": alwaysVisible]
+        let value: [String: Any] = [
+            "widgetVisible": widgetVisible,
+            "alwaysVisible": alwaysVisible,
+            "meterMode": meterMode,
+        ]
         guard let data = try? JSONSerialization.data(withJSONObject: value) else { return }
         try? data.write(to: url, options: .atomic)
     }
@@ -920,7 +928,10 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         guard !codexSnapshotInFlight, pageReady else { return }
         codexSnapshotInFlight = true
         lastCodexSnapshotAt = Date()
-        snapshotBridge.command(["command": "codex-snapshot"]) { [weak self] result in
+        snapshotBridge.command([
+            "command": "codex-snapshot",
+            "mode": preferences.meterMode,
+        ]) { [weak self] result in
             guard let self else { return }
             self.codexSnapshotInFlight = false
             guard case .success(let snapshot) = result else {
@@ -1193,6 +1204,12 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         case "set-sharing":
             let enabled = body["enabled"] as? Bool ?? false
             snapshotBridge.command(["command": "set-sharing", "enabled": enabled]) { _ in }
+        case "set-meter-mode":
+            let mode = body["mode"] as? String
+            preferences.meterMode = mode == "all-active" ? "all-active" : "focused"
+            lastCodexSnapshot = nil
+            lastCodexSnapshotAt = .distantPast
+            fetchCodexSnapshot()
         case "dismiss-handle-prompt":
             snapshotBridge.command(["command": "dismiss-handle-prompt"]) { _ in }
         case "open-update":

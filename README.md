@@ -93,6 +93,8 @@ Cached input is already included in Codex's reported total and is counted once. 
 
 Local raw workload is not a billing meter and does not claim to reproduce Codex `/usage`. The backend account surface does not expose safe per-Session attribution. See [the reconciliation research](docs/research/codex-account-usage-reconciliation.md).
 
+The native widget offers two persisted meter modes in Settings. **Focused** keeps the active-candidate behavior above. **All active** sums the rate and workload of every root Session with recent token telemetry, including each Session's child Agents, while listing model, child count, rate, and Context separately per Session. Context percentages are deliberately not summed because each root and child has an independent context window.
+
 ### Claude workload
 
 Legacy local Sessions resolve their exact Desktop `local_<uuid>` to one Claude Code transcript. Current cloud Code Sessions bind the exact `session_<24 chars>` route and accept only complete, contiguous locally cached `/events` sequences. Repeated responses are de-duplicated by response identity.

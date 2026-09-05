@@ -99,3 +99,22 @@ test("CodexSnapshotRuntime never falls back to a different thread when the activ
   assert.equal(snapshot.status, "unbound");
   assert.equal(snapshot.binding.exact, false);
 });
+
+test("CodexSnapshotRuntime can report all active sessions without a focused thread", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codex-runtime-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  await writeRollout(directory, THREAD_ID, 21019);
+  const runtime = new CodexSnapshotRuntime({
+    sessionsDirectory: directory,
+    resolveActiveThread: () => null,
+    identity: null,
+    usageHistory: null,
+    now: () => Date.parse("2026-08-15T19:44:00.000Z"),
+  });
+
+  const snapshot = await runtime.snapshot({ mode: "all-active" });
+  assert.equal(snapshot.status, "bound");
+  assert.equal(snapshot.meterMode, "all-active");
+  assert.equal(snapshot.activeSessionCount, 1);
+  assert.equal(snapshot.session.totalTokens, 21019);
+});

@@ -127,6 +127,19 @@ test("rollout parser records context compaction without retaining content", () =
   });
 });
 
+test("rollout parser records the active model without retaining turn context", () => {
+  const event = parseRolloutLine(JSON.stringify({
+    timestamp: "2026-09-05T10:00:00.000Z",
+    type: "turn_context",
+    payload: { model: "gpt-6-astra", summary: "private context" },
+  }));
+  assert.deepEqual(event, {
+    kind: "model",
+    timestampMs: Date.parse("2026-09-05T10:00:00.000Z"),
+    model: "gpt-6-astra",
+  });
+});
+
 test("rollout files are read through bounded chunks", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "token-meter-rollout-"));
   context.after(() => rm(directory, { recursive: true, force: true }));

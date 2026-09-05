@@ -282,4 +282,110 @@ export class MetricsEngine {
       anomaly,
     };
   }
+
+  activeSnapshot(
+    files,
+    { nowMs = Date.now(), hostName = "Codex", activeWindowMs = 120_000 } = {},
+  ) {
+    const roots = [...groupBySession(files).entries()].map(([sessionId, sessionFiles]) =>
+      sessionFiles.find((file) =>
+        file.meta?.id === sessionId || file.discoveredId === sessionId,
+      ) ?? sessionFiles.find((file) =>
+        isRootUserRollout(file) && file.meta?.sessionId === file.meta?.id,
+      ) ?? null,
+    ).filter(Boolean);
+    const snapshots = roots
+      .map((root) => {
+        const sessionFiles = files.filter(
+          (file) => file.meta?.sessionId === root.meta?.sessionId,
+        );
+        const lastActivityAtMs = Math.max(
+          ...sessionFiles.flatMap((file) => file.usage.map((event) => event.timestampMs)),
+          Number.NEGATIVE_INFINITY,
+        );
+        if (lastActivityAtMs < nowMs - activeWindowMs) return null;
+        const snapshot = this.snapshot(files, {
+          threadId: root.meta.id,
+          nowMs,
+          hostName,
+        });
+        if (snapshot.status !== "bound") return null;
+        const modelFile = sessionFiles
+          .filter((file) => file.modelUpdatedAtMs != null)
+          .sort((left, right) => left.modelUpdatedAtMs - right.modelUpdatedAtMs)
+          .at(-1);
+        return {
+          ...snapshot,
+          model: modelFile?.model ?? null,
+          lastActivityAtMs,
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) =>
+        right.rate.tokensPerMinute - left.rate.tokensPerMinute ||
+        right.lastActivityAtMs - left.lastActivityAtMs,
+      );
+
+    if (snapshots.length === 0) {
+      return {
+        status: "bound",
+        generatedAtMs: nowMs,
+        threadId: "all-active",
+        sessionId: "all-active",
+        childAgentCount: 0,
+        activeSessionCount: 0,
+        activeSessions: [],
+        session: { totalTokens: 0, lastHourTokens: 0, startedAtMs: null },
+        turn: { tokens: 0, startedAtMs: null },
+        context: { tokens: null, windowTokens: null, percent: null, compactionCount: 0 },
+        account: { lastHourTokens: 0, last24hTokens: 0 },
+        skills: { status: "unknown", source: "unavailable", updatedAtMs: null, items: [] },
+        rate: { tokensPerMinute: 0, windowMs: this.rateWindowMs, ...buildRateScale({ tokensPerMinute: 0 }) },
+        anomaly: { level: "learning", ratio: null, threshold: null, baseline: { sampleCount: 0, medianTokensPerMinute: null, averageTokensPerMinute: null, p95TokensPerMinute: null, madTokensPerMinute: null } },
+      };
+    }
+
+    const totalRate = snapshots.reduce((sum, item) => sum + item.rate.tokensPerMinute, 0);
+    const historicalRates = completedTurnRates(files);
+    const anomaly = classifyAnomaly({
+      currentRate: totalRate,
+      currentTurnTokens: snapshots.reduce((sum, item) => sum + item.turn.tokens, 0),
+      currentTurnDurationMs: this.rateWindowMs,
+      historicalRates,
+    });
+    const newest = snapshots.reduce((left, right) =>
+      left.lastActivityAtMs >= right.lastActivityAtMs ? left : right,
+    );
+    return {
+      ...newest,
+      threadId: "all-active",
+      sessionId: "all-active",
+      activeSessionCount: snapshots.length,
+      childAgentCount: snapshots.reduce((sum, item) => sum + item.childAgentCount, 0),
+      activeSessions: snapshots.map((item) => ({
+        threadId: item.threadId,
+        sessionId: item.sessionId,
+        cwd: item.cwd,
+        model: item.model,
+        childAgentCount: item.childAgentCount,
+        lastActivityAtMs: item.lastActivityAtMs,
+        totalTokens: item.session.totalTokens,
+        turnTokens: item.turn.tokens,
+        context: item.context,
+        tokensPerMinute: item.rate.tokensPerMinute,
+      })),
+      session: {
+        totalTokens: snapshots.reduce((sum, item) => sum + item.session.totalTokens, 0),
+        lastHourTokens: snapshots.reduce((sum, item) => sum + item.session.lastHourTokens, 0),
+        startedAtMs: Math.min(...snapshots.map((item) => item.session.startedAtMs ?? nowMs)),
+      },
+      turn: {
+        tokens: snapshots.reduce((sum, item) => sum + item.turn.tokens, 0),
+        startedAtMs: Math.min(...snapshots.map((item) => item.turn.startedAtMs ?? nowMs)),
+      },
+      context: { tokens: null, windowTokens: null, percent: null, compactionCount: snapshots.reduce((sum, item) => sum + (item.context.compactionCount ?? 0), 0) },
+      rate: { tokensPerMinute: totalRate, windowMs: this.rateWindowMs, ...buildRateScale({ tokensPerMinute: totalRate, medianTokensPerMinute: anomaly.baseline.medianTokensPerMinute, p95TokensPerMinute: anomaly.baseline.p95TokensPerMinute }) },
+      anomaly,
+    };
+  }
 }

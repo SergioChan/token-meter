@@ -41,6 +41,8 @@ function rollout({
   contextCompactions = [],
   skills = null,
   skillsUpdatedAtMs = null,
+  model = null,
+  modelUpdatedAtMs = null,
 }) {
   return {
     path: `/tmp/${id}.jsonl`,
@@ -61,8 +63,44 @@ function rollout({
     contextCompactions,
     skills,
     skillsUpdatedAtMs,
+    model,
+    modelUpdatedAtMs,
   };
 }
+
+test("activeSnapshot aggregates active roots while preserving per-session context", () => {
+  const rootA = rollout({
+    id: "session-a",
+    usageEvents: [usage(119_000, 500, { contextTokens: 100, contextWindow: 1000 })],
+    model: "gpt-6-astra",
+    modelUpdatedAtMs: 118_000,
+  });
+  const childA = rollout({
+    id: "child-a",
+    sessionId: "session-a",
+    threadSource: "subagent",
+    usageEvents: [usage(119_500, 200)],
+  });
+  const rootB = rollout({
+    id: "session-b",
+    usageEvents: [usage(60_000, 300, { contextTokens: 150, contextWindow: 1000 })],
+    model: "gpt-5.6-sol",
+    modelUpdatedAtMs: 59_000,
+  });
+  const stale = rollout({ id: "stale", usageEvents: [usage(-1, 900)] });
+
+  const snapshot = new MetricsEngine().activeSnapshot([rootA, childA, rootB, stale], {
+    nowMs: 120_000,
+  });
+
+  assert.equal(snapshot.status, "bound");
+  assert.equal(snapshot.activeSessionCount, 2);
+  assert.equal(snapshot.childAgentCount, 1);
+  assert.equal(snapshot.session.totalTokens, 1000);
+  assert.equal(snapshot.context.percent, null);
+  assert.equal(snapshot.activeSessions[0].model, "gpt-6-astra");
+  assert.equal(snapshot.activeSessions[0].context.percent, 10);
+});
 
 test("snapshot exposes the exact active Session skill inventory", () => {
   const file = rollout({

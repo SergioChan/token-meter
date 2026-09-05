@@ -48,9 +48,9 @@ export class CodexSnapshotRuntime {
     this.usageMemo = null;
   }
 
-  async snapshot() {
+  async snapshot({ mode = "focused" } = {}) {
     const active = this.resolveActiveThread();
-    if (active?.threadId == null) {
+    if (active?.threadId == null && mode !== "all-active") {
       const unbound = {
         status: "unbound",
         binding: { source: "codex-state-recency", exact: false },
@@ -60,21 +60,20 @@ export class CodexSnapshotRuntime {
       return unbound;
     }
     const files = await this.rolloutStore.refresh({
-      activeThreadIds: [active.threadId],
+      activeThreadIds: active?.threadId ? [active.threadId] : [],
     });
-    const snapshot = this.metricsEngine.snapshot(files, {
-      threadId: active.threadId,
-      nowMs: this.now(),
-      hostName: "Codex",
-    });
+    const snapshot = mode === "all-active"
+      ? this.metricsEngine.activeSnapshot(files, { nowMs: this.now(), hostName: "Codex" })
+      : this.metricsEngine.snapshot(files, { threadId: active.threadId, nowMs: this.now(), hostName: "Codex" });
     snapshot.binding = {
       source: "codex-state-recency",
       exact: false,
       confidence: "active-turn-candidate",
-      threadId: active.threadId,
-      activityThreadId: active.activityThreadId ?? active.threadId,
-      activityThreadSource: active.activityThreadSource ?? "user",
+      threadId: mode === "all-active" ? "all-active" : active.threadId,
+      activityThreadId: active?.activityThreadId ?? active?.threadId ?? null,
+      activityThreadSource: active?.activityThreadSource ?? "user",
     };
+    snapshot.meterMode = mode;
     snapshot.usageMethod = "codex-rollout-raw";
     this.#decorate(snapshot);
     return snapshot;

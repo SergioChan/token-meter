@@ -274,14 +274,16 @@
   color: #20211f;
 }
 
-.settings-privacy {
+.settings-privacy,
+.settings-meter-mode {
   display: flex;
   overflow: hidden;
   border: 1px solid rgb(32 33 31 / 0.14);
   border-radius: 7px;
 }
 
-.privacy-opt {
+.privacy-opt,
+.mode-opt {
   flex: 1;
   padding: 5px 4px;
   color: rgb(32 33 31 / 0.55);
@@ -293,7 +295,8 @@
   cursor: pointer;
 }
 
-.privacy-opt + .privacy-opt {
+.privacy-opt + .privacy-opt,
+.mode-opt + .mode-opt {
   border-left: 1px solid rgb(32 33 31 / 0.14);
 }
 
@@ -305,6 +308,11 @@
 .privacy-share.active {
   color: #2a78d6;
   background: rgb(42 120 214 / 0.12);
+}
+
+.mode-opt.active {
+  color: #20211f;
+  background: rgb(32 33 31 / 0.08);
 }
 
 .settings-tip {
@@ -496,6 +504,24 @@
   color: #20211f;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-variant-numeric: tabular-nums;
+}
+
+.meter-card[data-meter-mode="all-active"] .stats-panel .single-stat {
+  display: none;
+}
+
+.multi-session-list {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+}
+
+.multi-session-list[hidden] { display: none; }
+
+.multi-session {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 /* Stats view: the bottom section swaps in place; total card height is fixed.
