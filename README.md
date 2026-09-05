@@ -39,9 +39,9 @@ The legacy Codex CDP adapter (the per-user source installer described below) is 
 
 ## What Token Widget supports
 
-| Source or host | Live overlay | Historical dashboard and Profile | Exact binding |
+| Source or host | Live overlay | Historical dashboard and Profile | Session binding |
 | --- | --- | --- | --- |
-| Codex Desktop on macOS | Supported | Supported | Active semantic task UUID + local rollout events |
+| Codex Desktop on macOS | Supported | Supported | Most recent user-turn candidate + local rollout events |
 | Claude Code in Claude Desktop on macOS | Beta | Supported | Focused Code route + exact local/cloud Session records |
 | Cline in Code, Cursor, or VSCodium | Not currently | Supported | Local Cline task history |
 | Windows and Linux | Not implemented | Not implemented | — |
@@ -72,11 +72,11 @@ The gauge moves from green through yellow and orange to red as live rate rises r
 
 Click `−` to collapse the widget to its gauge and live rate, or `+` to expand it. Drag the expanded header or collapsed gauge. Layout and collapsed state persist across Session changes and service restarts.
 
-## Exact Session binding
+## Session binding
 
-Token Widget never guesses the selected Session from process recency, transcript modification time, or whichever file changed last.
+Token Widget never selects a Session from rollout modification time or whichever file changed last.
 
-- **Codex:** reads the active semantic sidebar task UUID and groups descendants that share its root `session_id`.
+- **Codex:** uses the most recent unarchived user-turn record in local Codex state as an active candidate, then groups descendants that share its root `session_id`. This identifies token-producing work but does not claim to identify the task merely selected in the UI.
 - **Claude:** reads an exact `local_<uuid>` or mixed-case `session_<24 chars>` from the focused Claude Code web area, then resolves only the matching local transcript or complete cached cloud-event sequence.
 
 If identity is missing, ambiguous, or unsupported, the widget becomes unbound or hides. It does not carry numbers from the previous Session into the next one.

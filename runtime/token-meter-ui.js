@@ -562,7 +562,10 @@
 
   const update = (snapshot) => {
     ensureMounted();
-    const bound = snapshot?.status === "bound" && snapshot?.binding?.exact;
+    const bindingUsable =
+      snapshot?.binding?.exact === true ||
+      snapshot?.binding?.confidence === "active-turn-candidate";
+    const bound = snapshot?.status === "bound" && bindingUsable;
     const global = !bound && snapshot?.status === "global";
     card.dataset.bound = String(bound);
     card.dataset.mode = bound ? "session" : global ? "global" : "unbound";

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -9,7 +9,7 @@ import {
   readActiveCodexThread,
 } from "../integrations/codex-desktop/src/thread-state.mjs";
 
-test("pickActiveThread selects the most recent user thread and drops sub-agents", () => {
+test("pickActiveThread resolves the most recent sub-agent to its root session", () => {
   const active = pickActiveThread([
     {
       id: "aaaaaaaa-0000-0000-0000-000000000000",
@@ -36,13 +36,16 @@ test("pickActiveThread selects the most recent user thread and drops sub-agents"
       tokens_used: 4242,
       recency_at_ms: 9000,
       thread_source: "subagent",
+      session_id: "bbbbbbbb-0000-0000-0000-000000000000",
       archived: 0,
     },
   ]);
   assert.equal(active.threadId, "bbbbbbbb-0000-0000-0000-000000000000");
-  assert.equal(active.title, "token-meter");
-  assert.equal(active.tokensUsed, 999);
-  assert.equal(active.recencyAtMs, 5000);
+  assert.equal(active.activityThreadId, "cccccccc-0000-0000-0000-000000000000");
+  assert.equal(active.activityThreadSource, "subagent");
+  assert.equal(active.title, "guardian child");
+  assert.equal(active.tokensUsed, 4242);
+  assert.equal(active.recencyAtMs, 9000);
 });
 
 test("pickActiveThread ignores archived threads and returns null when none remain", () => {
@@ -91,20 +94,27 @@ test("readActiveCodexThread reads the active thread from a live-shaped database"
       tokens_used INTEGER NOT NULL DEFAULT 0,
       recency_at_ms INTEGER NOT NULL DEFAULT 0,
       thread_source TEXT,
+      rollout_path TEXT,
       archived INTEGER NOT NULL DEFAULT 0
     )`);
     const insert = db.prepare(
-      `INSERT INTO threads (id, name, title, tokens_used, recency_at_ms, thread_source, archived)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO threads (id, name, title, tokens_used, recency_at_ms, thread_source, rollout_path, archived)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
-    insert.run("old", "old user", "old user", 10, 1000, "user", 0);
-    insert.run("current", "token-meter", "token-meter", 25712557, 9000, "user", 0);
-    insert.run("child", "sub", "sub", 5000, 9999, "subagent", 0);
+    insert.run("old", "old user", "old user", 10, 1000, "user", null, 0);
+    insert.run("current", "token-meter", "token-meter", 25712557, 9000, "user", null, 0);
+    const childRollout = path.join(dir, "child.jsonl");
+    await writeFile(
+      childRollout,
+      `${JSON.stringify({ type: "session_meta", payload: { id: "child", session_id: "current" } })}\n`,
+    );
+    insert.run("child", "sub", "sub", 5000, 9999, "subagent", childRollout, 0);
     db.close();
 
     const active = readActiveCodexThread(dbPath);
     assert.equal(active.threadId, "current");
-    assert.equal(active.tokensUsed, 25712557);
+    assert.equal(active.activityThreadId, "child");
+    assert.equal(active.activityThreadSource, "subagent");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

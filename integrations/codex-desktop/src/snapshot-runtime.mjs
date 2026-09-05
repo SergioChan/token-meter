@@ -53,7 +53,7 @@ export class CodexSnapshotRuntime {
     if (active?.threadId == null) {
       const unbound = {
         status: "unbound",
-        binding: { source: "codex-state-db", exact: false },
+        binding: { source: "codex-state-recency", exact: false },
         reason: "No active Codex user thread was found in the state database.",
       };
       this.#decorate(unbound);
@@ -68,9 +68,12 @@ export class CodexSnapshotRuntime {
       hostName: "Codex",
     });
     snapshot.binding = {
-      source: "codex-state-db",
-      exact: snapshot.status === "bound",
+      source: "codex-state-recency",
+      exact: false,
+      confidence: "active-turn-candidate",
       threadId: active.threadId,
+      activityThreadId: active.activityThreadId ?? active.threadId,
+      activityThreadSource: active.activityThreadSource ?? "user",
     };
     snapshot.usageMethod = "codex-rollout-raw";
     this.#decorate(snapshot);

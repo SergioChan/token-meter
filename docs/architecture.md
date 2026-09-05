@@ -4,7 +4,7 @@
 
 Token Widget is a local desktop enhancement with a small core and host adapters. The core knows nothing about Codex DOM selectors or Claude UI. Each host adapter must provide two things:
 
-1. Exact active-session identity.
+1. An explicitly qualified session identity (exact selection or active-turn candidate).
 2. Confirmed token-usage events and turn boundaries.
 
 The Codex implementation uses rollout JSONL as a read-only compatibility adapter and loopback CDP as an unofficial UI adapter. The Claude implementation uses local Claude Code transcripts for measurement and a separate native macOS companion for presentation.
@@ -68,6 +68,9 @@ ClaudeNativeCompanion
 ## Invariants
 
 - A requested but unknown thread produces `status: "unbound"`; it never falls back to another thread.
+- The native Codex adapter labels SQLite recency binding as an active-turn candidate; it never claims that signal is the exact UI selection.
+- When the latest activity belongs to a sub-Agent, the adapter resolves its bounded rollout metadata back to the root `session_id` and meters that complete Session tree.
+- Codex rollout collection continues while Codex is running, independently of whether its window is frontmost. The Session face follows a frontmost Codex window and remains live on the desktop while Codex works in the background.
 - Session totals include every loaded rollout with the same root `session_id`.
 - Codex uses its reported cumulative total directly, where cached input is already a subset of input. Claude transcript usage adds uncached input, cache creation, cache reads, and output because Anthropic reports those as separate fields.
 - Claude active Context is a separate non-cumulative reading from the selected root response: uncached input plus cache creation plus cache reads. Output is excluded. A root compaction invalidates it until the next response. The transcript does not carry the context-window size, so only a verified window adapter may supply that denominator.

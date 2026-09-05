@@ -54,8 +54,10 @@ test("CodexSnapshotRuntime binds to the active thread and reports its tokens", a
 
   const snapshot = await runtime.snapshot();
   assert.equal(snapshot.status, "bound");
-  assert.equal(snapshot.binding.source, "codex-state-db");
-  assert.equal(snapshot.binding.exact, true);
+  assert.equal(snapshot.binding.source, "codex-state-recency");
+  assert.equal(snapshot.binding.exact, false);
+  assert.equal(snapshot.binding.confidence, "active-turn-candidate");
+  assert.equal(snapshot.binding.activityThreadSource, "user");
   assert.equal(snapshot.binding.threadId, THREAD_ID);
   assert.equal(snapshot.usageMethod, "codex-rollout-raw");
   assert.equal(snapshot.session.totalTokens, 21019);
@@ -75,7 +77,7 @@ test("CodexSnapshotRuntime returns unbound (exact=false) when no thread is activ
   const snapshot = await runtime.snapshot();
   assert.equal(snapshot.status, "unbound");
   assert.equal(snapshot.binding.exact, false);
-  assert.equal(snapshot.binding.source, "codex-state-db");
+  assert.equal(snapshot.binding.source, "codex-state-recency");
 });
 
 test("CodexSnapshotRuntime never falls back to a different thread when the active one is absent", async (context) => {

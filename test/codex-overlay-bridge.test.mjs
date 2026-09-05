@@ -41,10 +41,10 @@ function writeStateDb(dbPath, activeThreadId) {
   db.exec(`CREATE TABLE threads (
     id TEXT PRIMARY KEY, name TEXT, title TEXT NOT NULL DEFAULT '',
     tokens_used INTEGER NOT NULL DEFAULT 0, recency_at_ms INTEGER NOT NULL DEFAULT 0,
-    thread_source TEXT, archived INTEGER NOT NULL DEFAULT 0)`);
+    thread_source TEXT, rollout_path TEXT, archived INTEGER NOT NULL DEFAULT 0)`);
   db.prepare(
-    `INSERT INTO threads (id, name, tokens_used, recency_at_ms, thread_source, archived)
-     VALUES (?, ?, ?, ?, 'user', 0)`,
+    `INSERT INTO threads (id, name, tokens_used, recency_at_ms, thread_source, rollout_path, archived)
+     VALUES (?, ?, ?, ?, 'user', NULL, 0)`,
   ).run(activeThreadId, "token-meter", 21019, 9000);
   db.close();
 }
@@ -101,8 +101,9 @@ test("overlay bridge serves a bound Codex snapshot from the state DB", async (co
   const responses = stdout.trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(responses[0].requestId, 1);
   assert.equal(responses[0].snapshot.status, "bound");
-  assert.equal(responses[0].snapshot.binding.source, "codex-state-db");
-  assert.equal(responses[0].snapshot.binding.exact, true);
+  assert.equal(responses[0].snapshot.binding.source, "codex-state-recency");
+  assert.equal(responses[0].snapshot.binding.exact, false);
+  assert.equal(responses[0].snapshot.binding.confidence, "active-turn-candidate");
   assert.equal(responses[0].snapshot.binding.threadId, THREAD_ID);
   assert.equal(responses[0].snapshot.session.totalTokens, 21019);
 });

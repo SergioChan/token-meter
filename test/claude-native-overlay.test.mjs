@@ -130,6 +130,31 @@ test("Claude companion waits quietly for Accessibility and passes valid bridge a
   assert.doesNotMatch(source, /openInstalledPage\("web\/leaderboard\.html"\)/);
 });
 
+test("native overlay collects Codex snapshots independently of foreground presentation", async () => {
+  const source = await readFile(
+    "integrations/claude-desktop/native/TokenMeterClaudeOverlay.swift",
+    "utf8",
+  );
+  const tick = source.match(/private func tick\(\) \{([\s\S]+?)\n    \}\n\n    private func frontmostHostWindow/)?.[1];
+  const poll = source.match(/private func pollCodexSnapshot\(\) \{([\s\S]+?)\n    \}\n\n    private func hidePanel/)?.[1];
+
+  assert.ok(tick, "tick must remain inspectable");
+  assert.ok(poll, "background Codex polling must remain inspectable");
+  assert.match(tick, /^\s*pollCodexSnapshot\(\)/);
+  assert.match(poll, /withBundleIdentifier: codexBundleID/);
+  assert.match(poll, /fetchCodexSnapshot\(\)/);
+  assert.match(source, /private var lastCodexSnapshot: \[String: Any\]\?/);
+  assert.match(source, /if let snapshot = lastCodexSnapshot/);
+  assert.match(
+    tick,
+    /if preferences\.alwaysVisible \{\s*if codexWasRunning \{\s*showCodexFace\(hostPosition: nil, hostSize: nil\)/,
+  );
+  assert.match(
+    source,
+    /private func showCodexFace\(hostPosition: CGPoint\?, hostSize: CGSize\?\)/,
+  );
+});
+
 test("Claude installer trusts the LaunchAgent health state for Accessibility", async () => {
   const source = await readFile(
     "integrations/claude-desktop/scripts/install.sh",
