@@ -4,7 +4,7 @@
 
 Token Widget is a local desktop enhancement with a small core and host adapters. The core knows nothing about Codex DOM selectors or Claude UI. Each host adapter must provide two things:
 
-1. Exact active-session identity.
+1. An explicitly qualified session identity (exact selection or active-turn candidate).
 2. Confirmed token-usage events and turn boundaries.
 
 The Codex implementation uses rollout JSONL as a read-only compatibility adapter and loopback CDP as an unofficial UI adapter. The Claude implementation uses local Claude Code transcripts for measurement and a separate native macOS companion for presentation.
@@ -68,6 +68,10 @@ ClaudeNativeCompanion
 ## Invariants
 
 - A requested but unknown thread produces `status: "unbound"`; it never falls back to another thread.
+- The native Codex adapter labels SQLite recency binding as an active-turn candidate; it never claims that signal is the exact UI selection.
+- When the latest activity belongs to a sub-Agent, the adapter resolves its bounded rollout metadata back to the root `session_id` and meters that complete Session tree.
+- Codex rollout collection continues while Codex is running, independently of whether its window is frontmost. The Session face follows a frontmost Codex window and remains live on the desktop while Codex works in the background.
+- The native widget persists a `Focused` / `All active` preference. `All active` discovers root Sessions from recent rollout telemetry and aggregates their live rate and workload, so activity in another window, model, or root Session cannot be masked by the most recently touched task.
 - Session totals include every loaded rollout with the same root `session_id`.
 - Codex uses its reported cumulative total directly, where cached input is already a subset of input. Claude transcript usage adds uncached input, cache creation, cache reads, and output because Anthropic reports those as separate fields.
 - Claude active Context is a separate non-cumulative reading from the selected root response: uncached input plus cache creation plus cache reads. Output is excluded. A root compaction invalidates it until the next response. The transcript does not carry the context-window size, so only a verified window adapter may supply that denominator.
@@ -98,6 +102,8 @@ Codex descendants have their own thread IDs but share the root session ID. The d
 The cumulative Session meter and the active Context meter answer different questions. Session usage sums positive cumulative-token deltas across the root and child Agents. It is a raw workload counter: every reported request counts its full input total, including the cached-input subset exactly once. It represents confirmed model processing and does not decrease when Codex compacts history.
 
 Active Context is scoped to the selected root thread because every child Agent has its own independent context window. It uses the latest Codex-reported `last_token_usage.total_tokens` and `model_context_window`. A compaction event can therefore reduce active Context while cumulative Session usage remains unchanged. The snapshot also exposes root-thread compaction count and latest compaction time.
+
+In `All active` mode, every root keeps its own Context percentage and model (read from the rollout's non-content `turn_context` metadata). The top-level aggregate intentionally reports no Context percentage; adding percentages from unrelated windows would be misleading.
 
 Neither metric claims to reproduce the backend account activity shown by Codex `/usage`.
 

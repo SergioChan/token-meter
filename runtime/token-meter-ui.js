@@ -1,5 +1,5 @@
 ((cssText) => {
-  const VERSION = 11;
+  const VERSION = 12;
   const existing = window.__tokenMeter;
   if (existing?.version === VERSION) {
     existing.ensureMounted();
@@ -74,11 +74,12 @@
       <em class="stats-hint" aria-hidden="true">···</em>
     </div>
     <div class="details-row stats-panel bottom-toggle" title="Click to go back" hidden>
-      <span>Current turn</span><b class="turn-total">0</b>
-      <span>Active context</span><b><span class="context-total">0</span><i class="context-extra"></i></b>
-      <span>All sessions · 1H</span><b class="account-hour">0</b>
-      <span>Historical baseline</span><b class="baseline">Learning</b>
-      <span>Context compactions</span><b class="compaction-count">0</b>
+      <span class="single-stat">Current turn</span><b class="single-stat turn-total">0</b>
+      <span class="single-stat">Active context</span><b class="single-stat"><span class="context-total">0</span><i class="context-extra"></i></b>
+      <span class="single-stat">All sessions · 1H</span><b class="single-stat account-hour">0</b>
+      <span class="single-stat">Historical baseline</span><b class="single-stat baseline">Learning</b>
+      <span class="single-stat">Context compactions</span><b class="single-stat compaction-count">0</b>
+      <div class="multi-session-list" hidden></div>
     </div>
     <section class="skills-panel" aria-label="Session skills">
       <div class="skills-heading">
@@ -133,6 +134,10 @@
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v6a5 5 0 0 1-10 0z"/><path d="M17 5h3a2 2 0 0 1-2 4"/><path d="M7 5H4a2 2 0 0 0 2 4"/></svg>
         <span>Check your ranking</span>
       </button>
+      <div class="settings-meter-mode" role="radiogroup" aria-label="Meter mode">
+        <button type="button" class="mode-opt mode-focused active" aria-pressed="true">Focused</button>
+        <button type="button" class="mode-opt mode-all" aria-pressed="false">All active</button>
+      </div>
       <div class="settings-privacy" role="radiogroup" aria-label="Data sharing">
         <button type="button" class="privacy-opt privacy-local active" aria-pressed="true">Data stays local</button>
         <button type="button" class="privacy-opt privacy-share" aria-pressed="false">Share with community</button>
@@ -152,6 +157,7 @@
     streak: card.querySelector(".streak"),
     lifetime: card.querySelector(".lifetime"),
     statsPanel: card.querySelector(".stats-panel"),
+    multiSessionList: card.querySelector(".multi-session-list"),
     turnTotal: card.querySelector(".turn-total"),
     contextTotal: card.querySelector(".context-total"),
     contextExtra: card.querySelector(".context-extra"),
@@ -175,6 +181,8 @@
     settingsTip: card.querySelector(".settings-tip"),
     privacyLocal: card.querySelector(".privacy-local"),
     privacyShare: card.querySelector(".privacy-share"),
+    modeFocused: card.querySelector(".mode-focused"),
+    modeAll: card.querySelector(".mode-all"),
     needle: card.querySelector(".needle"),
     progress: card.querySelector(".gauge-progress"),
     warning: card.querySelector(".warning"),
@@ -562,10 +570,20 @@
 
   const update = (snapshot) => {
     ensureMounted();
-    const bound = snapshot?.status === "bound" && snapshot?.binding?.exact;
+    const bindingUsable =
+      snapshot?.binding?.exact === true ||
+      snapshot?.binding?.confidence === "active-turn-candidate";
+    const bound = snapshot?.status === "bound" && bindingUsable;
     const global = !bound && snapshot?.status === "global";
     card.dataset.bound = String(bound);
     card.dataset.mode = bound ? "session" : global ? "global" : "unbound";
+    const allActiveMode = bound && snapshot?.meterMode === "all-active";
+    card.dataset.meterMode = allActiveMode ? "all-active" : "focused";
+    elements.multiSessionList.hidden = !allActiveMode;
+    elements.modeFocused.classList.toggle("active", !allActiveMode);
+    elements.modeFocused.setAttribute("aria-pressed", String(!allActiveMode));
+    elements.modeAll.classList.toggle("active", allActiveMode);
+    elements.modeAll.setAttribute("aria-pressed", String(allActiveMode));
     elements.unbound.hidden = bound || global;
     elements.dayLabel.textContent = global ? "TODAY" : "24H TOTAL";
     if (!bound) {
@@ -635,8 +653,9 @@
     const identityLabel = snapshot.meterHandle
       ? `@${snapshot.meterHandle}`
       : snapshot.meterId;
-    elements.sessionId.textContent =
-      identityLabel ?? snapshot.sessionId.slice(-8).toUpperCase();
+    elements.sessionId.textContent = allActiveMode
+      ? `${snapshot.activeSessionCount ?? 0} ACTIVE`
+      : identityLabel ?? snapshot.sessionId.slice(-8).toUpperCase();
     elements.sessionId.title =
       (snapshot.meterId
         ? `Meter ${snapshot.meterId} · Session ${snapshot.sessionId}`
@@ -698,9 +717,22 @@
     const intensity = Math.min(1, Math.max(0, snapshot.rate.intensity ?? 0));
     elements.rate.textContent = `${format(rate)}/min`;
     elements.baseline.textContent = median ? `${format(median)}/min` : "Learning";
-    elements.agentCount.textContent = snapshot.childAgentCount
-      ? `+${snapshot.childAgentCount} agent${snapshot.childAgentCount === 1 ? "" : "s"}`
-      : "";
+    elements.agentCount.textContent = allActiveMode
+      ? `${snapshot.activeSessionCount ?? 0} session${snapshot.activeSessionCount === 1 ? "" : "s"}` +
+        (snapshot.childAgentCount ? ` · ${snapshot.childAgentCount} agent${snapshot.childAgentCount === 1 ? "" : "s"}` : "")
+      : snapshot.childAgentCount
+        ? `+${snapshot.childAgentCount} agent${snapshot.childAgentCount === 1 ? "" : "s"}`
+        : "";
+    if (allActiveMode) {
+      elements.multiSessionList.innerHTML = (snapshot.activeSessions ?? []).slice(0, 4).map((item) => {
+        const context = item.context?.percent == null ? "ctx —" : `ctx ${item.context.percent.toFixed(0)}%`;
+        const model = String(item.model ?? "unknown")
+          .replace(/^gpt-/, "")
+          .replace(/[^a-zA-Z0-9._-]/g, "");
+        const agents = item.childAgentCount ? ` +${item.childAgentCount}a` : "";
+        return `<div class="multi-session"><span>${model}${agents}</span><b>${format(item.tokensPerMinute)}/m · ${context}</b></div>`;
+      }).join("") || '<div class="multi-session empty"><span>No active sessions</span><b>Idle</b></div>';
+    }
     if (lastRate == null || Math.abs(lastRate - rate) >= 1) {
       animateNeedle(intensity);
       lastRate = rate;
@@ -879,6 +911,14 @@
     postAction({ type: "open-leaderboard" });
   });
   let privacySharingOn = false;
+  elements.modeFocused.addEventListener("click", () => {
+    postAction({ type: "set-meter-mode", mode: "focused" });
+    showTip("Showing the most recently active session.", 1400);
+  });
+  elements.modeAll.addEventListener("click", () => {
+    postAction({ type: "set-meter-mode", mode: "all-active" });
+    showTip("Showing every session consuming tokens now.", 1400);
+  });
   const setPrivacyUI = (sharingOn) => {
     privacySharingOn = sharingOn;
     elements.privacyLocal.classList.toggle("active", !sharingOn);

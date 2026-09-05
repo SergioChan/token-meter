@@ -54,8 +54,10 @@ test("CodexSnapshotRuntime binds to the active thread and reports its tokens", a
 
   const snapshot = await runtime.snapshot();
   assert.equal(snapshot.status, "bound");
-  assert.equal(snapshot.binding.source, "codex-state-db");
-  assert.equal(snapshot.binding.exact, true);
+  assert.equal(snapshot.binding.source, "codex-state-recency");
+  assert.equal(snapshot.binding.exact, false);
+  assert.equal(snapshot.binding.confidence, "active-turn-candidate");
+  assert.equal(snapshot.binding.activityThreadSource, "user");
   assert.equal(snapshot.binding.threadId, THREAD_ID);
   assert.equal(snapshot.usageMethod, "codex-rollout-raw");
   assert.equal(snapshot.session.totalTokens, 21019);
@@ -75,7 +77,7 @@ test("CodexSnapshotRuntime returns unbound (exact=false) when no thread is activ
   const snapshot = await runtime.snapshot();
   assert.equal(snapshot.status, "unbound");
   assert.equal(snapshot.binding.exact, false);
-  assert.equal(snapshot.binding.source, "codex-state-db");
+  assert.equal(snapshot.binding.source, "codex-state-recency");
 });
 
 test("CodexSnapshotRuntime never falls back to a different thread when the active one is absent", async (context) => {
@@ -96,4 +98,23 @@ test("CodexSnapshotRuntime never falls back to a different thread when the activ
   // the unrelated rollout's numbers.
   assert.equal(snapshot.status, "unbound");
   assert.equal(snapshot.binding.exact, false);
+});
+
+test("CodexSnapshotRuntime can report all active sessions without a focused thread", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "codex-runtime-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  await writeRollout(directory, THREAD_ID, 21019);
+  const runtime = new CodexSnapshotRuntime({
+    sessionsDirectory: directory,
+    resolveActiveThread: () => null,
+    identity: null,
+    usageHistory: null,
+    now: () => Date.parse("2026-08-15T19:44:00.000Z"),
+  });
+
+  const snapshot = await runtime.snapshot({ mode: "all-active" });
+  assert.equal(snapshot.status, "bound");
+  assert.equal(snapshot.meterMode, "all-active");
+  assert.equal(snapshot.activeSessionCount, 1);
+  assert.equal(snapshot.session.totalTokens, 21019);
 });

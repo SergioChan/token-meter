@@ -230,21 +230,29 @@ private final class WidgetPreferences {
     private let url: URL
     var widgetVisible: Bool { didSet { save() } }
     var alwaysVisible: Bool { didSet { save() } }
+    var meterMode: String { didSet { save() } }
 
     init(stateDirectoryURL: URL) {
         url = stateDirectoryURL.appendingPathComponent("visibility.json")
         widgetVisible = true
         alwaysVisible = true
+        meterMode = "focused"
         guard let data = try? Data(contentsOf: url),
-              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Bool] else {
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return
         }
-        widgetVisible = value["widgetVisible"] ?? true
-        alwaysVisible = value["alwaysVisible"] ?? true
+        widgetVisible = value["widgetVisible"] as? Bool ?? true
+        alwaysVisible = value["alwaysVisible"] as? Bool ?? true
+        let savedMode = value["meterMode"] as? String
+        meterMode = savedMode == "all-active" ? "all-active" : "focused"
     }
 
     private func save() {
-        let value = ["widgetVisible": widgetVisible, "alwaysVisible": alwaysVisible]
+        let value: [String: Any] = [
+            "widgetVisible": widgetVisible,
+            "alwaysVisible": alwaysVisible,
+            "meterMode": meterMode,
+        ]
         guard let data = try? JSONSerialization.data(withJSONObject: value) else { return }
         try? data.write(to: url, options: .atomic)
     }
@@ -624,6 +632,8 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
     private var showingCodexFace = false
     private var codexSnapshotInFlight = false
     private var lastCodexSnapshotAt = Date.distantPast
+    private var lastCodexSnapshot: [String: Any]?
+    private var codexWasRunning = false
     private var dragTimer: Timer?
     private var dragStartMouse = CGPoint.zero
     private var dragStartPanel = CGPoint.zero
@@ -738,6 +748,7 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
     }
 
     private func tick() {
+        pollCodexSnapshot()
         guard preferences.widgetVisible else {
             hidePanel()
             return
@@ -765,7 +776,11 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
             return
         }
         if preferences.alwaysVisible {
-            showGlobalFace(hostPosition: nil, hostSize: nil)
+            if codexWasRunning {
+                showCodexFace(hostPosition: nil, hostSize: nil)
+            } else {
+                showGlobalFace(hostPosition: nil, hostSize: nil)
+            }
             return
         }
         hidePanel()
@@ -777,6 +792,26 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         ).first(where: { $0.isActive }) else { return nil }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         return axElement(appElement, kAXFocusedWindowAttribute)
+    }
+
+    // Collection follows the Codex process, not its foreground state. Window
+    // focus only controls presentation, so background turns keep accumulating.
+    private func pollCodexSnapshot() {
+        let running = !NSRunningApplication.runningApplications(
+            withBundleIdentifier: codexBundleID
+        ).isEmpty
+        if !running {
+            if codexWasRunning {
+                lastCodexSnapshot = nil
+                lastCodexSnapshotAt = .distantPast
+            }
+            codexWasRunning = false
+            return
+        }
+        codexWasRunning = true
+        if Date().timeIntervalSince(lastCodexSnapshotAt) >= 1.0 {
+            fetchCodexSnapshot()
+        }
     }
 
     private func hidePanel() {
@@ -864,46 +899,63 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         }
     }
 
-    // Bound face for a frontmost Codex window. The bridge resolves which Codex
-    // thread is active from the state database, so — unlike the Claude session
-    // face — the native side supplies no session identifier and reads no
-    // Accessibility tree; it only pins the panel to the window and polls.
-    private func showCodexFace(hostPosition: CGPoint, hostSize: CGSize) {
-        if currentSessionID != nil || showingGlobalFace || !showingCodexFace {
+    // Bound face for a Codex process. It follows the window while Codex is in
+    // front and parks on the desktop while Codex consumes tokens in back.
+    // The bridge resolves the active-turn candidate from local state.
+    private func showCodexFace(hostPosition: CGPoint?, hostSize: CGSize?) {
+        let enteringCodexFace = currentSessionID != nil || showingGlobalFace || !showingCodexFace
+        if enteringCodexFace {
             currentSessionID = nil
             showingGlobalFace = false
             visibleContextWindowTokens = nil
             contextScanCadence.reset()
-            lastCodexSnapshotAt = .distantPast
-            publishUnbound()
+            if let snapshot = lastCodexSnapshot {
+                publishCodexSnapshot(snapshot)
+            } else {
+                publishUnbound()
+            }
         }
         showingCodexFace = true
-        positionPanel(hostPosition: hostPosition, hostSize: hostSize)
-        panel.orderFrontRegardless()
-        if Date().timeIntervalSince(lastCodexSnapshotAt) >= 0.8 {
-            fetchCodexSnapshot()
+        if let hostPosition, let hostSize {
+            positionPanel(hostPosition: hostPosition, hostSize: hostSize)
+        } else {
+            positionPanelOnDesktop()
         }
+        panel.orderFrontRegardless()
     }
 
     private func fetchCodexSnapshot() {
         guard !codexSnapshotInFlight, pageReady else { return }
         codexSnapshotInFlight = true
         lastCodexSnapshotAt = Date()
-        snapshotBridge.command(["command": "codex-snapshot"]) { [weak self] result in
+        snapshotBridge.command([
+            "command": "codex-snapshot",
+            "mode": preferences.meterMode,
+        ]) { [weak self] result in
             guard let self else { return }
             self.codexSnapshotInFlight = false
-            guard self.showingCodexFace else { return }
-            guard case .success(let snapshot) = result,
-                  let data = try? JSONSerialization.data(withJSONObject: snapshot) else {
-                self.health.update(bridgeHealthy: false, sessionBound: false)
-                self.publishUnbound()
+            guard case .success(let snapshot) = result else {
+                self.health.update(bridgeHealthy: false)
+                if self.showingCodexFace && self.lastCodexSnapshot == nil {
+                    self.health.update(sessionBound: false)
+                    self.publishUnbound()
+                }
                 return
             }
-            let bound = (snapshot["binding"] as? [String: Any])?["exact"] as? Bool ?? false
+            self.lastCodexSnapshot = snapshot
+            let bound = snapshot["status"] as? String == "bound"
             self.health.update(bridgeHealthy: true, sessionBound: bound)
-            let json = String(decoding: data, as: UTF8.self)
-            self.webView.evaluateJavaScript("window.__tokenMeter?.update(\(json))")
+            if self.showingCodexFace { self.publishCodexSnapshot(snapshot) }
         }
+    }
+
+    private func publishCodexSnapshot(_ snapshot: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: snapshot) else {
+            health.update(bridgeHealthy: false)
+            return
+        }
+        let json = String(decoding: data, as: UTF8.self)
+        webView.evaluateJavaScript("window.__tokenMeter?.update(\(json))")
     }
 
     private func positionPanel(hostPosition: CGPoint, hostSize: CGSize) {
@@ -1152,6 +1204,12 @@ private final class MeterController: NSObject, WKNavigationDelegate, WKScriptMes
         case "set-sharing":
             let enabled = body["enabled"] as? Bool ?? false
             snapshotBridge.command(["command": "set-sharing", "enabled": enabled]) { _ in }
+        case "set-meter-mode":
+            let mode = body["mode"] as? String
+            preferences.meterMode = mode == "all-active" ? "all-active" : "focused"
+            lastCodexSnapshot = nil
+            lastCodexSnapshotAt = .distantPast
+            fetchCodexSnapshot()
         case "dismiss-handle-prompt":
             snapshotBridge.command(["command": "dismiss-handle-prompt"]) { _ in }
         case "open-update":

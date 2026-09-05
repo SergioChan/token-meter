@@ -1,7 +1,7 @@
 # Codex Desktop integration
 
 > **Deprecated.** This CDP adapter is superseded by the native Token Widget
-> overlay, which meters Codex by reading the active thread from Codex's local
+> overlay, which meters Codex by reading the most recent user-turn candidate from Codex's local
 > state (`~/.codex/state_5.sqlite`) and its rollout files — with no loopback
 > debugging port, no launch flags, and no quit/relaunch of Codex. The adapter
 > here still works but will be removed in a future release. See the repository
@@ -36,6 +36,7 @@ The default installed runtime is `~/Library/Application Support/Token Meter/Code
 
 - Never inject into an unverified application, listener, or renderer surface.
 - Never infer the selected task from rollout recency.
+- The native state-database adapter reports a recent user-turn candidate, not an exact UI selection.
 - Keep CDP bound to loopback.
 - Do not modify, unpack, replace, or re-sign Codex.app.
 - A normal Codex relaunch is allowed only through the documented installer recovery path; force-quit is never used.

@@ -68,6 +68,12 @@ export function parseRolloutLine(line) {
     };
   }
 
+  if (value.type === "turn_context") {
+    const model = value.payload?.model;
+    if (typeof model !== "string" || model.length === 0 || timestampMs == null) return null;
+    return { kind: "model", timestampMs, model };
+  }
+
   if (value.type !== "event_msg") return null;
   const payload = value.payload ?? {};
   if (payload.type === "token_count") {
@@ -143,6 +149,8 @@ function createFileState(filePath, discoveredId, modifiedMs) {
     contextCompactions: [],
     skills: null,
     skillsUpdatedAtMs: null,
+    model: null,
+    modelUpdatedAtMs: null,
   };
 }
 
@@ -344,6 +352,8 @@ export class RolloutStore {
       file.contextCompactions = [];
       file.skills = null;
       file.skillsUpdatedAtMs = null;
+      file.model = null;
+      file.modelUpdatedAtMs = null;
     }
     if (fileStat.size === file.offset) {
       file.modifiedMs = fileStat.mtimeMs;
@@ -399,6 +409,9 @@ export class RolloutStore {
     } else if (event.kind === "skillInventory") {
       file.skills = event.skills;
       file.skillsUpdatedAtMs = event.timestampMs;
+    } else if (event.kind === "model") {
+      file.model = event.model;
+      file.modelUpdatedAtMs = event.timestampMs;
     }
   }
 }

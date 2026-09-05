@@ -272,7 +272,8 @@ for await (const line of input) {
       continue;
     }
     if (request?.command === "codex-snapshot") {
-      const snapshot = await ensureCodexRuntime().snapshot();
+      const mode = request.mode === "all-active" ? "all-active" : "focused";
+      const snapshot = await ensureCodexRuntime().snapshot({ mode });
       snapshot.appVersion = installedVersion;
       if (updateInfo) snapshot.updateInfo = { version: updateInfo.version };
       await writeLine({ requestId, snapshot });

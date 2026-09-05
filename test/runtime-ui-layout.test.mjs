@@ -438,6 +438,8 @@ test("opening settings closes the stats view and shows the installed version", a
   const settingsPanel = card.querySelector(".meter-settings");
   const settingsToggle = card.querySelector(".settings-toggle");
   const settingsTip = card.querySelector(".settings-tip");
+  const modeAll = card.querySelector(".mode-all");
+  const multiSessionList = card.querySelector(".multi-session-list");
 
   const snapshot = (extra = {}) => ({
     status: "bound",
@@ -477,6 +479,26 @@ test("opening settings closes the stats view and shows the installed version", a
     settingsTip.textContent,
     "Token Widget v9.9.9 · v9.9.10 available",
   );
+
+  modeAll.click();
+  assert.equal(actions.at(-1).type, "set-meter-mode");
+  assert.equal(actions.at(-1).mode, "all-active");
+  window.__tokenMeter.update(snapshot({
+    meterMode: "all-active",
+    sessionId: "all-active",
+    activeSessionCount: 1,
+    childAgentCount: 2,
+    activeSessions: [{
+      model: "gpt-6-astra",
+      childAgentCount: 2,
+      tokensPerMinute: 4200,
+      context: { percent: 37 },
+    }],
+  }));
+  assert.equal(card.dataset.meterMode, "all-active");
+  assert.equal(multiSessionList.hidden, false);
+  assert.match(multiSessionList.markup, /6-astra \+2a/);
+  assert.match(multiSessionList.markup, /4\.20K\/m · ctx 37%/);
 });
 
 test("the global face renders machine-wide totals without a session", async () => {
