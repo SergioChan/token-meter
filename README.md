@@ -95,7 +95,7 @@ Local raw workload is not a billing meter and does not claim to reproduce Codex 
 
 ### Claude workload
 
-Legacy local Sessions resolve their exact Desktop `local_<uuid>` to one Claude Code transcript. Current cloud Code Sessions bind the exact `session_<24 chars>` route and accept only complete, contiguous locally cached `/events` sequences. Repeated responses are de-duplicated by response identity.
+Legacy local Sessions resolve their exact Desktop `local_<uuid>` to one Claude Code transcript. Current cloud Code Sessions bind the exact `session_<24 chars>` route and read that Session's events from Claude Desktop's local HTTP cache: every cached `/events` page, the open `/events/stream` connection, and `watch` poll responses are matched by Session identity rather than by a fixed URL, merged by `sequence_num`, and de-duplicated by response identity. A cloud Session whose cached events leave gaps is shown as a flagged lower bound (`≈`) rather than hidden; the meter never substitutes another Session's data. See [the cloud event cache research](docs/research/claude-cloud-events-cache.md) for what Desktop actually requests and why the collector is shape-agnostic.
 
 ```text
 raw tokens = input_tokens

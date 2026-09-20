@@ -637,10 +637,16 @@
       : snapshot.meterId;
     elements.sessionId.textContent =
       identityLabel ?? snapshot.sessionId.slice(-8).toUpperCase();
+    const partial = snapshot.binding?.complete === false;
+    card.dataset.partial = String(partial);
+    const coverage = snapshot.binding?.coverage;
     elements.sessionId.title =
       (snapshot.meterId
         ? `Meter ${snapshot.meterId} · Session ${snapshot.sessionId}`
         : `Session ${snapshot.sessionId}`) +
+      (partial
+        ? ` · Partial: ${coverage?.knownSequences ?? "?"} of ${coverage?.maxSequence ?? "?"} cloud events cached locally; totals are a lower bound`
+        : "") +
       (nativeActions() ? " · Click to open your dashboard" : "");
     renderSettingsIdentity(snapshot);
     const delta = Math.max(0, snapshot.session.totalTokens - lastSessionTotal);

@@ -93,11 +93,17 @@ export class ClaudeSnapshotRuntime {
       snapshot.binding = {
         source: "claude-cloud-events-cache",
         exact: snapshot.status === "bound",
+        // `complete` is false when cached pages leave sequence gaps; the
+        // numbers are then a lower bound for the right Session, never data
+        // borrowed from another one.
+        complete: cloud.complete !== false,
+        coverage: cloud.coverage ?? null,
         desktopSessionId,
         cliSessionId: null,
         model: null,
       };
       snapshot.usageMethod = "claude-cloud-events-cache";
+      snapshot.cloudDiagnostics = cloud.diagnostics ?? null;
       this.#decorate(snapshot);
       return snapshot;
     }

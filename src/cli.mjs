@@ -18,6 +18,10 @@ function parseArguments(argv) {
       options.claudeSessionsDirectory = rest[++index];
     } else if (value === "--claude-projects-dir") {
       options.claudeProjectsDirectory = rest[++index];
+    } else if (value === "--claude-cache-dir") {
+      options.claudeCacheDirectory = rest[++index];
+    } else if (value === "--strict") {
+      options.strict = true;
     } else if (value === "--cdp-port") {
       options.cdpPort = Number(rest[++index]);
     } else if (value === "--set-handle") {
@@ -73,9 +77,19 @@ if (options.command === "snapshot") {
   const claudeProjectsDirectory =
     options.claudeProjectsDirectory ??
     path.join(os.homedir(), ".claude", "projects");
+  const { ClaudeCloudSessionStore } = await import(
+    "../integrations/claude-desktop/src/cloud-session-store.mjs"
+  );
+  // One-shot diagnostics: no persisted index, so a CLI run never writes state.
+  const cloudSessionStore = new ClaudeCloudSessionStore({
+    ...(options.claudeCacheDirectory ? { cacheDirectory: options.claudeCacheDirectory } : {}),
+    indexPersistPath: null,
+    allowPartial: options.strict !== true,
+  });
   const runtime = new ClaudeSnapshotRuntime({
     sessionsDirectory: claudeSessionsDirectory,
     projectsDirectory: claudeProjectsDirectory,
+    cloudSessionStore,
   });
   const snapshot = await runtime.snapshot(options.desktopSessionId);
   process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);

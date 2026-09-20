@@ -79,6 +79,13 @@
   cursor: pointer;
 }
 
+/* A cloud Session whose locally cached events leave gaps: totals are a lower
+   bound, so the identifier carries an approximation mark. */
+.meter-card[data-partial="true"] .session-id::before {
+  content: "≈ ";
+  opacity: 0.8;
+}
+
 .session-id.clickable:hover {
   color: #20211f;
   text-decoration: underline;

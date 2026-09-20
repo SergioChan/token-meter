@@ -187,6 +187,33 @@ Confirm all of the following:
 
 The integration deliberately shows nothing rather than guessing another Session.
 
+### A cloud Session shows UNBOUND or `≈`
+
+Cloud Code Sessions (`session_<24 chars>` routes) have no transcript on this Mac.
+Their events are read from Claude Desktop's local HTTP cache, so the reading
+depends on what Desktop has fetched. Ask the collector directly:
+
+```bash
+node src/cli.mjs claude-snapshot --desktop-session-id session_<24 chars>
+```
+
+The `reason` and `diagnostics` fields explain the state:
+
+- `cloud-session-cache-missing` with `index.matched: 0`: Desktop has not cached
+  any events for this Session yet. Open the Session in Desktop's Code tab and
+  scroll its history once.
+- `cloud-session-cache-unreadable`: entries exist but could not be decoded; the
+  per-entry `error` names the format problem (for example `ZSTD_UNSUPPORTED`
+  on a source install running Node.js older than 22.15).
+- `cloud-cache-directory-unavailable`: the cache directory is missing or
+  unreadable; check `diagnostics.cacheDirectory`.
+- A bound reading marked `≈` means the cached pages leave sequence gaps and the
+  totals are a lower bound. `binding.coverage` shows how many of the Session's
+  events are known locally.
+
+The overlay bridge writes the same summary to `overlay-error.log` each time the
+binding state changes, so the log shows why a Session stopped being measured.
+
 ### Update
 
 The packaged app updates itself. The widget checks the registry at startup and
