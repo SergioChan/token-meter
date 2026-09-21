@@ -119,11 +119,16 @@ independent sources and merges everything by `sequence_num`:
    from stream 0's record at the end of the file); an open stream is read to
    end of file and decoded up to its last flushed block. The live
    `/events/stream` body on the tested install is gzip and is rejected by a
-   strict decoder with `invalid stored block lengths`, so gzip falls back to
-   sync-flush decoding, then to inflating each `1f 8b 08` member on its own
-   (a proxy that restarts compression per chunk without trailers), then to a
-   back-off to the last `00 00 ff ff` marker. `claude-cache-inspect` prints
-   which strategy applied.
+   strict decoder with `invalid stored block lengths`. The body is written by
+   a level-0 proxy as stored deflate blocks (five-byte header plus plaintext)
+   with a sync-flush after each chunk, and strict decoding stops partway
+   through. gzip therefore falls back to sync-flush decoding and then to a
+   block walker (`walkGzip`) that advances stored block by stored block, lets
+   zlib consume Huffman runs bounded at the next member header, skips
+   trailers after a final block, tolerates members that restart without
+   trailers, and resynchronizes at the next plausible header after corrupt
+   bytes. `claude-cache-inspect` prints the walk statistics and the offsets
+   and eight header bytes of every anomaly.
 4. **Extraction**. Any object carrying `sequence_num` (or `sequenceNum`, or a
    numeric SSE `id:`) becomes an event; containers named `data`, `events`,
    `event`, `items`, `results`, `rows`, `history` are searched to a bounded

@@ -10,6 +10,7 @@ import {
   decodeGzipLenient,
   findStreamEnd,
   gzipMemberOffsets,
+  walkGzip,
   parseSimpleCacheHeader,
   readSimpleCacheEntry,
   readSimpleCacheKey,
@@ -187,29 +188,72 @@ test("key index surfaces a directory listing failure", async () => {
   await assert.rejects(() => index.refresh(), { code: "ENOENT" });
 });
 
-test("gzip members that restart without trailers decode segment by segment", () => {
-  const frame = (index) => Buffer.from(`data: {"sequence_num":${index},"payload":{"type":"user"}}\n\n`);
-  // A proxy that opens a fresh gzip member per chunk and never closes the
-  // previous one: header + raw deflate (sync-flushed), repeated.
-  const member = (index) => {
-    const deflate = zlib.deflateRawSync(frame(index), { finishFlush: zlib.constants.Z_SYNC_FLUSH });
-    return Buffer.concat([Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0, 0, 0, 0, 0x00, 0x03]), deflate]);
-  };
-  const wire = Buffer.concat([member(1), member(2), member(3)]);
-  assert.throws(() => zlib.gunzipSync(wire), "a strict decoder rejects the concatenation");
-  assert.equal(gzipMemberOffsets(wire).length, 3);
-  const lenient = decodeGzipLenient(wire, { maxOutputLength: 1 << 20 });
-  assert.equal(lenient.strategy, "members");
-  assert.equal(lenient.segments, 3);
-  assert.equal(lenient.failedSegments, 0);
-  assert.equal((lenient.bytes.toString().match(/^data:/gm) ?? []).length, 3);
-  const decoded = decodeCacheBody(wire, { truncated: true });
-  assert.equal(decoded.format, "gzip");
-  assert.equal(decoded.strategy, "members");
-  const analysis = analyzeBody(wire);
-  assert.equal(analysis.firstBytesHex.startsWith("1f8b0800"), true);
-  assert.equal(analysis.gzipMemberOffsets.length, 3);
-  assert.equal(analysis.textual, false);
+const GZ_HEADER = Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0, 0, 0, 0, 0x00, 0xff]);
+const SYNC = Buffer.from([0x00, 0x00, 0x00, 0xff, 0xff]);
+function storedBlock(text, { final = false } = {}) {
+  const data = Buffer.from(text);
+  const header = Buffer.alloc(5);
+  header[0] = final ? 0x01 : 0x00;
+  header.writeUInt16LE(data.length, 1);
+  header.writeUInt16LE(~data.length & 0xffff, 3);
+  return Buffer.concat([header, data]);
+}
+const frameText = (index) => `data: {"sequence_num":${index},"payload":{"type":"user"}}\n\n`;
+const countFrames = (bytes) => (bytes.toString().match(/^data:/gm) ?? []).length;
+
+test("gzip walker: level-0 proxy stream with keepalives and a cut-off tail", () => {
+  const wire = Buffer.concat([
+    GZ_HEADER,
+    storedBlock(": keepalive\n\n"), SYNC,
+    storedBlock(frameText(1)), SYNC,
+    storedBlock(frameText(2)), SYNC,
+    storedBlock(frameText(3)).subarray(0, 12), // still being written
+  ]);
+  const walked = walkGzip(wire);
+  assert.equal(countFrames(walked.bytes), 2);
+  assert.equal(walked.stats.storedBlocks, 3 + 3, "three data blocks plus three empty sync-flush blocks");
+  assert.equal(walked.stats.exhausted, true);
+  assert.deepEqual(walked.anomalies, []);
+});
+
+test("gzip walker: members that restart without trailers, and complete concatenated members", () => {
+  const member = (index) => Buffer.concat([GZ_HEADER, zlib.deflateRawSync(Buffer.from(frameText(index)), { finishFlush: zlib.constants.Z_SYNC_FLUSH })]);
+  const restarted = Buffer.concat([member(1), member(2), member(3)]);
+  assert.throws(() => zlib.gunzipSync(restarted));
+  const walked = walkGzip(restarted);
+  assert.equal(countFrames(walked.bytes), 3);
+  assert.equal(walked.stats.members, 3);
+  assert.equal(walked.anomalies.length, 0);
+
+  const complete = Buffer.concat([zlib.gzipSync(Buffer.from(frameText(1))), zlib.gzipSync(Buffer.from(frameText(2)))]);
+  const walkedComplete = walkGzip(complete);
+  assert.equal(countFrames(walkedComplete.bytes), 2);
+  assert.equal(walkedComplete.stats.trailersSkipped, 2);
+  assert.equal(walkedComplete.anomalies.length, 0);
+
+  const decoded = decodeCacheBody(restarted, { truncated: true });
+  assert.equal(decoded.strategy, "walk");
+  assert.equal(countFrames(decoded.bytes), 3);
+});
+
+test("gzip walker: a final block mid-stream followed by more blocks, and corrupt bytes", () => {
+  const wire = Buffer.concat([
+    GZ_HEADER,
+    storedBlock(frameText(1)), SYNC,
+    storedBlock(frameText(2), { final: true }), Buffer.alloc(8, 0), // trailer
+    storedBlock(frameText(3)), SYNC,
+    Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00, 0x41, 0x42]), // garbage: mismatched stored header
+    storedBlock(frameText(4)), SYNC,
+  ]);
+  assert.throws(() => zlib.gunzipSync(wire));
+  const walked = walkGzip(wire);
+  assert.equal(countFrames(walked.bytes), 4);
+  assert.equal(walked.stats.finalBlocks, 1);
+  assert.equal(walked.stats.trailersSkipped, 1);
+  assert.equal(walked.stats.resyncs, 1);
+  assert.equal(walked.anomalies.length, 1);
+  assert.equal(walked.anomalies[0].reason, "stored-block-length-mismatch");
+  assert.equal(walked.anomalies[0].hex.length, 16);
 });
 
 test("plain-text bodies of unknown shape are raw with no events rather than errors", () => {

@@ -150,70 +150,170 @@ function gzipHeaderLength(segment) {
   return offset <= segment.length ? offset : null;
 }
 
+function plausibleStoredHeader(body, at) {
+  if (at + 5 > body.length) return false;
+  if ((body[at] & 0xfe) !== 0) return false;
+  const length = body.readUInt16LE(at + 1);
+  const check = body.readUInt16LE(at + 3);
+  return length > 0 && ((length ^ check) & 0xffff) === 0xffff;
+}
+
+function isGzipHeaderAt(body, at) {
+  return at + 10 <= body.length && body[at] === 0x1f && body[at + 1] === 0x8b && body[at + 2] === 0x08 && body[at + 3] <= 0x1f;
+}
+
 /**
- * Decode gzip data that a strict decoder rejects, in order of preference:
- * an unfinished member (Z_SYNC_FLUSH), several members that restart without
- * trailers (inflate each raw deflate segment on its own), and finally a
- * back-off to the last sync-flush marker. Returns `{ bytes, strategy,
- * segments, failedSegments }` or null.
+ * Walk a gzip body block by block and salvage every decodable byte.
+ *
+ * Handles, in one pass: several members with or without trailers, a member
+ * whose final block arrives mid-stream while more blocks follow, stored blocks
+ * written by a level-0 proxy, a block cut off at the end of a growing file,
+ * and corrupt bytes (resynchronized at the next gzip header or plausible
+ * stored-block header). Returns `{ bytes, stats, anomalies }`; `anomalies`
+ * carry only offsets, a reason, and eight header bytes.
+ */
+export function walkGzip(body, { maxOutputLength = DEFAULT_MAX_DECODED_BYTES, maxAnomalies = 10 } = {}) {
+  const outputs = [];
+  const anomalies = [];
+  const stats = {
+    members: 0,
+    storedBlocks: 0,
+    compressedRuns: 0,
+    finalBlocks: 0,
+    trailersSkipped: 0,
+    resyncs: 0,
+    exhausted: false,
+    consumedBytes: 0,
+  };
+  let produced = 0;
+  const note = (offset, reason) => {
+    if (anomalies.length < maxAnomalies) {
+      anomalies.push({ offset, reason, hex: body.subarray(offset, offset + 8).toString("hex") });
+    }
+  };
+  const push = (chunk) => {
+    produced += chunk.length;
+    if (produced > maxOutputLength) {
+      throw Object.assign(new Error("decoded body exceeds limit"), { code: "TOO_LARGE" });
+    }
+    outputs.push(chunk);
+  };
+  const resync = (from) => {
+    stats.resyncs += 1;
+    for (let at = from; at + 5 <= body.length; at += 1) {
+      if (isGzipHeaderAt(body, at) || plausibleStoredHeader(body, at)) return at;
+    }
+    return body.length;
+  };
+  const afterFinal = (at) => {
+    stats.finalBlocks += 1;
+    // A well-formed member is followed by CRC32 + ISIZE. A proxy that only
+    // marks the block final and keeps streaming is followed by data instead.
+    if (at >= body.length) return at;
+    if (isGzipHeaderAt(body, at) || plausibleStoredHeader(body, at)) return at;
+    if (at + 8 <= body.length) {
+      stats.trailersSkipped += 1;
+      return at + 8;
+    }
+    return body.length;
+  };
+
+  let pos = 0;
+  while (pos < body.length) {
+    if (isGzipHeaderAt(body, pos)) {
+      const headerLength = gzipHeaderLength(body.subarray(pos));
+      if (headerLength == null) {
+        stats.exhausted = true;
+        break;
+      }
+      stats.members += 1;
+      pos += headerLength;
+      continue;
+    }
+    if (pos + 5 > body.length) {
+      stats.exhausted = true;
+      break;
+    }
+    const header = body[pos];
+    if ((header & 0x06) === 0) {
+      const length = body.readUInt16LE(pos + 1);
+      const check = body.readUInt16LE(pos + 3);
+      if (((length ^ check) & 0xffff) !== 0xffff) {
+        note(pos, "stored-block-length-mismatch");
+        pos = resync(pos + 1);
+        continue;
+      }
+      if (pos + 5 + length > body.length) {
+        // Still being written; the data will be complete on a later read.
+        stats.exhausted = true;
+        break;
+      }
+      stats.storedBlocks += 1;
+      push(body.subarray(pos + 5, pos + 5 + length));
+      pos += 5 + length;
+      if (header & 0x01) pos = afterFinal(pos);
+      continue;
+    }
+    // A Huffman-coded run: let zlib consume as far as it can. A run that is
+    // followed by a fresh member header (a proxy restarting compression) is
+    // inflated up to that header first, because zlib would otherwise read
+    // the header bytes as deflate data and discard the whole run.
+    const inflateOptions = {
+      finishFlush: zlib.constants.Z_SYNC_FLUSH,
+      info: true,
+      maxOutputLength: Math.max(1, maxOutputLength - produced),
+    };
+    let result = null;
+    let inflateError = null;
+    const nextHeader = body.indexOf(GZIP_MEMBER_HEAD, pos + 1);
+    const candidates = nextHeader !== -1 && isGzipHeaderAt(body, nextHeader) ? [nextHeader, body.length] : [body.length];
+    for (const limit of candidates) {
+      try {
+        result = zlib.inflateRawSync(body.subarray(pos, limit), inflateOptions);
+        break;
+      } catch (error) {
+        inflateError = error;
+      }
+    }
+    if (result == null) {
+      note(pos, `inflate: ${inflateError?.message ?? "failed"}`);
+      pos = resync(pos + 1);
+      continue;
+    }
+    stats.compressedRuns += 1;
+    push(result.buffer);
+    const consumed = result.engine.bytesWritten;
+    if (consumed <= 0) {
+      note(pos, "inflate-made-no-progress");
+      pos = resync(pos + 1);
+      continue;
+    }
+    pos += consumed;
+    if (pos < body.length) pos = afterFinal(pos);
+    else stats.exhausted = true;
+  }
+  stats.consumedBytes = pos;
+  return { bytes: Buffer.concat(outputs), stats, anomalies };
+}
+
+/**
+ * Decode gzip data that a strict decoder rejects: first an unfinished single
+ * member (Z_SYNC_FLUSH), then the block walker above. Returns
+ * `{ bytes, strategy, walk }` or null when nothing could be salvaged.
  */
 export function decodeGzipLenient(body, { maxOutputLength }) {
   try {
     return {
       bytes: zlib.gunzipSync(body, { maxOutputLength, finishFlush: zlib.constants.Z_SYNC_FLUSH }),
       strategy: "sync-flush",
-      segments: 1,
-      failedSegments: 0,
+      walk: null,
     };
   } catch {
     // fall through
   }
-  const offsets = gzipMemberOffsets(body);
-  if (offsets.length > 0) {
-    const parts = [];
-    let failed = 0;
-    for (let index = 0; index < offsets.length; index += 1) {
-      const segment = body.subarray(offsets[index], offsets[index + 1] ?? body.length);
-      const headerLength = gzipHeaderLength(segment);
-      if (headerLength == null) {
-        failed += 1;
-        continue;
-      }
-      try {
-        parts.push(
-          zlib.inflateRawSync(segment.subarray(headerLength), {
-            maxOutputLength,
-            finishFlush: zlib.constants.Z_SYNC_FLUSH,
-          }),
-        );
-      } catch {
-        failed += 1;
-      }
-    }
-    if (parts.length > 0) {
-      return {
-        bytes: Buffer.concat(parts),
-        strategy: "members",
-        segments: offsets.length,
-        failedSegments: failed,
-      };
-    }
-  }
-  const marker = body.lastIndexOf(SYNC_FLUSH_MARKER);
-  if (marker > 0) {
-    try {
-      return {
-        bytes: zlib.gunzipSync(body.subarray(0, marker + 4), {
-          maxOutputLength,
-          finishFlush: zlib.constants.Z_SYNC_FLUSH,
-        }),
-        strategy: "marker-backoff",
-        segments: 1,
-        failedSegments: 0,
-      };
-    } catch {
-      // fall through
-    }
+  const walked = walkGzip(body, { maxOutputLength });
+  if (walked.bytes.length > 0) {
+    return { bytes: walked.bytes, strategy: "walk", walk: { ...walked.stats, anomalies: walked.anomalies } };
   }
   return null;
 }
@@ -301,8 +401,7 @@ export function decodeCacheBody(body, { maxDecodedBytes = DEFAULT_MAX_DECODED_BY
         bytes: lenient.bytes,
         partial: true,
         strategy: lenient.strategy,
-        segments: lenient.segments,
-        failedSegments: lenient.failedSegments,
+        walk: lenient.walk,
       };
     }
   }
