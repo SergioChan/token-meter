@@ -26,7 +26,7 @@
 // parse boundary exactly as before.
 
 import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { isClaudeCloudSessionId } from "./desktop-session-store.mjs";
@@ -57,6 +57,9 @@ const DEFAULT_MAX_EVENTS = 20_000;
 const DEFAULT_MAX_MATCHED_ENTRIES = 200;
 const DEFAULT_MAX_WATCH_ENTRIES = 25;
 const DIAGNOSTIC_ENTRY_LIMIT = 40;
+const DEFAULT_RETAINED_SESSIONS = 20;
+const DEFAULT_RETENTION_PERSIST_INTERVAL_MS = 10_000;
+const RETENTION_VERSION = 1;
 
 // Every first-page request shape seen so far. New shapes only need a row here
 // for the probe fallback; the key index already matches them by identity.
@@ -76,6 +79,17 @@ export const KNOWN_CURSOR_PAGE_SHAPES = Object.freeze([
 
 export function defaultClaudeCacheDirectory() {
   return path.join(os.homedir(), "Library", "Application Support", "Claude", "Cache", "Cache_Data");
+}
+
+export function defaultCloudRetentionDirectory() {
+  return path.join(
+    os.homedir(),
+    "Library",
+    "Application Support",
+    "Token Meter",
+    "State",
+    "claude-cloud-sessions",
+  );
 }
 
 export function defaultCloudCacheIndexPath() {
@@ -267,27 +281,47 @@ function fileFromEvents(sessionId, id, threadSource, records, { startedAtMs, cov
   };
 }
 
-export function buildMetricFiles(sessionId, orderedEvents, { complete = true, coverage = null, diagnostics = {} } = {}) {
+/**
+ * Reduce one cloud event to what the meter keeps: its sequence, whether it
+ * belongs to a child Agent, and the numerical transcript record (or null for
+ * rows without usage, which still count toward coverage). Content is dropped
+ * here and never retained.
+ */
+export function eventToRecord(event) {
+  const payload = event.payload;
+  if (payload == null || typeof payload !== "object") {
+    return { sequence: event.sequence, subagent: false, parsed: null };
+  }
+  const value =
+    payload.timestamp == null && event.createdAt != null
+      ? { ...payload, timestamp: event.createdAt }
+      : payload;
+  return {
+    sequence: event.sequence,
+    subagent: isSubagentPayload(payload),
+    parsed: parseClaudeTranscriptValue(value),
+  };
+}
+
+export function buildMetricFiles(sessionId, orderedEvents, options = {}) {
+  return buildMetricFilesFromRecords(sessionId, orderedEvents.map(eventToRecord), options);
+}
+
+export function buildMetricFilesFromRecords(sessionId, orderedRecords, { complete = true, coverage = null, diagnostics = {} } = {}) {
   const rootRecords = [];
   const agentRecords = [];
   let startedAtMs = null;
-  for (const event of orderedEvents) {
-    const payload = event.payload;
-    if (payload == null || typeof payload !== "object") continue;
-    const value =
-      payload.timestamp == null && event.createdAt != null
-        ? { ...payload, timestamp: event.createdAt }
-        : payload;
-    const parsed = parseClaudeTranscriptValue(value);
+  for (const record of orderedRecords) {
+    const parsed = record.parsed;
     if (parsed == null) continue;
     if (startedAtMs == null || parsed.timestampMs < startedAtMs) startedAtMs = parsed.timestampMs;
-    (isSubagentPayload(payload) ? agentRecords : rootRecords).push(parsed);
+    (record.subagent ? agentRecords : rootRecords).push(parsed);
   }
   const shared = {
     startedAtMs,
     coverage,
     complete,
-    diagnostics: { source: "claude-cloud-http-cache", eventCount: orderedEvents.length, ...diagnostics },
+    diagnostics: { source: "claude-cloud-http-cache", eventCount: orderedRecords.length, ...diagnostics },
   };
   const files = [fileFromEvents(sessionId, sessionId, "user", rootRecords, shared)];
   if (agentRecords.some((record) => record.kind === "assistantUsage")) {
@@ -301,6 +335,7 @@ export class ClaudeCloudSessionStore {
     cacheDirectory = defaultClaudeCacheDirectory(),
     index = undefined,
     indexPersistPath = defaultCloudCacheIndexPath(),
+    indexRescanIntervalMs = undefined,
     responseReader = null,
     refreshIntervalMs = DEFAULT_REFRESH_INTERVAL_MS,
     maxPages = DEFAULT_MAX_PAGES,
@@ -316,6 +351,12 @@ export class ClaudeCloudSessionStore {
     waitForIndex = false,
     indexDrainTimeoutMs = 120_000,
     onProgress = null,
+    // Desktop replaces the SSE cache entry on every reconnect and evicts old
+    // pages, so events seen once are retained (numbers only) in memory and,
+    // when a directory is given, on disk across bridge restarts.
+    retentionDirectory = defaultCloudRetentionDirectory(),
+    retentionPersistIntervalMs = DEFAULT_RETENTION_PERSIST_INTERVAL_MS,
+    maxRetainedSessions = DEFAULT_RETAINED_SESSIONS,
     prefixes = cloudIdPrefixes(),
     hostSuffixes = cloudHostSuffixes(),
     readEntry = readSimpleCacheEntry,
@@ -332,6 +373,7 @@ export class ClaudeCloudSessionStore {
             directory: cacheDirectory,
             isRelevantKey: (key) => isCloudSessionCacheKey(key, { hostSuffixes }),
             persistPath: indexPersistPath,
+            ...(indexRescanIntervalMs == null ? {} : { rescanIntervalMs: indexRescanIntervalMs }),
             now,
           });
     // A legacy `responseReader(url)` is honored by the probe source so callers
@@ -348,6 +390,10 @@ export class ClaudeCloudSessionStore {
     this.waitForIndex = waitForIndex;
     this.indexDrainTimeoutMs = indexDrainTimeoutMs;
     this.onProgress = onProgress;
+    this.retentionDirectory = retentionDirectory;
+    this.retentionPersistIntervalMs = retentionPersistIntervalMs;
+    this.maxRetainedSessions = maxRetainedSessions;
+    this.retained = new Map();
     this.readEntry = readEntry;
     this.now = now;
     this.memo = null;
@@ -368,7 +414,85 @@ export class ClaudeCloudSessionStore {
   }
 
   async close() {
+    await Promise.all([...this.retained.keys()].map((sessionId) => this.#persistRetention(sessionId, true)));
     await this.index?.close?.();
+  }
+
+  #retentionPath(sessionId) {
+    return this.retentionDirectory ? path.join(this.retentionDirectory, `${sessionId}.json`) : null;
+  }
+
+  async #retentionFor(sessionId) {
+    let state = this.retained.get(sessionId);
+    if (state) {
+      this.retained.delete(sessionId);
+      this.retained.set(sessionId, state);
+      return state;
+    }
+    state = { records: new Map(), dirty: false, lastPersistMs: 0, loaded: false, source: "memory" };
+    const filePath = this.#retentionPath(sessionId);
+    if (filePath) {
+      try {
+        const raw = JSON.parse(await readFile(filePath, "utf8"));
+        if (raw?.version === RETENTION_VERSION && raw.sessionId === sessionId && Array.isArray(raw.records)) {
+          for (const record of raw.records) {
+            const sequence = Number(record?.sequence);
+            if (!Number.isSafeInteger(sequence) || sequence <= 0) continue;
+            state.records.set(sequence, {
+              sequence,
+              subagent: record.subagent === true,
+              parsed: record.parsed ?? null,
+            });
+          }
+          state.source = "disk";
+        }
+      } catch {
+        // No prior retention, or an unreadable file: start from the cache.
+      }
+    }
+    state.loaded = true;
+    this.retained.set(sessionId, state);
+    while (this.retained.size > this.maxRetainedSessions) {
+      const oldest = this.retained.keys().next().value;
+      await this.#persistRetention(oldest, true);
+      this.retained.delete(oldest);
+    }
+    return state;
+  }
+
+  #retain(state, event) {
+    const existing = state.records.get(event.sequence);
+    if (existing != null && (existing.parsed != null || event.payload == null)) return;
+    state.records.set(event.sequence, eventToRecord(event));
+    state.dirty = true;
+    if (state.records.size > this.maxEvents) {
+      const oldest = Math.min(...state.records.keys());
+      state.records.delete(oldest);
+    }
+  }
+
+  async #persistRetention(sessionId, force = false) {
+    const state = this.retained.get(sessionId);
+    const filePath = this.#retentionPath(sessionId);
+    if (!state?.dirty || !filePath) return;
+    const nowMs = this.now();
+    if (!force && nowMs - state.lastPersistMs < this.retentionPersistIntervalMs) return;
+    const payload = JSON.stringify({
+      version: RETENTION_VERSION,
+      sessionId,
+      updatedAtMs: nowMs,
+      records: [...state.records.values()].sort((left, right) => left.sequence - right.sequence),
+    });
+    const temporary = `${filePath}.${process.pid}.tmp`;
+    try {
+      await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+      await writeFile(temporary, payload, { mode: 0o600 });
+      await rename(temporary, filePath);
+      state.dirty = false;
+      state.lastPersistMs = nowMs;
+    } catch {
+      // Retention on disk is an optimization; memory still holds the records.
+    }
   }
 
   #unbound(sessionId, reason, diagnostics) {
@@ -643,8 +767,18 @@ export class ClaudeCloudSessionStore {
       await this.#probeSource(variants, events, diagnostics);
     }
 
+    const retention = await this.#retentionFor(sessionId);
+    for (const event of events.values()) this.#retain(retention, event);
+    await this.#persistRetention(sessionId);
+    diagnostics.retention = {
+      records: retention.records.size,
+      fromCacheNow: events.size,
+      source: retention.source,
+      path: this.#retentionPath(sessionId),
+    };
+
     const entries = diagnostics.entries;
-    if (events.size === 0) {
+    if (events.size === 0 && retention.records.size === 0) {
       const indexSource = diagnostics.sources.index;
       const indexError = indexSource?.status === "error";
       const probeErrors = diagnostics.sources.probe?.errors ?? 0;
@@ -668,7 +802,7 @@ export class ClaudeCloudSessionStore {
       return this.#unbound(sessionId, "cloud-session-event-limit", diagnostics);
     }
 
-    const sequences = [...events.keys()].sort((left, right) => left - right);
+    const sequences = [...retention.records.keys()].sort((left, right) => left - right);
     const maxSequence = sequences.at(-1);
     const coverage = {
       knownSequences: sequences.length,
@@ -682,18 +816,17 @@ export class ClaudeCloudSessionStore {
       return this.#unbound(sessionId, "cloud-session-cache-incomplete", { ...diagnostics, coverage });
     }
 
-    const orderedEvents = sequences.map((sequence) => events.get(sequence));
-    const withPayload = orderedEvents.filter((event) => event.payload != null);
-    if (withPayload.length === 0) {
+    const orderedRecords = sequences.map((sequence) => retention.records.get(sequence));
+    if (!orderedRecords.some((record) => record.parsed != null)) {
       return this.#unbound(sessionId, "cloud-session-cache-empty", { ...diagnostics, coverage });
     }
     return {
       status: "resolved",
       desktopSessionId: sessionId,
-      eventCount: orderedEvents.length,
+      eventCount: orderedRecords.length,
       complete,
       coverage,
-      files: buildMetricFiles(sessionId, orderedEvents, { complete, coverage }),
+      files: buildMetricFilesFromRecords(sessionId, orderedRecords, { complete, coverage }),
       diagnostics: { ...diagnostics, coverage },
     };
   }

@@ -23,7 +23,13 @@ published.
   Session is unbound, `claude-snapshot` prints full source diagnostics and
   accepts `--claude-cache-dir` and `--strict`, and the key index persists under
   `Token Meter/State` so a 50,000-entry cache costs a few hundred milliseconds
-  per tick only on first launch.
+  per tick only on first launch. Live SSE entries decode even while Chromium
+  is still writing them (zero-filled tail trimmed, longest decodable prefix),
+  and every event seen is retained as numbers only, in memory and under
+  `Token Meter/State/claude-cloud-sessions`, so Desktop replacing the stream
+  entry on reconnect or evicting old pages no longer resets the Session total.
+  `claude-cache-inspect` prints the byte-level structure and decode strategy
+  of every cached entry for a Session without printing content.
 
 - The dashboard's Token activity views are live. Daily, Weekly and Cumulative
   are now real toggle buttons, each drawn with the encoding that suits it:

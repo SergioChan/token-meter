@@ -154,14 +154,27 @@ running), `cloud-cache-directory-unavailable`,
 `cloud-session-cache-empty`, `cloud-session-cache-incomplete` (strict only),
 and `cloud-session-event-limit`.
 
+8. **Retention**. On the tested install the SSE entry's `from_sequence_num`
+   moved from 474 to 563, 625, 710, and 776 within one afternoon: every
+   reconnect creates a new entry and the previous one disappears. Reading the
+   cache alone would therefore reset the Session total at each reconnect. The
+   store keeps every record it has seen (sequence, child-Agent flag, and the
+   numerical transcript record; no content) in memory and persists it under
+   `Token Meter/State/claude-cloud-sessions/<id>.json`, so totals accumulate
+   across reconnects, evictions, and bridge restarts. One-shot CLI runs read
+   that state but never write it.
+
 ## Limits that remain
 
 - **Liveness depends on Desktop.** Cached `/events` pages update only when
   Desktop re-requests them. Live numbers require either an open
   `/events/stream` entry that Chromium is appending to, or periodic re-fetches
   by the renderer. Neither is under Token Widget's control.
-- **Cache eviction.** Chromium evicts by size and age. A long-idle Session may
-  keep only its newest pages, which the partial binding reports honestly.
+- **Cache eviction and reconnects.** Chromium evicts by size and age, and
+  Desktop drops the previous SSE entry on reconnect. Retention covers events
+  the companion has seen; events that occurred before it first looked at a
+  Session, or while it was not running, are recoverable only if Desktop
+  fetches history pages for that Session.
 - **`Cache-Control: no-store`.** If Anthropic ever marks these responses
   non-storable, nothing lands on disk and every source above is empty. The
   diagnostics would show `index=ok/0`.

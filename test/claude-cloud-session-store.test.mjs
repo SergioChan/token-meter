@@ -79,6 +79,8 @@ function makeStore(directory, overrides = {}) {
   return new ClaudeCloudSessionStore({
     cacheDirectory: directory,
     indexPersistPath: null,
+    indexRescanIntervalMs: 0,
+    retentionDirectory: null,
     refreshIntervalMs: 0,
     ...overrides,
   });
@@ -100,6 +102,7 @@ test("an injected legacy response reader still resolves a complete cursor chain"
   ]);
   const store = new ClaudeCloudSessionStore({
     index: false,
+    retentionDirectory: null,
     responseReader: async (url) => responses.get(url) ?? null,
     refreshIntervalMs: 0,
   });
@@ -118,13 +121,13 @@ test("an injected legacy response reader still resolves a complete cursor chain"
 
 test("a partial cache binds as a lower bound by default and fails closed in strict mode", async () => {
   const reader = async (url) => (url === claudeCloudEventsUrl(sessionId) ? { data: [assistant(4, "response-2", smallUsage), user(3)], next_cursor: "3" } : null);
-  const lenient = await new ClaudeCloudSessionStore({ index: false, responseReader: reader, refreshIntervalMs: 0 }).refresh(sessionId);
+  const lenient = await new ClaudeCloudSessionStore({ index: false, retentionDirectory: null, responseReader: reader, refreshIntervalMs: 0 }).refresh(sessionId);
   assert.equal(lenient.status, "resolved");
   assert.equal(lenient.complete, false);
   assert.deepEqual(lenient.coverage, { knownSequences: 2, firstSequence: 3, lastSequence: 4, maxSequence: 4, missingSequences: 2 });
   assert.equal(lenient.files[0].diagnostics.complete, false);
 
-  const strict = await new ClaudeCloudSessionStore({ index: false, responseReader: reader, refreshIntervalMs: 0, allowPartial: false }).refresh(sessionId);
+  const strict = await new ClaudeCloudSessionStore({ index: false, retentionDirectory: null, responseReader: reader, refreshIntervalMs: 0, allowPartial: false }).refresh(sessionId);
   assert.equal(strict.status, "unbound");
   assert.equal(strict.reason, "cloud-session-cache-incomplete");
   assert.equal(strict.diagnostics.coverage.missingSequences, 2);
@@ -425,4 +428,51 @@ test("SSE events whose payload carries the sandbox session UUID are accepted", a
   assert.equal(result.eventCount, 6);
   assert.equal(result.complete, true);
   assert.equal(result.files[0].usage.length, 3);
+});
+
+test("events survive Desktop replacing the SSE entry on reconnect", async (context) => {
+  const directory = await makeCacheDirectory(context);
+  const frames = (list) => list.map((row) => `data: ${JSON.stringify(row)}\n\n`).join("");
+  const first = await writeSimpleCacheEntry(directory, `https://claude.ai/v1/code/sessions/${cseId}/events/stream?from_sequence_num=1`, Buffer.from(frames(rows(6, 1).reverse())), { open: true });
+  const store = makeStore(directory);
+  const before = await store.refresh(sessionId);
+  assert.equal(before.eventCount, 6);
+  assert.equal(before.files[0].usage.at(-1).total.totalTokens, 30);
+
+  // Reconnect: the old entry is gone and the new one starts where it left off.
+  await rm(first);
+  await writeSimpleCacheEntry(directory, `https://claude.ai/v1/code/sessions/${cseId}/events/stream?from_sequence_num=7`, Buffer.from(frames(rows(10, 7).reverse())), { open: true });
+  const after = await store.refresh(sessionId);
+  assert.equal(after.status, "resolved");
+  assert.equal(after.eventCount, 10, "earlier events are retained");
+  assert.equal(after.complete, true);
+  assert.equal(after.files[0].usage.at(-1).total.totalTokens, 50);
+  assert.equal(after.diagnostics.retention.records, 10);
+  assert.equal(after.diagnostics.retention.fromCacheNow, 4);
+
+  // Everything evicted: the meter keeps the last known totals.
+  for (const entry of store.index.find()) await rm(entry.path);
+  const evicted = await store.refresh(sessionId);
+  assert.equal(evicted.status, "resolved");
+  assert.equal(evicted.eventCount, 10);
+});
+
+test("retained records persist across store instances without keeping content", async (context) => {
+  const directory = await makeCacheDirectory(context);
+  const retentionDirectory = path.join(directory, "state", "claude-cloud-sessions");
+  await writeSimpleCacheEntry(directory, `https://claude.ai/v1/code/sessions/${cseId}/events?limit=100`, encode({ data: rows(4, 1), next_cursor: null }, "raw"));
+  const first = makeStore(directory, { retentionDirectory });
+  assert.equal((await first.refresh(sessionId)).eventCount, 4);
+  await first.close();
+  const persisted = await import("node:fs/promises").then((fs) => fs.readFile(path.join(retentionDirectory, `${sessionId}.json`), "utf8"));
+  assert.equal(persisted.includes("discarded private"), false, "no message content on disk");
+  assert.equal(JSON.parse(persisted).records.length, 4);
+
+  await rm(path.join(directory, simpleCacheFileName(`https://claude.ai/v1/code/sessions/${cseId}/events?limit=100`)));
+  const second = makeStore(directory, { retentionDirectory });
+  const restored = await second.refresh(sessionId);
+  assert.equal(restored.status, "resolved");
+  assert.equal(restored.eventCount, 4);
+  assert.equal(restored.diagnostics.retention.source, "disk");
+  assert.equal(restored.files[0].usage.at(-1).total.totalTokens, 20);
 });

@@ -85,6 +85,8 @@ if (options.command === "snapshot") {
   const cloudSessionStore = new ClaudeCloudSessionStore({
     ...(options.claudeCacheDirectory ? { cacheDirectory: options.claudeCacheDirectory } : {}),
     indexPersistPath: null,
+    // Read what the bridge has retained, but never write from a one-shot run.
+    retentionPersistIntervalMs: Number.POSITIVE_INFINITY,
     allowPartial: options.strict !== true,
     // A one-shot run must read every cache header before it can say "missing".
     waitForIndex: true,
@@ -115,7 +117,7 @@ if (options.command === "snapshot") {
       import("../integrations/claude-desktop/src/cloud-events.mjs"),
     ]);
   const cacheDirectory = options.claudeCacheDirectory ?? defaultClaudeCacheDirectory();
-  const store = new ClaudeCloudSessionStore({ cacheDirectory, indexPersistPath: null, waitForIndex: true });
+  const store = new ClaudeCloudSessionStore({ cacheDirectory, indexPersistPath: null, retentionDirectory: null, waitForIndex: true });
   const variants = cloudEvents.cloudSessionIdVariants(options.desktopSessionId);
   await store.index.refresh();
   while (store.index.stats.backlog > 0) await store.index.refresh();

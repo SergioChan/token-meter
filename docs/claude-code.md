@@ -97,6 +97,12 @@ styles have changed repeatedly. The adapter therefore never guesses a URL:
 4. When the directory cannot be listed, it probes deterministic file names for
    every request shape observed so far and follows cursor chains in each style.
 
+Events seen once are retained as numerical records (never content), in memory
+and under `Token Meter/State/claude-cloud-sessions/<id>.json`, because Desktop
+replaces the SSE entry on every reconnect and evicts older pages; the Session
+total therefore accumulates for as long as the companion has been watching,
+including across its own restarts.
+
 Coverage is reported rather than assumed. A contiguous `1..N` sequence is
 `complete`; gaps produce a partial binding flagged with `≈` and a
 `binding.coverage` record, or an unbound state when the store runs with
