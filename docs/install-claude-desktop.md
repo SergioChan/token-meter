@@ -199,6 +199,10 @@ node src/cli.mjs claude-snapshot --desktop-session-id session_<24 chars>
 
 The `reason` and `diagnostics` fields explain the state:
 
+- `cloud-cache-indexing`: the companion is still reading cache headers for the
+  first time (a 50,000-entry cache takes roughly fifteen seconds of ticks);
+  the persisted index makes later starts immediate. The CLI drains the index
+  before answering, printing progress to stderr.
 - `cloud-session-cache-missing` with `index.matched: 0`: Desktop has not cached
   any events for this Session yet. Open the Session in Desktop's Code tab and
   scroll its history once.

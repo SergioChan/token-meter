@@ -343,3 +343,68 @@ test("buildSimpleCacheEntry round-trips through the compatibility reader", async
   assert.deepEqual(await readSimpleCacheJson(directory, url), { data: [], next_cursor: null });
   assert.equal(await readSimpleCacheJson(directory, `${url}&missing=1`), null);
 });
+
+test("a large cache reports indexing until the first scan completes, and drains in one-shot mode", async (context) => {
+  const directory = await makeCacheDirectory(context);
+  for (let index = 0; index < 30; index += 1) {
+    await writeSimpleCacheEntry(directory, `https://claude.ai/api/organizations/o/conversations/${index}`, Buffer.from("{}"));
+  }
+  // A shape the probe table does not know, so only the index can find it.
+  const url = `https://claude.ai/v1/code/sessions/${cseId}/events?limit=250&sort_order=desc`;
+  await writeSimpleCacheEntry(directory, url, encode({ data: rows(3, 1), next_cursor: null }, "raw"));
+  const { SimpleCacheKeyIndex } = await import("../integrations/claude-desktop/src/simple-cache.mjs");
+  const { isCloudSessionCacheKey } = await import("../integrations/claude-desktop/src/cloud-events.mjs");
+  const slowIndex = (now) =>
+    new SimpleCacheKeyIndex({
+      directory,
+      isRelevantKey: isCloudSessionCacheKey,
+      maxHeaderReadsPerRefresh: 5,
+      // Force the relevant entry to be read last so early ticks see nothing.
+      listDirectory: async (dir) => {
+        const { readdir } = await import("node:fs/promises");
+        const names = await readdir(dir);
+        const target = simpleCacheFileName(url);
+        return [...names.filter((name) => name !== target), target];
+      },
+      now,
+    });
+
+  // Bridge posture: one batch per tick, honest interim reason.
+  let clock = 0;
+  const bridge = makeStore(directory, { index: slowIndex(() => clock), now: () => clock });
+  const first = await bridge.refresh(sessionId);
+  assert.equal(first.status, "unbound");
+  assert.equal(first.reason, "cloud-cache-indexing");
+  assert.ok(first.diagnostics.sources.index.stats.backlog > 0);
+  let result = first;
+  for (let tick = 0; tick < 20 && result.status !== "resolved"; tick += 1) {
+    clock += 1;
+    result = await bridge.refresh(sessionId);
+  }
+  assert.equal(result.status, "resolved");
+  assert.equal(result.eventCount, 3);
+
+  // CLI posture: drain everything before answering.
+  const progress = [];
+  const oneShot = makeStore(directory, {
+    index: slowIndex(Date.now),
+    waitForIndex: true,
+    onProgress: (event) => progress.push(event.backlog),
+  });
+  const drained = await oneShot.refresh(sessionId);
+  assert.equal(drained.status, "resolved");
+  assert.equal(drained.diagnostics.sources.index.stats.backlog, 0);
+  assert.ok(progress.length > 0, "progress is reported while draining");
+});
+
+test("watch poll entries that fail to decode appear in diagnostics", async (context) => {
+  const directory = await makeCacheDirectory(context);
+  await writeSimpleCacheEntry(directory, "https://claude.ai/v1/code/sessions/watch?exclude_tags=-&resume_token=abc", Buffer.alloc(0), { open: true });
+  await writeSimpleCacheEntry(directory, "https://claude.ai/v1/code/sessions/watch?exclude_tags=-&resume_token=def", Buffer.from([0x01, 0x02, 0x03, 0x04]));
+  const result = await makeStore(directory).refresh(sessionId);
+  assert.equal(result.status, "unbound");
+  assert.equal(result.reason, "cloud-session-cache-missing", "watch failures never masquerade as unreadable Session data");
+  assert.equal(result.diagnostics.sources.index.errors, 2);
+  const errors = result.diagnostics.entries.filter((entry) => entry.kind === "session-watch").map((entry) => entry.error).sort();
+  assert.deepEqual(errors, ["DECODE_FAILED", "UNKNOWN_FORMAT"]);
+});

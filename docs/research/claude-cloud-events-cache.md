@@ -134,7 +134,8 @@ independent sources and merges everything by `sequence_num`:
    bridge logs binding-state changes to its stderr log; `claude-snapshot`
    prints the full block.
 
-Unbound reasons are now specific: `cloud-cache-directory-unavailable`,
+Unbound reasons are now specific: `cloud-cache-indexing` (first scan still
+running), `cloud-cache-directory-unavailable`,
 `cloud-session-cache-missing`, `cloud-session-cache-unreadable`,
 `cloud-session-cache-empty`, `cloud-session-cache-incomplete` (strict only),
 and `cloud-session-event-limit`.

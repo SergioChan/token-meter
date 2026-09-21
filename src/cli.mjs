@@ -81,10 +81,19 @@ if (options.command === "snapshot") {
     "../integrations/claude-desktop/src/cloud-session-store.mjs"
   );
   // One-shot diagnostics: no persisted index, so a CLI run never writes state.
+  let lastProgress = 0;
   const cloudSessionStore = new ClaudeCloudSessionStore({
     ...(options.claudeCacheDirectory ? { cacheDirectory: options.claudeCacheDirectory } : {}),
     indexPersistPath: null,
     allowPartial: options.strict !== true,
+    // A one-shot run must read every cache header before it can say "missing".
+    waitForIndex: true,
+    onProgress: (progress) => {
+      const done = progress.scannedFiles - progress.backlog;
+      if (done - lastProgress < 5_000) return;
+      lastProgress = done;
+      process.stderr.write(`indexing Claude cache: ${done}/${progress.scannedFiles} entries\n`);
+    },
   });
   const runtime = new ClaudeSnapshotRuntime({
     sessionsDirectory: claudeSessionsDirectory,

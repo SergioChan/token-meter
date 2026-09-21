@@ -310,6 +310,12 @@ export class ClaudeCloudSessionStore {
     maxCacheEntryBytes = DEFAULT_MAX_CACHE_ENTRY_BYTES,
     maxDecodedBytes = DEFAULT_MAX_DECODED_BYTES,
     allowPartial = true,
+    // One-shot callers (the CLI) drain the whole key index before judging;
+    // the long-lived bridge spreads the first scan over its 1 s ticks and
+    // reports `cloud-cache-indexing` until the backlog is gone.
+    waitForIndex = false,
+    indexDrainTimeoutMs = 120_000,
+    onProgress = null,
     prefixes = cloudIdPrefixes(),
     hostSuffixes = cloudHostSuffixes(),
     readEntry = readSimpleCacheEntry,
@@ -339,6 +345,9 @@ export class ClaudeCloudSessionStore {
     this.maxCacheEntryBytes = maxCacheEntryBytes;
     this.maxDecodedBytes = maxDecodedBytes;
     this.allowPartial = allowPartial;
+    this.waitForIndex = waitForIndex;
+    this.indexDrainTimeoutMs = indexDrainTimeoutMs;
+    this.onProgress = onProgress;
     this.readEntry = readEntry;
     this.now = now;
     this.memo = null;
@@ -427,6 +436,13 @@ export class ClaudeCloudSessionStore {
     if (this.index == null) return;
     try {
       await this.index.refresh();
+      if (this.waitForIndex) {
+        const deadline = this.now() + this.indexDrainTimeoutMs;
+        while (this.index.stats.backlog > 0 && this.now() < deadline) {
+          this.onProgress?.({ phase: "indexing", ...this.index.stats });
+          await this.index.refresh();
+        }
+      }
       summary.status = "ok";
     } catch (error) {
       summary.status = "error";
@@ -479,7 +495,9 @@ export class ClaudeCloudSessionStore {
       }
       if (result.error) summary.errors += 1;
       else if (accepted > 0 || entry.kind !== "session-watch") summary.harvested += 1;
-      if (accepted > 0 || entry.kind !== "session-watch") {
+      // Session-scoped entries are always listed; watch polls only when they
+      // contributed or failed, so a healthy poll stream does not flood the log.
+      if (accepted > 0 || result.error || entry.kind !== "session-watch") {
         this.#recordEntry(diagnostics, { ...result, source: "index", accepted });
       }
       if (events.size > this.maxEvents) break;
@@ -609,16 +627,22 @@ export class ClaudeCloudSessionStore {
 
     const entries = diagnostics.entries;
     if (events.size === 0) {
-      const indexError = diagnostics.sources.index?.status === "error";
+      const indexSource = diagnostics.sources.index;
+      const indexError = indexSource?.status === "error";
       const probeErrors = diagnostics.sources.probe?.errors ?? 0;
-      const decodeErrors = entries.filter((entry) => entry.error).length;
+      const sessionEntries = entries.filter((entry) => entry.kind !== "session-watch");
+      const decodeErrors = sessionEntries.filter((entry) => entry.error).length;
       let reason = "cloud-session-cache-missing";
       if (indexError && (diagnostics.sources.probe?.status === "error" || probeErrors > 0)) {
         reason = "cloud-cache-directory-unavailable";
-      } else if (entries.length > 0 && decodeErrors === entries.length) {
+      } else if (sessionEntries.length > 0 && decodeErrors === sessionEntries.length) {
         reason = "cloud-session-cache-unreadable";
-      } else if (entries.length > 0) {
+      } else if (sessionEntries.length > 0) {
         reason = "cloud-session-cache-empty";
+      } else if (indexSource?.status === "ok" && (indexSource.stats?.backlog ?? 0) > 0) {
+        // The first scan of a large cache is still in progress; "missing"
+        // would be a claim the index cannot back yet.
+        reason = "cloud-cache-indexing";
       }
       return this.#unbound(sessionId, reason, diagnostics);
     }
