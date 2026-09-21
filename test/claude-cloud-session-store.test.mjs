@@ -404,7 +404,11 @@ test("watch poll entries that fail to decode appear in diagnostics", async (cont
   const result = await makeStore(directory).refresh(sessionId);
   assert.equal(result.status, "unbound");
   assert.equal(result.reason, "cloud-session-cache-missing", "watch failures never masquerade as unreadable Session data");
-  assert.equal(result.diagnostics.sources.index.errors, 2);
-  const errors = result.diagnostics.entries.filter((entry) => entry.kind === "session-watch").map((entry) => entry.error).sort();
-  assert.deepEqual(errors, ["DECODE_FAILED", "UNKNOWN_FORMAT"]);
+  // An empty long-poll body that is still open is not an error; garbage is.
+  assert.equal(result.diagnostics.sources.index.errors, 1);
+  const failed = result.diagnostics.entries.filter((entry) => entry.kind === "session-watch");
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].error, "UNKNOWN_FORMAT");
+  assert.match(failed[0].detail, /first bytes 01020304/);
+  assert.equal(failed[0].magic, "01020304");
 });

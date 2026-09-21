@@ -60,22 +60,37 @@ export function parseSimpleCacheHeader(buffer, { maxKeyBytes = DEFAULT_MAX_KEY_B
   return { magicOk, version, keyLength, bodyStart, key };
 }
 
+const EOF_FLAG_HAS_KEY_SHA256 = 1 << 1;
+
 /**
- * Locate the stream-1 EOF record. Returns the body end offset, or null when
- * the entry has no EOF record yet (still being written).
+ * Locate the end of stream 1 (the response body).
+ *
+ * A finished entry ends with stream 0's EOF record, whose `stream_size` is the
+ * length of stream 0 (the EOF record for stream 1 leaves that field unused).
+ * Walking back from the end of the file therefore lands exactly on stream 1's
+ * EOF record: `[body][EOF1][stream0][key sha256?][EOF0]`. Returns
+ * `{ end, stream0Start }`, or null when the entry has no EOF record yet
+ * (Chromium is still appending to it).
  */
 export function findStreamEnd(buffer, bodyStart) {
-  let from = bodyStart;
-  while (from + SIMPLE_CACHE_EOF_BYTES <= buffer.length) {
-    const at = buffer.indexOf(FINAL_MAGIC, from);
-    if (at === -1 || at + 20 > buffer.length) return null;
-    const streamSize = buffer.readUInt32LE(at + 16);
-    // The stream_size field must describe exactly the bytes before the record;
-    // otherwise the magic occurred inside the body by coincidence.
-    if (at - bodyStart === streamSize) return at;
-    from = at + 1;
+  const length = buffer.length;
+  if (length - bodyStart >= 2 * SIMPLE_CACHE_EOF_BYTES) {
+    const eof0 = length - SIMPLE_CACHE_EOF_BYTES;
+    if (buffer.subarray(eof0, eof0 + 8).equals(FINAL_MAGIC)) {
+      const flags = buffer.readUInt32LE(eof0 + 8);
+      const stream0Size = buffer.readUInt32LE(eof0 + 16);
+      const shaBytes = flags & EOF_FLAG_HAS_KEY_SHA256 ? 32 : 0;
+      const stream0Start = eof0 - shaBytes - stream0Size;
+      const eof1 = stream0Start - SIMPLE_CACHE_EOF_BYTES;
+      if (eof1 >= bodyStart && buffer.subarray(eof1, eof1 + 8).equals(FINAL_MAGIC)) {
+        return { end: eof1, stream0Start };
+      }
+    }
   }
-  return null;
+  // Fallback for layouts this reader does not model: the first EOF magic
+  // after the body start. An 8-byte magic inside compressed data is unlikely.
+  const at = buffer.indexOf(FINAL_MAGIC, bodyStart);
+  return at === -1 ? null : { end: at, stream0Start: at + SIMPLE_CACHE_EOF_BYTES };
 }
 
 /**
@@ -111,44 +126,77 @@ function looksTextual(buffer) {
   return /^(?:data:|event:|id:|retry:)/.test(head);
 }
 
+function partialText(bytes) {
+  return looksTextual(bytes) ? bytes : null;
+}
+
 /**
  * Decode a stored response body, sniffing the wire encoding. Returns
- * `{ format, bytes }` or throws an Error with `code` set to one of
- * `ZSTD_UNSUPPORTED`, `DECODE_FAILED`, `UNKNOWN_FORMAT`, `TOO_LARGE`.
+ * `{ format, bytes, partial }`; `partial` is true when the data was an
+ * unfinished compressed stream and only the flushed prefix could be decoded.
+ * Throws an Error with `code` set to one of `ZSTD_UNSUPPORTED`,
+ * `DECODE_FAILED`, `UNKNOWN_FORMAT`, `TOO_LARGE`.
  */
-export function decodeCacheBody(body, { maxDecodedBytes = DEFAULT_MAX_DECODED_BYTES } = {}) {
+export function decodeCacheBody(body, { maxDecodedBytes = DEFAULT_MAX_DECODED_BYTES, truncated = false } = {}) {
   const fail = (code, message) => Object.assign(new Error(message), { code });
-  if (!Buffer.isBuffer(body) || body.length === 0) throw fail("DECODE_FAILED", "empty body");
+  if (!Buffer.isBuffer(body)) throw fail("DECODE_FAILED", "missing body");
+  if (body.length === 0) return { format: "empty", bytes: body, partial: truncated };
 
   if (body.subarray(0, 4).equals(ZSTD_MAGIC)) {
     if (typeof zlib.zstdDecompressSync !== "function") {
       throw fail("ZSTD_UNSUPPORTED", "Node.js without zstd support cannot decode this entry");
     }
+    // zstd returns the frames it could finish and stops at a cut block.
     let bytes;
     try {
       bytes = zlib.zstdDecompressSync(body, { maxOutputLength: maxDecodedBytes });
     } catch (error) {
-      throw fail("DECODE_FAILED", `zstd: ${error.message}`);
+      try {
+        bytes = zlib.zstdDecompressSync(body, {
+          maxOutputLength: maxDecodedBytes,
+          finishFlush: zlib.constants.ZSTD_e_flush,
+        });
+      } catch {
+        throw fail("DECODE_FAILED", `zstd: ${error.message}`);
+      }
     }
     if (bytes.length > maxDecodedBytes) throw fail("TOO_LARGE", "decoded body exceeds limit");
-    return { format: "zstd", bytes };
+    return { format: "zstd", bytes, partial: truncated };
   }
   if (body.subarray(0, 2).equals(GZIP_MAGIC)) {
     try {
-      return { format: "gzip", bytes: zlib.gunzipSync(body, { maxOutputLength: maxDecodedBytes }) };
+      return { format: "gzip", bytes: zlib.gunzipSync(body, { maxOutputLength: maxDecodedBytes }), partial: false };
     } catch (error) {
-      throw fail("DECODE_FAILED", `gzip: ${error.message}`);
+      // An unfinished gzip member decodes up to its last flushed block.
+      try {
+        const bytes = zlib.gunzipSync(body, {
+          maxOutputLength: maxDecodedBytes,
+          finishFlush: zlib.constants.Z_SYNC_FLUSH,
+        });
+        return { format: "gzip", bytes, partial: true };
+      } catch {
+        throw fail("DECODE_FAILED", `gzip: ${error.message}`);
+      }
     }
   }
-  if (looksTextual(body)) return { format: "raw", bytes: body };
+  if (looksTextual(body)) return { format: "raw", bytes: body, partial: truncated };
   // Brotli has no magic number; it is the last resort and must produce text.
-  try {
-    const bytes = zlib.brotliDecompressSync(body, { maxOutputLength: maxDecodedBytes });
-    if (looksTextual(bytes)) return { format: "brotli", bytes };
-  } catch {
-    // fall through
+  let brotliError = null;
+  for (const options of [
+    { maxOutputLength: maxDecodedBytes },
+    { maxOutputLength: maxDecodedBytes, finishFlush: zlib.constants.BROTLI_OPERATION_FLUSH },
+  ]) {
+    try {
+      const bytes = partialText(zlib.brotliDecompressSync(body, options));
+      if (bytes) return { format: "brotli", bytes, partial: options.finishFlush != null || truncated };
+    } catch (error) {
+      brotliError = error;
+    }
   }
-  throw fail("UNKNOWN_FORMAT", "response body is not zstd, gzip, brotli, JSON, or SSE text");
+  throw fail(
+    "UNKNOWN_FORMAT",
+    `response body is not zstd, gzip, brotli, JSON, or SSE text (first bytes ${body.subarray(0, 8).toString("hex")}${brotliError ? `; brotli: ${brotliError.message}` : ""})`,
+  );
 }
 
 /**
@@ -189,13 +237,14 @@ export async function readSimpleCacheEntry(
   const buffer = await readFile(filePath);
   const header = parseSimpleCacheHeader(buffer, { maxKeyBytes });
   if (header?.key == null) return null;
-  const end = findStreamEnd(buffer, header.bodyStart);
-  const body = buffer.subarray(header.bodyStart, end ?? buffer.length);
+  const bounds = findStreamEnd(buffer, header.bodyStart);
+  const body = buffer.subarray(header.bodyStart, bounds?.end ?? buffer.length);
   return {
     key: header.key,
     body,
-    truncated: end == null,
-    headers: end == null ? null : sniffResponseHeaders(buffer, end + SIMPLE_CACHE_EOF_BYTES),
+    bodyMagic: body.subarray(0, 4).toString("hex"),
+    truncated: bounds == null,
+    headers: bounds == null ? null : sniffResponseHeaders(buffer, bounds.stream0Start),
     sizeBytes: fileStat.size,
     modifiedMs: fileStat.mtimeMs,
   };

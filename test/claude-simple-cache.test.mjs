@@ -24,8 +24,15 @@ test("Simple Cache header, key, and stream boundary are parsed", () => {
   const header = parseSimpleCacheHeader(file);
   assert.equal(header.magicOk, true);
   assert.equal(header.key, "1/0/https://claude.ai/x");
-  const end = findStreamEnd(file, header.bodyStart);
-  assert.equal(file.subarray(header.bodyStart, end).toString(), body.toString());
+  const bounds = findStreamEnd(file, header.bodyStart);
+  assert.equal(file.subarray(header.bodyStart, bounds.end).toString(), body.toString());
+  assert.equal(file.subarray(bounds.stream0Start, bounds.stream0Start + 8).toString("latin1"), "HTTP/1.1");
+
+  const withDigest = buildSimpleCacheEntry("https://claude.ai/x", body, { keySha256: true });
+  const digestHeader = parseSimpleCacheHeader(withDigest);
+  const digestBounds = findStreamEnd(withDigest, digestHeader.bodyStart);
+  assert.equal(withDigest.subarray(digestHeader.bodyStart, digestBounds.end).toString(), body.toString());
+  assert.equal(withDigest.subarray(digestBounds.stream0Start, digestBounds.stream0Start + 8).toString("latin1"), "HTTP/1.1");
 });
 
 test("an open stream without an EOF record runs to the end of the file", () => {
@@ -39,8 +46,32 @@ test("a body containing the EOF magic by coincidence is not cut short", () => {
   const body = Buffer.concat([Buffer.from("{\"x\":\""), FINAL_MAGIC, Buffer.from("\"}")]);
   const file = buildSimpleCacheEntry("https://claude.ai/y", body);
   const header = parseSimpleCacheHeader(file);
-  const end = findStreamEnd(file, header.bodyStart);
-  assert.equal(end - header.bodyStart, body.length);
+  assert.equal(findStreamEnd(file, header.bodyStart).end - header.bodyStart, body.length);
+});
+
+test("unfinished compressed streams decode up to their last flushed block", { skip: !hasZstd && "zstd unavailable" }, async () => {
+  const frames = Array.from({ length: 200 }, (_, index) => Buffer.from(`data: {"sequence_num":${index + 1},"payload":{"type":"user","message":{"content":"${"x".repeat(120)}"}}}\n\n`));
+  const flushAll = (stream) =>
+    new Promise((resolve) => {
+      const out = [];
+      stream.on("data", (chunk) => out.push(chunk));
+      let index = 0;
+      const step = () => {
+        if (index >= frames.length) return stream.flush(() => resolve(Buffer.concat(out)));
+        stream.write(frames[index++]);
+        stream.flush(step);
+      };
+      step();
+    });
+  for (const [name, stream] of [["zstd", zlib.createZstdCompress()], ["gzip", zlib.createGzip()], ["brotli", zlib.createBrotliCompress()]]) {
+    const wire = await flushAll(stream);
+    const cut = wire.subarray(0, Math.floor(wire.length * 0.6));
+    const decoded = decodeCacheBody(cut, { truncated: true });
+    assert.equal(decoded.format, name);
+    const framesOut = (decoded.bytes.toString().match(/\n\n/g) ?? []).length;
+    assert.ok(framesOut > 50 && framesOut < 200, `${name}: ${framesOut} frames`);
+  }
+  assert.deepEqual(decodeCacheBody(Buffer.alloc(0), { truncated: true }), { format: "empty", bytes: Buffer.alloc(0), partial: true });
 });
 
 test("body decoding sniffs zstd, gzip, brotli, JSON, and SSE text", { skip: !hasZstd && "zstd unavailable" }, () => {

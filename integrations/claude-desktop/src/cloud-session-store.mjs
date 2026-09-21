@@ -169,11 +169,11 @@ export async function readSimpleCacheJson(
   if (source.length > maxCacheEntryBytes) return null;
   const header = parseSimpleCacheHeader(source);
   if (header?.key == null || header.key !== cacheKey(url)) return null;
-  const end = findStreamEnd(source, header.bodyStart);
-  const body = source.subarray(header.bodyStart, end ?? source.length);
+  const bounds = findStreamEnd(source, header.bodyStart);
+  const body = source.subarray(header.bodyStart, bounds?.end ?? source.length);
   let decoded;
   try {
-    decoded = decodeCacheBody(body, { maxDecodedBytes });
+    decoded = decodeCacheBody(body, { maxDecodedBytes, truncated: bounds == null });
   } catch (error) {
     if (error?.code === "ZSTD_UNSUPPORTED") {
       throw new Error("Claude cloud telemetry requires Node.js with zstd support");
@@ -402,11 +402,14 @@ export class ClaudeCloudSessionStore {
       bytes: fileStat.size,
       modifiedMs: fileStat.mtimeMs,
       format: null,
+      partial: null,
+      magic: null,
       truncated: null,
       headers: null,
       events: [],
       cursor: null,
       error: null,
+      detail: null,
     };
     try {
       const entry = await this.readEntry(filePath, { maxEntryBytes: this.maxCacheEntryBytes });
@@ -415,8 +418,13 @@ export class ClaudeCloudSessionStore {
       } else {
         result.truncated = entry.truncated;
         result.headers = entry.headers;
-        const decoded = decodeCacheBody(entry.body, { maxDecodedBytes: this.maxDecodedBytes });
+        result.magic = entry.bodyMagic ?? null;
+        const decoded = decodeCacheBody(entry.body, {
+          maxDecodedBytes: this.maxDecodedBytes,
+          truncated: entry.truncated,
+        });
         result.format = decoded.format;
+        result.partial = decoded.partial;
         const extracted = extractCloudEvents(decoded.bytes.toString("utf8"));
         result.bodyKind = extracted.format;
         result.events = extracted.events;
@@ -424,7 +432,8 @@ export class ClaudeCloudSessionStore {
         if (extracted.errors?.length) result.parseErrors = extracted.errors.slice(0, 3);
       }
     } catch (error) {
-      result.error = error?.code ?? error?.message ?? "READ_FAILED";
+      result.error = error?.code ?? "READ_FAILED";
+      result.detail = typeof error?.message === "string" ? error.message.slice(0, 200) : null;
     }
     this.entryMemo.set(filePath, { sizeBytes: fileStat.size, modifiedMs: fileStat.mtimeMs, result });
     return result;
@@ -595,6 +604,8 @@ export class ClaudeCloudSessionStore {
       kind: result.kind,
       shape: result.shape,
       format: result.format ?? null,
+      partial: result.partial ?? null,
+      magic: result.magic ?? null,
       body: result.bodyKind ?? null,
       bytes: result.bytes ?? null,
       modifiedMs: result.modifiedMs ?? null,
@@ -604,6 +615,7 @@ export class ClaudeCloudSessionStore {
       events: result.events?.length ?? 0,
       accepted: result.accepted ?? null,
       error: result.error ?? null,
+      detail: result.detail ?? null,
     });
   }
 
