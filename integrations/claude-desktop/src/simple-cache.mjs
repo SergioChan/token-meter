@@ -155,7 +155,25 @@ function plausibleStoredHeader(body, at) {
   if ((body[at] & 0xfe) !== 0) return false;
   const length = body.readUInt16LE(at + 1);
   const check = body.readUInt16LE(at + 3);
-  return length > 0 && ((length ^ check) & 0xffff) === 0xffff;
+  // The block must fit in what has been written so far, or be the final,
+  // still-growing one; a complementary pair alone matches random bytes about
+  // once per 65,536 positions, which a long stream would hit.
+  return length > 0 && ((length ^ check) & 0xffff) === 0xffff && at + 5 + length <= body.length + 65_535;
+}
+
+const SYNC_FLUSH_BLOCK = Buffer.from([0x00, 0x00, 0x00, 0xff, 0xff]);
+
+/** Offsets just past every empty stored block emitted by a sync flush. */
+export function syncFlushBoundaries(body) {
+  const boundaries = [];
+  let from = 0;
+  while (boundaries.length < 100_000) {
+    const at = body.indexOf(SYNC_FLUSH_BLOCK, from);
+    if (at === -1) break;
+    boundaries.push(at + SYNC_FLUSH_BLOCK.length);
+    from = at + 1;
+  }
+  return boundaries;
 }
 
 function isGzipHeaderAt(body, at) {
@@ -198,11 +216,30 @@ export function walkGzip(body, { maxOutputLength = DEFAULT_MAX_DECODED_BYTES, ma
     }
     outputs.push(chunk);
   };
+  // A stored header counts during resync only when the block it describes
+  // ends on another verifiable structure, so a complementary byte pair inside
+  // compressed data cannot swallow tens of kilobytes as fake plaintext.
+  const verifiedStoredHeader = (at) => {
+    if (!plausibleStoredHeader(body, at)) return false;
+    const end = at + 5 + body.readUInt16LE(at + 1);
+    return (
+      end === body.length ||
+      isGzipHeaderAt(body, end) ||
+      body.subarray(end, end + SYNC_FLUSH_BLOCK.length).equals(SYNC_FLUSH_BLOCK) ||
+      plausibleStoredHeader(body, end)
+    );
+  };
   const resync = (from) => {
     stats.resyncs += 1;
-    for (let at = from; at + 5 <= body.length; at += 1) {
-      if (isGzipHeaderAt(body, at) || plausibleStoredHeader(body, at)) return at;
+    // Prefer a header we can verify before the next sync-flush block; failing
+    // that, the byte after that block, where a new block header always starts
+    // byte-aligned.
+    const marker = body.indexOf(SYNC_FLUSH_BLOCK, from);
+    const limit = marker === -1 ? body.length : marker;
+    for (let at = from; at + 5 <= limit; at += 1) {
+      if (isGzipHeaderAt(body, at) || verifiedStoredHeader(at)) return at;
     }
+    if (marker !== -1) return marker + SYNC_FLUSH_BLOCK.length;
     return body.length;
   };
   const afterFinal = (at) => {
@@ -318,6 +355,76 @@ export function decodeGzipLenient(body, { maxOutputLength }) {
   return null;
 }
 
+/**
+ * Find how far zlib gets into a raw deflate run before rejecting it: the
+ * longest prefix that inflates (with Z_SYNC_FLUSH) and its output size.
+ */
+export function bisectInflateFailure(run, { maxOutputLength = DEFAULT_MAX_DECODED_BYTES } = {}) {
+  const attempt = (length) => {
+    try {
+      const result = zlib.inflateRawSync(run.subarray(0, length), {
+        finishFlush: zlib.constants.Z_SYNC_FLUSH,
+        info: true,
+        maxOutputLength,
+      });
+      return { ok: true, output: result.buffer.length, consumed: result.engine.bytesWritten };
+    } catch (error) {
+      return { ok: false, message: error.message };
+    }
+  };
+  const whole = attempt(run.length);
+  if (whole.ok) return { failsAt: null, ...whole };
+  let low = 0;
+  let high = run.length;
+  let best = { output: 0, consumed: 0 };
+  while (high - low > 1) {
+    const middle = (low + high) >> 1;
+    const result = attempt(middle);
+    if (result.ok) {
+      low = middle;
+      best = result;
+    } else {
+      high = middle;
+    }
+  }
+  return { failsAt: high, message: whole.message, output: best.output, consumed: best.consumed };
+}
+
+/**
+ * Try alternative readings of a gzip body that a strict decoder rejects and
+ * report how many SSE `data:` lines each one yields. Diagnostics only.
+ */
+export function probeGzipHypotheses(body, { maxOutputLength = DEFAULT_MAX_DECODED_BYTES } = {}) {
+  const dataLines = (bytes) => (bytes.toString("latin1").match(/^data:/gm) ?? []).length;
+  const probes = [];
+  const headerLength = isGzipHeaderAt(body, 0) ? gzipHeaderLength(body) ?? 10 : 0;
+  const boundaries = [headerLength, ...syncFlushBoundaries(body).filter((at) => at > headerLength)];
+  // H1: each sync-flushed chunk is an independent deflate unit.
+  for (const skip of [0, 1, 2, 3, 4, 5, 8]) {
+    const parts = [];
+    let failures = 0;
+    for (let index = 0; index < boundaries.length; index += 1) {
+      const start = boundaries[index] + (index === 0 ? 0 : skip);
+      const end = boundaries[index + 1] ?? body.length;
+      if (end <= start) continue;
+      try {
+        parts.push(zlib.inflateRawSync(body.subarray(start, end), { finishFlush: zlib.constants.Z_SYNC_FLUSH, maxOutputLength }));
+      } catch {
+        failures += 1;
+      }
+    }
+    const bytes = Buffer.concat(parts);
+    probes.push({ hypothesis: `independent-chunks skip=${skip}`, chunks: boundaries.length, failures, decodedBytes: bytes.length, dataLines: dataLines(bytes) });
+  }
+  // H2: one continuous raw deflate stream (what gzip assumes).
+  const continuous = bisectInflateFailure(body.subarray(headerLength), { maxOutputLength });
+  probes.push({ hypothesis: "continuous-deflate", failsAt: continuous.failsAt == null ? null : continuous.failsAt + headerLength, message: continuous.message ?? null, decodedBytes: continuous.output });
+  // H3: the walker.
+  const walked = walkGzip(body, { maxOutputLength });
+  probes.push({ hypothesis: "walk", decodedBytes: walked.bytes.length, dataLines: dataLines(walked.bytes), resyncs: walked.stats.resyncs });
+  return probes;
+}
+
 /** Structural facts about a body for diagnostics; never returns content. */
 export function analyzeBody(body) {
   const markers = [];
@@ -330,9 +437,10 @@ export function analyzeBody(body) {
   }
   return {
     bytes: body.length,
-    firstBytesHex: body.subarray(0, 16).toString("hex"),
+    firstBytesHex: body.subarray(0, 48).toString("hex"),
     gzipMemberOffsets: gzipMemberOffsets(body).slice(0, 50),
     syncFlushMarkers: markers.length,
+    firstSyncFlushOffsets: markers.slice(0, 6),
     textual: looksTextual(body),
   };
 }

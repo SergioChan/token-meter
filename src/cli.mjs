@@ -131,8 +131,9 @@ if (options.command === "snapshot") {
       entry.truncated = cached.truncated;
       entry.headers = cached.headers;
       entry.body = simpleCache.analyzeBody(cached.body);
+      let decoded = null;
       try {
-        const decoded = simpleCache.decodeCacheBody(cached.body, { truncated: cached.truncated });
+        decoded = simpleCache.decodeCacheBody(cached.body, { truncated: cached.truncated });
         const text = decoded.bytes.toString("utf8");
         const extracted = cloudEvents.extractCloudEvents(text);
         const sequences = extracted.events.map((event) => event.sequence);
@@ -151,8 +152,24 @@ if (options.command === "snapshot") {
           sequenceRange: sequences.length ? [Math.min(...sequences), Math.max(...sequences)] : null,
           parseErrors: extracted.errors?.slice(0, 3) ?? [],
         };
+        if (decoded.format === "gzip" && decoded.partial && entry.decode.events === 0) {
+          entry.decode.probes = simpleCache.probeGzipHypotheses(cached.body);
+          const failure = simpleCache.bisectInflateFailure(cached.body.subarray(10));
+          if (failure.failsAt != null) {
+            const at = failure.failsAt + 10;
+            entry.decode.firstFailure = {
+              offset: at,
+              message: failure.message,
+              outputBeforeFailure: failure.output,
+              hexAround: cached.body.subarray(Math.max(0, at - 12), at + 12).toString("hex"),
+            };
+          }
+        }
       } catch (error) {
         entry.decode = { error: error.code ?? "DECODE_FAILED", detail: error.message };
+        if (decoded == null && cached.body.subarray(0, 2).toString("hex") === "1f8b") {
+          entry.decode.probes = simpleCache.probeGzipHypotheses(cached.body);
+        }
       }
     } catch (error) {
       entry.error = error.code ?? error.message;
