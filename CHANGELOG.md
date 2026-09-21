@@ -6,6 +6,31 @@ published.
 
 ## Unreleased
 
+- Cloud Code Sessions in Claude Desktop are measured again. The old cloud
+  collector computed one cache file name from a hard-coded
+  `/events?limit=50&sort_order=desc` request and walked `next_cursor` links from
+  it; Desktop has since changed the page size, the identifier prefix
+  (`session_` versus `cse_`), the sort order, and the pagination style several
+  times, so every cloud Session reported `cloud-session-cache-missing`. The
+  collector now indexes Claude's Chromium Simple Cache by plaintext key, matches
+  the bound Session under every known identifier form and any query string,
+  decodes zstd, gzip, brotli, JSON, and SSE bodies, harvests the open
+  `/events/stream` connection for the live tail, and falls back to URL probes
+  in every observed shape when the directory cannot be listed. Rows without a
+  payload no longer break sequence coverage, child-Agent events no longer
+  distort the root Context reading, and a Session with gaps binds as a flagged
+  lower bound (`≈` on the identifier) instead of hiding. The bridge logs why a
+  Session is unbound, `claude-snapshot` prints full source diagnostics and
+  accepts `--claude-cache-dir` and `--strict`, and the key index persists under
+  `Token Meter/State` so a 50,000-entry cache costs a few hundred milliseconds
+  per tick only on first launch. Live SSE entries decode even while Chromium
+  is still writing them (zero-filled tail trimmed, longest decodable prefix),
+  and every event seen is retained as numbers only, in memory and under
+  `Token Meter/State/claude-cloud-sessions`, so Desktop replacing the stream
+  entry on reconnect or evicting old pages no longer resets the Session total.
+  `claude-cache-inspect` prints the byte-level structure and decode strategy
+  of every cached entry for a Session without printing content.
+
 - The dashboard's Token activity views are live. Daily, Weekly and Cumulative
   are now real toggle buttons, each drawn with the encoding that suits it:
   Daily keeps the day heatmap, Weekly is a bar per calendar week, and

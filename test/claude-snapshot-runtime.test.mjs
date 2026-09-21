@@ -155,6 +155,8 @@ test("Claude snapshot runtime follows one exact cloud Code Session", async () =>
   assert.deepEqual(snapshot.binding, {
     source: "claude-cloud-events-cache",
     exact: true,
+    complete: true,
+    coverage: null,
     desktopSessionId: cloudSessionId,
     cliSessionId: null,
     model: null,

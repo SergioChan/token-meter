@@ -182,6 +182,40 @@ function globalSnapshot() {
   globalSnapshotMemo = { atMs: nowMs, value };
   return value;
 }
+// The native overlay only renders "unbound"; the reason would otherwise be
+// invisible. Log it once per change so `status.sh` and the LaunchAgent log
+// explain why a Session is not measured, without flooding on every poll.
+let lastBindingLog = null;
+function logBindingState(desktopSessionId, snapshot) {
+  const state =
+    snapshot?.status === "unbound"
+      ? `unbound:${snapshot.reason ?? "unknown"}`
+      : snapshot?.binding?.complete === false
+        ? "partial"
+        : snapshot?.status ?? "unknown";
+  const key = `${desktopSessionId}:${state}`;
+  if (key === lastBindingLog) return;
+  lastBindingLog = key;
+  const details = [];
+  const diagnostics = snapshot?.diagnostics ?? snapshot?.cloudDiagnostics;
+  if (diagnostics?.sources) {
+    for (const [name, source] of Object.entries(diagnostics.sources)) {
+      details.push(`${name}=${source.status ?? "?"}${source.matched != null ? `/${source.matched}` : ""}${source.error ? `(${source.error})` : ""}`);
+    }
+  }
+  if (diagnostics?.coverage) {
+    details.push(`coverage=${diagnostics.coverage.knownSequences}/${diagnostics.coverage.maxSequence}`);
+  }
+  // Session-scoped entries only; watch polls are shared noise for the log.
+  const shapes = diagnostics?.entries
+    ?.filter((entry) => entry.kind !== "session-watch")
+    .slice(0, 4)
+    .map((entry) => `${entry.shape}${entry.strategy ? `[${entry.strategy}]` : ""}${entry.error ? `!${entry.error}` : ""}`);
+  if (shapes?.length) details.push(`entries=${shapes.join(",")}`);
+  if (diagnostics?.retention) details.push(`retained=${diagnostics.retention.records}`);
+  process.stderr.write(`claude session ${desktopSessionId}: ${state}${details.length ? ` ${details.join(" ")}` : ""}\n`);
+}
+
 const runtime = new ClaudeSnapshotRuntime({
   sessionsDirectory:
     options.sessionsDirectory ??
@@ -300,6 +334,7 @@ for await (const line of input) {
       throw new TypeError("desktopSessionId must be a string");
     }
     const snapshot = await runtime.snapshot(request.desktopSessionId);
+    logBindingState(request.desktopSessionId, snapshot);
     snapshot.appVersion = installedVersion;
     if (updateInfo) snapshot.updateInfo = { version: updateInfo.version };
     await writeLine({ requestId, snapshot });

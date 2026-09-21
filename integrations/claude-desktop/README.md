@@ -24,9 +24,15 @@ See [the complete installation guide](../../docs/install-claude-desktop.md).
 - `native/TokenMeterClaudeOverlay.swift` owns the non-activating panel, window following, persistent snapshot bridge, drag/collapse behavior, and permission lifecycle.
 - `src/desktop-session-store.mjs` maps one exact legacy Desktop
   `local_<uuid>` to one Claude Code transcript identity.
-- `src/cloud-session-store.mjs` resolves exact current `session_<24 chars>`
-  routes to deterministic Claude HTTP-cache entries and accepts only complete,
-  contiguous event sequences.
+- `src/simple-cache.mjs` reads Chromium Simple Cache entries (header, plaintext
+  key, wire-encoded body, streaming state) and keeps an incremental,
+  persistable key index over Claude's cache directory.
+- `src/cloud-events.mjs` recognizes one cloud Session under every identifier
+  prefix and request shape and extracts `sequence_num` events from JSON pages,
+  SSE streams, and wrapper responses.
+- `src/cloud-session-store.mjs` merges every cached source for a
+  `session_<24 chars>` route, reports sequence coverage, and falls back to URL
+  probes in each observed shape when the cache directory cannot be listed.
 - `src/transcript-store.mjs` incrementally reads numerical usage while discarding prompt, tool, reasoning, and response content.
 - `src/snapshot-runtime.mjs` is the deep measurement module used by both CLI inspection and the overlay.
 - `src/overlay-bridge.mjs` keeps one Node process alive and serves newline-delimited numerical snapshots to the native host.
@@ -42,5 +48,6 @@ See [the complete installation guide](../../docs/install-claude-desktop.md).
 - Read local content only to extract identifiers, timestamps, event types, and numerical usage; do not retain message content.
 - Require macOS Accessibility permission for the companion itself and fail closed until it is granted.
 - Never read static text, values, descriptions, or conversation bodies while resolving a Session or Context window.
+- Match cloud Session cache entries by Session identity, never by a fixed URL, and report partial coverage as a flagged lower bound rather than hiding it or borrowing another Session's data.
 - Never treat browser pairing as usage-sharing consent; sharing remains an explicit local opt-in.
 - Never quit, relaunch, modify, patch, or re-sign Claude.app.

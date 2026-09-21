@@ -18,6 +18,10 @@ function parseArguments(argv) {
       options.claudeSessionsDirectory = rest[++index];
     } else if (value === "--claude-projects-dir") {
       options.claudeProjectsDirectory = rest[++index];
+    } else if (value === "--claude-cache-dir") {
+      options.claudeCacheDirectory = rest[++index];
+    } else if (value === "--strict") {
+      options.strict = true;
     } else if (value === "--cdp-port") {
       options.cdpPort = Number(rest[++index]);
     } else if (value === "--set-handle") {
@@ -73,12 +77,109 @@ if (options.command === "snapshot") {
   const claudeProjectsDirectory =
     options.claudeProjectsDirectory ??
     path.join(os.homedir(), ".claude", "projects");
+  const { ClaudeCloudSessionStore } = await import(
+    "../integrations/claude-desktop/src/cloud-session-store.mjs"
+  );
+  // One-shot diagnostics: no persisted index, so a CLI run never writes state.
+  let lastProgress = 0;
+  const cloudSessionStore = new ClaudeCloudSessionStore({
+    ...(options.claudeCacheDirectory ? { cacheDirectory: options.claudeCacheDirectory } : {}),
+    indexPersistPath: null,
+    // Read what the bridge has retained, but never write from a one-shot run.
+    retentionPersistIntervalMs: Number.POSITIVE_INFINITY,
+    allowPartial: options.strict !== true,
+    // A one-shot run must read every cache header before it can say "missing".
+    waitForIndex: true,
+    onProgress: (progress) => {
+      const done = progress.scannedFiles - progress.backlog;
+      if (done - lastProgress < 5_000) return;
+      lastProgress = done;
+      process.stderr.write(`indexing Claude cache: ${done}/${progress.scannedFiles} entries\n`);
+    },
+  });
   const runtime = new ClaudeSnapshotRuntime({
     sessionsDirectory: claudeSessionsDirectory,
     projectsDirectory: claudeProjectsDirectory,
+    cloudSessionStore,
   });
   const snapshot = await runtime.snapshot(options.desktopSessionId);
   process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
+} else if (options.command === "claude-cache-inspect") {
+  // Byte-level view of every cached entry for one cloud Session: structure,
+  // encoding, decode strategy, and event counts. Never prints content.
+  if (!options.desktopSessionId) {
+    throw new Error("--desktop-session-id is required for claude-cache-inspect");
+  }
+  const [{ ClaudeCloudSessionStore, defaultClaudeCacheDirectory }, simpleCache, cloudEvents] =
+    await Promise.all([
+      import("../integrations/claude-desktop/src/cloud-session-store.mjs"),
+      import("../integrations/claude-desktop/src/simple-cache.mjs"),
+      import("../integrations/claude-desktop/src/cloud-events.mjs"),
+    ]);
+  const cacheDirectory = options.claudeCacheDirectory ?? defaultClaudeCacheDirectory();
+  const store = new ClaudeCloudSessionStore({ cacheDirectory, indexPersistPath: null, retentionDirectory: null, waitForIndex: true });
+  const variants = cloudEvents.cloudSessionIdVariants(options.desktopSessionId);
+  await store.index.refresh();
+  while (store.index.stats.backlog > 0) await store.index.refresh();
+  const report = { cacheDirectory, variants, indexed: store.index.stats, entries: [] };
+  for (const item of store.index.find()) {
+    const info = cloudEvents.classifyCloudCacheKey(item.key, variants);
+    if (info == null || info.kind === "session-watch") continue;
+    const entry = { shape: info.shape, kind: info.kind };
+    try {
+      const cached = await simpleCache.readSimpleCacheEntry(item.path);
+      entry.fileBytes = cached.sizeBytes;
+      entry.modifiedAt = new Date(cached.modifiedMs).toISOString();
+      entry.truncated = cached.truncated;
+      entry.headers = cached.headers;
+      entry.body = simpleCache.analyzeBody(cached.body);
+      let decoded = null;
+      try {
+        decoded = simpleCache.decodeCacheBody(cached.body, { truncated: cached.truncated });
+        const text = decoded.bytes.toString("utf8");
+        const extracted = cloudEvents.extractCloudEvents(text);
+        const sequences = extracted.events.map((event) => event.sequence);
+        entry.decode = {
+          format: decoded.format,
+          partial: decoded.partial,
+          strategy: decoded.strategy ?? "strict",
+          walk: decoded.walk ?? (decoded.format === "gzip" ? { ...simpleCache.walkGzip(cached.body).stats, anomalies: simpleCache.walkGzip(cached.body).anomalies } : null),
+          decodedBytes: decoded.bytes.length,
+          bodyKind: extracted.format,
+          sseFrames: extracted.frames ?? null,
+          dataLines: (text.match(/^data:/gm) ?? []).length,
+          usageRecords: (text.match(/"usage"/g) ?? []).length,
+          events: extracted.events.length,
+          withPayload: extracted.events.filter((event) => event.payload != null).length,
+          sequenceRange: sequences.length ? [Math.min(...sequences), Math.max(...sequences)] : null,
+          parseErrors: extracted.errors?.slice(0, 3) ?? [],
+        };
+        if (decoded.format === "gzip" && decoded.partial && entry.decode.events === 0) {
+          entry.decode.probes = simpleCache.probeGzipHypotheses(cached.body);
+          const failure = simpleCache.bisectInflateFailure(cached.body.subarray(10));
+          if (failure.failsAt != null) {
+            const at = failure.failsAt + 10;
+            entry.decode.firstFailure = {
+              offset: at,
+              message: failure.message,
+              outputBeforeFailure: failure.output,
+              hexAround: cached.body.subarray(Math.max(0, at - 12), at + 12).toString("hex"),
+            };
+          }
+        }
+      } catch (error) {
+        entry.decode = { error: error.code ?? "DECODE_FAILED", detail: error.message };
+        if (decoded == null && cached.body.subarray(0, 2).toString("hex") === "1f8b") {
+          entry.decode.probes = simpleCache.probeGzipHypotheses(cached.body);
+        }
+      }
+    } catch (error) {
+      entry.error = error.code ?? error.message;
+    }
+    report.entries.push(entry);
+  }
+  await store.close();
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } else if (options.command === "inject") {
   const modulePath = new URL(
     "../integrations/codex-desktop/src/injector.mjs",
@@ -172,6 +273,6 @@ if (options.command === "snapshot") {
 } else {
   const script = fileURLToPath(import.meta.url);
   throw new Error(
-    `Unknown command \"${options.command}\". Run ${script} snapshot, claude-snapshot, identity, profile-invite, profile-join, profile-membership, profile-devices, profile-revoke, profile-transfer, inject, or remove.`,
+    `Unknown command \"${options.command}\". Run ${script} snapshot, claude-snapshot, claude-cache-inspect, identity, profile-invite, profile-join, profile-membership, profile-devices, profile-revoke, profile-transfer, inject, or remove.`,
   );
 }

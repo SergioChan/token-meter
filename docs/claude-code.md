@@ -24,8 +24,11 @@ Implemented modules include:
   legacy `local_<uuid>` or current mixed-case `session_<24 chars>` identifier.
 - Exact local Desktop `sessionId` to Claude Code `cliSessionId` resolution with
   fail-closed ambiguity handling.
-- Exact cloud Session event resolution through deterministic Chromium Simple
-  Cache keys, zstd decoding, pagination, and contiguous sequence validation.
+- Cloud Session event resolution from Claude's Chromium Simple Cache: a
+  plaintext-key index matched by Session identity under every identifier
+  prefix, zstd/gzip/brotli/JSON/SSE decoding, sequence-numbered merging across
+  pages and the live `/events/stream` body, honest coverage reporting, and URL
+  probes in every observed request shape as a fallback.
 - Bounded incremental transcript collection with content discard and response-level de-duplication.
 - A persistent numerical snapshot bridge rather than one Node process per poll.
 - A native non-activating panel that follows Claude, hides outside the eligible Code surface, and supports drag/collapse persistence.
@@ -74,14 +77,48 @@ One `local_<uuid>` must map to one valid `cliSessionId` and absolute project dir
 - the most recent `lastFocusedAt` value;
 - the Session title or display name.
 
-A `session_<24 chars>` cloud Session takes a separate path. The adapter computes
-the exact Chromium Simple Cache file for Claude's stable latest-events URL,
-follows only validated pagination cursors, de-duplicates by `sequence_num`, and
-requires one contiguous sequence beginning at 1. A missing page, malformed
-cache key, unsupported compression format, sequence gap, or oversized response
-produces an unbound state. It never falls back to the newest local transcript.
+A `session_<24 chars>` cloud Session takes a separate path. Its transcript lives
+in Anthropic's sandbox; the only local copies of its events are the responses
+Claude Desktop cached while displaying it. Desktop reaches one Session through
+two clients (the renderer with `session_<id>` URLs and an embedded Claude Code
+client with `cse_<id>` URLs), and their page sizes, sort orders, and pagination
+styles have changed repeatedly. The adapter therefore never guesses a URL:
 
-Read [the selected-Session signal research](research/claude-selected-session-signals.md) for the evidence and rejected fallbacks.
+1. It indexes `~/Library/Application Support/Claude/Cache/Cache_Data` by the
+   plaintext key stored in each Simple Cache entry, reading each header once
+   and persisting the index under `Token Meter/State`.
+2. It matches the bound Session under every known identifier prefix
+   (`session_`, `cse_`, plus `TOKEN_METER_CLAUDE_CLOUD_ID_PREFIXES`) and any
+   query string, including the open `/events/stream` SSE body that Chromium
+   appends to while the connection is alive, and `watch` poll responses whose
+   rows name the Session.
+3. It decodes zstd, gzip, brotli, raw JSON, or SSE text, extracts
+   `sequence_num` + `payload` rows from any wrapper shape, and merges them.
+4. When the directory cannot be listed, it probes deterministic file names for
+   every request shape observed so far and follows cursor chains in each style.
+
+Events seen once are retained as numerical records (never content), in memory
+and under `Token Meter/State/claude-cloud-sessions/<id>.json`, because Desktop
+replaces the SSE entry on every reconnect and evicts older pages; the Session
+total therefore accumulates for as long as the companion has been watching,
+including across its own restarts.
+
+Coverage is reported rather than assumed. A contiguous `1..N` sequence is
+`complete`; gaps produce a partial binding flagged with `≈` and a
+`binding.coverage` record, or an unbound state when the store runs with
+`allowPartial: false` (`claude-snapshot --strict`). Rows without a payload
+count toward coverage, child-Agent events are split into a subagent file so the
+root Context reading stays exact, and rows attributed to another Session are
+discarded. It never falls back to the newest local transcript.
+
+To see why a cloud Session is not measured, run
+`node src/cli.mjs claude-snapshot --desktop-session-id session_<id>` (add
+`--claude-cache-dir` for a non-default profile); the `diagnostics` block lists
+each source, the redacted URL shape of every entry considered, its encoding,
+and any decode error. The overlay bridge writes the same summary to its stderr
+log whenever the binding state changes.
+
+Read [the selected-Session signal research](research/claude-selected-session-signals.md) for the evidence and rejected fallbacks, and [the cloud event cache research](research/claude-cloud-events-cache.md) for the observed request shapes and remaining limits.
 
 ## Runtime architecture
 
@@ -116,7 +153,7 @@ The complete snapshot switches atomically when the Accessibility Session ID chan
 
 Both collectors use the same accounting rules. The local collector reads the
 bound transcript; the cloud collector reads only the bound Session's locally
-cached event pages after proving that the sequence is complete. They:
+cached events and reports how much of the sequence they cover. They:
 
 1. Reads the exact root transcript and child-Agent transcripts nested under that Session.
 2. Retains response IDs, timestamps, event types, turn boundaries, and numerical usage only.
