@@ -152,12 +152,14 @@ function normalizeEvent(record, fallbackSequence) {
   const sequence = sequenceOf(record) ?? fallbackSequence ?? null;
   if (sequence == null) return null;
   const payload = record.payload ?? record.event?.payload ?? null;
-  const sessionId = record.session_id ?? record.sessionId ?? record.payload?.session_id ?? null;
+  // Only the envelope names the cloud Session. `payload.session_id` is the
+  // Claude Code process UUID inside the sandbox and must not be compared.
+  const sessionId = record.session_id ?? record.sessionId ?? null;
   return {
     sequence,
     payload: payload != null && typeof payload === "object" ? payload : null,
     createdAt: record.created_at ?? record.createdAt ?? record.timestamp ?? null,
-    sessionId: typeof sessionId === "string" ? sessionId : null,
+    sessionId: typeof sessionId === "string" && cloudSessionIdCore(sessionId) != null ? sessionId : null,
     source: typeof record.source === "string" ? record.source : null,
   };
 }

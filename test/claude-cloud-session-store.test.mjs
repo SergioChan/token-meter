@@ -412,3 +412,17 @@ test("watch poll entries that fail to decode appear in diagnostics", async (cont
   assert.match(failed[0].detail, /first bytes 01020304/);
   assert.equal(failed[0].magic, "01020304");
 });
+
+test("SSE events whose payload carries the sandbox session UUID are accepted", async (context) => {
+  const directory = await makeCacheDirectory(context);
+  const frames = rows(6, 1).reverse().map((row) => {
+    row.payload.session_id = "a802530d-226d-5fa4-83df-d3dcb3f3b735";
+    return `data: ${JSON.stringify(row)}\n\n`;
+  }).join("");
+  await writeSimpleCacheEntry(directory, `https://claude.ai/v1/code/sessions/${cseId}/events/stream?from_sequence_num=1`, Buffer.from(`: keepalive\n\n${frames}`), { open: true });
+  const result = await makeStore(directory).refresh(sessionId);
+  assert.equal(result.status, "resolved");
+  assert.equal(result.eventCount, 6);
+  assert.equal(result.complete, true);
+  assert.equal(result.files[0].usage.length, 3);
+});

@@ -111,3 +111,15 @@ test("SSE streams yield events, tolerate keepalives, and skip an unfinished fram
   assert.equal(extractCloudEvents(stream).format, "sse");
   assert.equal(extractCloudEvents("\r\n" + stream.replaceAll("\n", "\r\n")).events.length, 2);
 });
+
+test("the sandbox process UUID inside a payload is not mistaken for another Session", () => {
+  const page = JSON.stringify({
+    data: [
+      { sequence_num: 1, payload: { type: "assistant", session_id: "a802530d-226d-5fa4-83df-d3dcb3f3b735", message: { id: "r1", usage: { input_tokens: 1 } } } },
+      { sequence_num: 2, session_id: `cse_${core}`, payload: { type: "user", session_id: "a802530d-226d-5fa4-83df-d3dcb3f3b735" } },
+      { sequence_num: 3, session_id: "not-a-cloud-id", payload: { type: "user" } },
+    ],
+  });
+  const { events } = extractCloudEvents(page);
+  assert.deepEqual(events.map((event) => event.sessionId), [null, `cse_${core}`, null]);
+});
