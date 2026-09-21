@@ -334,23 +334,95 @@ export function walkGzip(body, { maxOutputLength = DEFAULT_MAX_DECODED_BYTES, ma
 }
 
 /**
- * Decode gzip data that a strict decoder rejects: first an unfinished single
- * member (Z_SYNC_FLUSH), then the block walker above. Returns
+ * Drop the zero-filled tail Chromium leaves on an entry it is still writing:
+ * the file grows before the bytes land, so a live read sees the real stream
+ * followed by NUL padding that every decoder rejects.
+ */
+export function trimZeroTail(body) {
+  let end = body.length;
+  while (end > 0 && body[end - 1] === 0) end -= 1;
+  return end === body.length ? body : body.subarray(0, end);
+}
+
+/**
+ * Longest prefix of `body` that `decode` accepts, found by bisection.
+ * Returns `{ bytes, prefixLength }` or null when no prefix decodes.
+ */
+export function longestDecodablePrefix(body, decode, { minimumLength = 1 } = {}) {
+  const attempt = (length) => {
+    try {
+      return decode(body.subarray(0, length));
+    } catch {
+      return null;
+    }
+  };
+  let low = minimumLength - 1;
+  let high = body.length;
+  let best = null;
+  let bestLength = 0;
+  while (high - low > 1) {
+    const middle = (low + high) >> 1;
+    const result = attempt(middle);
+    if (result != null) {
+      low = middle;
+      best = result;
+      bestLength = middle;
+    } else {
+      high = middle;
+    }
+  }
+  return best != null && best.length > 0 ? { bytes: best, prefixLength: bestLength } : null;
+}
+
+/**
+ * Strict decode, then the same decoder on the body without its zero tail,
+ * then on the longest prefix it accepts. Shared by every compressed format.
+ */
+function decodeWithRecovery(body, strict, lenient) {
+  try {
+    return { bytes: strict(body), strategy: "strict", partial: false };
+  } catch (error) {
+    const trimmed = trimZeroTail(body);
+    if (trimmed.length !== body.length) {
+      try {
+        return { bytes: lenient(trimmed), strategy: "trim-zero-tail", partial: true };
+      } catch {
+        // fall through
+      }
+    }
+    const prefix = longestDecodablePrefix(trimmed, lenient);
+    if (prefix != null) return { bytes: prefix.bytes, strategy: "longest-prefix", partial: true, prefixLength: prefix.prefixLength };
+    throw error;
+  }
+}
+
+/**
+ * Decode gzip data that a strict decoder rejects: an unfinished continuous
+ * stream first (zero tail trimmed, then longest decodable prefix), and only
+ * then the block walker for streams assembled from several members. Returns
  * `{ bytes, strategy, walk }` or null when nothing could be salvaged.
  */
 export function decodeGzipLenient(body, { maxOutputLength }) {
+  const lenient = (bytes) => zlib.gunzipSync(bytes, { maxOutputLength, finishFlush: zlib.constants.Z_SYNC_FLUSH });
+  const trimmed = trimZeroTail(body);
+  let recovered = null;
   try {
-    return {
-      bytes: zlib.gunzipSync(body, { maxOutputLength, finishFlush: zlib.constants.Z_SYNC_FLUSH }),
-      strategy: "sync-flush",
-      walk: null,
-    };
+    recovered = decodeWithRecovery(body, lenient, lenient);
   } catch {
     // fall through
   }
-  const walked = walkGzip(body, { maxOutputLength });
-  if (walked.bytes.length > 0) {
+  // A continuous stream that stops well short of the written bytes may really
+  // be several members; let the walker compete for the leftover.
+  const leftover = recovered?.prefixLength == null ? 0 : trimmed.length - recovered.prefixLength;
+  if (recovered != null && leftover <= 64) {
+    return { bytes: recovered.bytes, strategy: recovered.strategy === "strict" ? "sync-flush" : recovered.strategy, walk: null };
+  }
+  const walked = walkGzip(trimmed, { maxOutputLength });
+  if (walked.bytes.length > (recovered?.bytes.length ?? 0)) {
     return { bytes: walked.bytes, strategy: "walk", walk: { ...walked.stats, anomalies: walked.anomalies } };
+  }
+  if (recovered != null) {
+    return { bytes: recovered.bytes, strategy: recovered.strategy, walk: null };
   }
   return null;
 }
@@ -419,6 +491,16 @@ export function probeGzipHypotheses(body, { maxOutputLength = DEFAULT_MAX_DECODE
   // H2: one continuous raw deflate stream (what gzip assumes).
   const continuous = bisectInflateFailure(body.subarray(headerLength), { maxOutputLength });
   probes.push({ hypothesis: "continuous-deflate", failsAt: continuous.failsAt == null ? null : continuous.failsAt + headerLength, message: continuous.message ?? null, decodedBytes: continuous.output });
+  // H2b: the same stream without Chromium's zero-filled tail.
+  const trimmed = trimZeroTail(body);
+  probes.push({ hypothesis: "trim-zero-tail", trimmedBytes: body.length - trimmed.length, ...(() => {
+    try {
+      const bytes = zlib.gunzipSync(trimmed, { maxOutputLength, finishFlush: zlib.constants.Z_SYNC_FLUSH });
+      return { decodedBytes: bytes.length, dataLines: dataLines(bytes) };
+    } catch (error) {
+      return { failed: error.message };
+    }
+  })() });
   // H3: the walker.
   const walked = walkGzip(body, { maxOutputLength });
   probes.push({ hypothesis: "walk", decodedBytes: walked.bytes.length, dataLines: dataLines(walked.bytes), resyncs: walked.stats.resyncs });
@@ -481,22 +563,20 @@ export function decodeCacheBody(body, { maxDecodedBytes = DEFAULT_MAX_DECODED_BY
     if (typeof zlib.zstdDecompressSync !== "function") {
       throw fail("ZSTD_UNSUPPORTED", "Node.js without zstd support cannot decode this entry");
     }
-    // zstd returns the frames it could finish and stops at a cut block.
-    let bytes;
+    const zstd = (bytes) => zlib.zstdDecompressSync(bytes, { maxOutputLength: maxDecodedBytes });
+    let recovered;
     try {
-      bytes = zlib.zstdDecompressSync(body, { maxOutputLength: maxDecodedBytes });
+      recovered = decodeWithRecovery(body, zstd, zstd);
     } catch (error) {
-      try {
-        bytes = zlib.zstdDecompressSync(body, {
-          maxOutputLength: maxDecodedBytes,
-          finishFlush: zlib.constants.ZSTD_e_flush,
-        });
-      } catch {
-        throw fail("DECODE_FAILED", `zstd: ${error.message}`);
-      }
+      throw fail("DECODE_FAILED", `zstd: ${error.message}`);
     }
-    if (bytes.length > maxDecodedBytes) throw fail("TOO_LARGE", "decoded body exceeds limit");
-    return { format: "zstd", bytes, partial: truncated };
+    if (recovered.bytes.length > maxDecodedBytes) throw fail("TOO_LARGE", "decoded body exceeds limit");
+    return {
+      format: "zstd",
+      bytes: recovered.bytes,
+      partial: truncated || recovered.partial,
+      strategy: recovered.strategy === "strict" ? undefined : recovered.strategy,
+    };
   }
   if (body.subarray(0, 2).equals(GZIP_MAGIC)) {
     try {
@@ -513,19 +593,25 @@ export function decodeCacheBody(body, { maxDecodedBytes = DEFAULT_MAX_DECODED_BY
       };
     }
   }
-  if (looksTextual(body)) return { format: "raw", bytes: body, partial: truncated };
+  if (looksTextual(body)) return { format: "raw", bytes: trimZeroTail(body), partial: truncated };
   // Brotli has no magic number; it is the last resort and must produce text.
   let brotliError = null;
-  for (const options of [
-    { maxOutputLength: maxDecodedBytes },
-    { maxOutputLength: maxDecodedBytes, finishFlush: zlib.constants.BROTLI_OPERATION_FLUSH },
-  ]) {
-    try {
-      const bytes = partialText(zlib.brotliDecompressSync(body, options));
-      if (bytes) return { format: "brotli", bytes, partial: options.finishFlush != null || truncated };
-    } catch (error) {
-      brotliError = error;
+  try {
+    const recovered = decodeWithRecovery(
+      body,
+      (bytes) => zlib.brotliDecompressSync(bytes, { maxOutputLength: maxDecodedBytes }),
+      (bytes) => zlib.brotliDecompressSync(bytes, { maxOutputLength: maxDecodedBytes, finishFlush: zlib.constants.BROTLI_OPERATION_FLUSH }),
+    );
+    if (partialText(recovered.bytes)) {
+      return {
+        format: "brotli",
+        bytes: recovered.bytes,
+        partial: truncated || recovered.partial,
+        strategy: recovered.strategy === "strict" ? undefined : recovered.strategy,
+      };
     }
+  } catch (error) {
+    brotliError = error;
   }
   throw fail(
     "UNKNOWN_FORMAT",

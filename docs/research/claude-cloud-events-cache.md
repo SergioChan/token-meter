@@ -119,16 +119,18 @@ independent sources and merges everything by `sequence_num`:
    from stream 0's record at the end of the file); an open stream is read to
    end of file and decoded up to its last flushed block. The live
    `/events/stream` body on the tested install is gzip and is rejected by a
-   strict decoder with `invalid stored block lengths`. The body is written by
-   a level-0 proxy as stored deflate blocks (five-byte header plus plaintext)
-   with a sync-flush after each chunk, and strict decoding stops partway
-   through. gzip therefore falls back to sync-flush decoding and then to a
-   block walker (`walkGzip`) that advances stored block by stored block, lets
-   zlib consume Huffman runs bounded at the next member header, skips
-   trailers after a final block, tolerates members that restart without
-   trailers, and resynchronizes at the next plausible header after corrupt
-   bytes. `claude-cache-inspect` prints the walk statistics and the offsets
-   and eight header bytes of every anomaly.
+   strict decoder with `invalid stored block lengths`. The cause is not the
+   compression: the stream is one continuous deflate stream with a sync flush
+   per chunk (later chunks back-reference earlier ones, so per-chunk decoding
+   fails with `invalid distance too far back`). The cause is Chromium: an
+   entry it is still writing grows before the bytes land, so a live read ends
+   in a run of NUL padding that every decoder rejects. Recovery is shared by
+   zstd, gzip, and brotli: strict decode, then the body without its zero
+   tail, then the longest prefix the decoder accepts (bisection). A gzip
+   block walker (`walkGzip`) remains as the last resort for streams assembled
+   from several members. `claude-cache-inspect` reports the strategy, the
+   exact offset where zlib rejects the raw stream, the bytes around it, and
+   how alternative readings fare.
 4. **Extraction**. Any object carrying `sequence_num` (or `sequenceNum`, or a
    numeric SSE `id:`) becomes an event; containers named `data`, `events`,
    `event`, `items`, `results`, `rows`, `history` are searched to a bounded

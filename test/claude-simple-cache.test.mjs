@@ -10,6 +10,8 @@ import {
   decodeGzipLenient,
   findStreamEnd,
   gzipMemberOffsets,
+  longestDecodablePrefix,
+  trimZeroTail,
   walkGzip,
   parseSimpleCacheHeader,
   readSimpleCacheEntry,
@@ -260,4 +262,37 @@ test("plain-text bodies of unknown shape are raw with no events rather than erro
   const decoded = decodeCacheBody(Buffer.from("resume_token=abc123&interval=30"));
   assert.equal(decoded.format, "raw");
   assert.throws(() => decodeCacheBody(Buffer.from([0x00, 0x01, 0x02, 0x03])), { code: "UNKNOWN_FORMAT" });
+});
+
+test("a live entry's zero-filled tail is trimmed before decoding, for every format", { skip: !hasZstd && "zstd unavailable" }, async () => {
+  // One continuous compressor with per-frame flushes, so later frames
+  // back-reference earlier ones (independent per-chunk decoding must fail).
+  const frames = Array.from({ length: 80 }, (_, index) => Buffer.from(`event: message\ndata: {"sequence_num":${index + 1},"payload":{"type":"user","message":{"content":"shared prefix ${"y".repeat(50)} ${index}"}}}\n\n`));
+  const flushAll = (stream) =>
+    new Promise((resolve) => {
+      const out = [];
+      stream.on("data", (chunk) => out.push(chunk));
+      let index = 0;
+      const step = () => {
+        if (index >= frames.length) return stream.flush(() => resolve(Buffer.concat(out)));
+        stream.write(frames[index++]);
+        stream.flush(step);
+      };
+      step();
+    });
+  const zeros = Buffer.alloc(3000, 0);
+  for (const [name, stream] of [["gzip", zlib.createGzip()], ["zstd", zlib.createZstdCompress()], ["brotli", zlib.createBrotliCompress()]]) {
+    const wire = await flushAll(stream);
+    const live = Buffer.concat([wire.subarray(0, Math.floor(wire.length * 0.7)), zeros]);
+    const decoded = decodeCacheBody(live, { truncated: true });
+    assert.equal(decoded.format, name);
+    assert.equal(decoded.partial, true);
+    assert.ok(["trim-zero-tail", "longest-prefix", "sync-flush"].includes(decoded.strategy), `${name}: ${decoded.strategy}`);
+    const count = (decoded.bytes.toString().match(/^data:/gm) ?? []).length;
+    assert.ok(count >= 40 && count < 80, `${name}: ${count} frames from a 70% cut`);
+    const complete = decodeCacheBody(Buffer.concat([wire, zeros]), { truncated: true });
+    assert.equal((complete.bytes.toString().match(/^data:/gm) ?? []).length, 80, `${name}: complete stream plus zero tail`);
+  }
+  assert.equal(trimZeroTail(Buffer.from([1, 2, 0, 0])).length, 2);
+  assert.equal(longestDecodablePrefix(Buffer.from("zzzz"), () => { throw new Error("no"); }), null);
 });
