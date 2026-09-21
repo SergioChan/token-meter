@@ -206,8 +206,13 @@ function logBindingState(desktopSessionId, snapshot) {
   if (diagnostics?.coverage) {
     details.push(`coverage=${diagnostics.coverage.knownSequences}/${diagnostics.coverage.maxSequence}`);
   }
-  const shapes = diagnostics?.entries?.slice(0, 4).map((entry) => `${entry.shape}${entry.error ? `!${entry.error}` : ""}`);
+  // Session-scoped entries only; watch polls are shared noise for the log.
+  const shapes = diagnostics?.entries
+    ?.filter((entry) => entry.kind !== "session-watch")
+    .slice(0, 4)
+    .map((entry) => `${entry.shape}${entry.strategy ? `[${entry.strategy}]` : ""}${entry.error ? `!${entry.error}` : ""}`);
   if (shapes?.length) details.push(`entries=${shapes.join(",")}`);
+  if (diagnostics?.retention) details.push(`retained=${diagnostics.retention.records}`);
   process.stderr.write(`claude session ${desktopSessionId}: ${state}${details.length ? ` ${details.join(" ")}` : ""}\n`);
 }
 
