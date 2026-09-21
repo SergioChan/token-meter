@@ -5,8 +5,11 @@ import path from "node:path";
 import test from "node:test";
 import * as zlib from "node:zlib";
 import {
+  analyzeBody,
   decodeCacheBody,
+  decodeGzipLenient,
   findStreamEnd,
+  gzipMemberOffsets,
   parseSimpleCacheHeader,
   readSimpleCacheEntry,
   readSimpleCacheKey,
@@ -182,4 +185,35 @@ test("key index surfaces a directory listing failure", async () => {
     isRelevantKey: () => true,
   });
   await assert.rejects(() => index.refresh(), { code: "ENOENT" });
+});
+
+test("gzip members that restart without trailers decode segment by segment", () => {
+  const frame = (index) => Buffer.from(`data: {"sequence_num":${index},"payload":{"type":"user"}}\n\n`);
+  // A proxy that opens a fresh gzip member per chunk and never closes the
+  // previous one: header + raw deflate (sync-flushed), repeated.
+  const member = (index) => {
+    const deflate = zlib.deflateRawSync(frame(index), { finishFlush: zlib.constants.Z_SYNC_FLUSH });
+    return Buffer.concat([Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0, 0, 0, 0, 0x00, 0x03]), deflate]);
+  };
+  const wire = Buffer.concat([member(1), member(2), member(3)]);
+  assert.throws(() => zlib.gunzipSync(wire), "a strict decoder rejects the concatenation");
+  assert.equal(gzipMemberOffsets(wire).length, 3);
+  const lenient = decodeGzipLenient(wire, { maxOutputLength: 1 << 20 });
+  assert.equal(lenient.strategy, "members");
+  assert.equal(lenient.segments, 3);
+  assert.equal(lenient.failedSegments, 0);
+  assert.equal((lenient.bytes.toString().match(/^data:/gm) ?? []).length, 3);
+  const decoded = decodeCacheBody(wire, { truncated: true });
+  assert.equal(decoded.format, "gzip");
+  assert.equal(decoded.strategy, "members");
+  const analysis = analyzeBody(wire);
+  assert.equal(analysis.firstBytesHex.startsWith("1f8b0800"), true);
+  assert.equal(analysis.gzipMemberOffsets.length, 3);
+  assert.equal(analysis.textual, false);
+});
+
+test("plain-text bodies of unknown shape are raw with no events rather than errors", () => {
+  const decoded = decodeCacheBody(Buffer.from("resume_token=abc123&interval=30"));
+  assert.equal(decoded.format, "raw");
+  assert.throws(() => decodeCacheBody(Buffer.from([0x00, 0x01, 0x02, 0x03])), { code: "UNKNOWN_FORMAT" });
 });

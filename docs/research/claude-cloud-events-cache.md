@@ -115,8 +115,15 @@ independent sources and merges everything by `sequence_num`:
    part of the match. `watch` responses are decoded too, but their rows count
    only when they name the Session explicitly.
 3. **Decoding**. zstd, gzip, and brotli by sniffing, raw JSON or SSE by first
-   byte. Bodies are trimmed at the stream-1 EOF record when one exists, which
-   is what makes gzip work; an open stream is read to end of file.
+   byte. Bodies are trimmed at the stream-1 EOF record when one exists (found
+   from stream 0's record at the end of the file); an open stream is read to
+   end of file and decoded up to its last flushed block. The live
+   `/events/stream` body on the tested install is gzip and is rejected by a
+   strict decoder with `invalid stored block lengths`, so gzip falls back to
+   sync-flush decoding, then to inflating each `1f 8b 08` member on its own
+   (a proxy that restarts compression per chunk without trailers), then to a
+   back-off to the last `00 00 ff ff` marker. `claude-cache-inspect` prints
+   which strategy applied.
 4. **Extraction**. Any object carrying `sequence_num` (or `sequenceNum`, or a
    numeric SSE `id:`) becomes an event; containers named `data`, `events`,
    `event`, `items`, `results`, `rows`, `history` are searched to a bounded

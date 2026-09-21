@@ -218,6 +218,13 @@ The `reason` and `diagnostics` fields explain the state:
 The overlay bridge writes the same summary to `overlay-error.log` each time the
 binding state changes, so the log shows why a Session stopped being measured.
 
+For a byte-level view of every cached entry (encoding, gzip member layout,
+decode strategy, event counts, never content), run:
+
+```bash
+node src/cli.mjs claude-cache-inspect --desktop-session-id session_<24 chars>
+```
+
 ### Update
 
 The packaged app updates itself. The widget checks the registry at startup and

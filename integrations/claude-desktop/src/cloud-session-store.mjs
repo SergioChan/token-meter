@@ -425,6 +425,11 @@ export class ClaudeCloudSessionStore {
         });
         result.format = decoded.format;
         result.partial = decoded.partial;
+        if (decoded.strategy) {
+          result.strategy = decoded.strategy;
+          result.segments = decoded.segments;
+          result.failedSegments = decoded.failedSegments;
+        }
         const extracted = extractCloudEvents(decoded.bytes.toString("utf8"));
         result.bodyKind = extracted.format;
         result.events = extracted.events;
@@ -605,6 +610,9 @@ export class ClaudeCloudSessionStore {
       shape: result.shape,
       format: result.format ?? null,
       partial: result.partial ?? null,
+      strategy: result.strategy ?? null,
+      segments: result.segments ?? null,
+      failedSegments: result.failedSegments ?? null,
       magic: result.magic ?? null,
       body: result.bodyKind ?? null,
       bytes: result.bytes ?? null,

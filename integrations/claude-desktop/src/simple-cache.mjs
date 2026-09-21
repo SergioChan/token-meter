@@ -114,6 +114,129 @@ export function sniffResponseHeaders(buffer, from) {
   };
 }
 
+const GZIP_MEMBER_HEAD = Buffer.from([0x1f, 0x8b, 0x08]);
+const SYNC_FLUSH_MARKER = Buffer.from([0x00, 0x00, 0xff, 0xff]);
+
+/** Offsets of plausible gzip member headers (`1f 8b 08 <flags<=0x1f>`). */
+export function gzipMemberOffsets(body) {
+  const offsets = [];
+  let from = 0;
+  while (from < body.length) {
+    const at = body.indexOf(GZIP_MEMBER_HEAD, from);
+    if (at === -1) break;
+    if (at + 10 <= body.length && body[at + 3] <= 0x1f) offsets.push(at);
+    from = at + 1;
+  }
+  return offsets;
+}
+
+function gzipHeaderLength(segment) {
+  // RFC 1952: fixed 10 bytes, then optional FEXTRA, FNAME, FCOMMENT, FHCRC.
+  if (segment.length < 10) return null;
+  const flags = segment[3];
+  let offset = 10;
+  if (flags & 0x04) {
+    if (offset + 2 > segment.length) return null;
+    offset += 2 + segment.readUInt16LE(offset);
+  }
+  for (const bit of [0x08, 0x10]) {
+    if (flags & bit) {
+      const end = segment.indexOf(0, offset);
+      if (end === -1) return null;
+      offset = end + 1;
+    }
+  }
+  if (flags & 0x02) offset += 2;
+  return offset <= segment.length ? offset : null;
+}
+
+/**
+ * Decode gzip data that a strict decoder rejects, in order of preference:
+ * an unfinished member (Z_SYNC_FLUSH), several members that restart without
+ * trailers (inflate each raw deflate segment on its own), and finally a
+ * back-off to the last sync-flush marker. Returns `{ bytes, strategy,
+ * segments, failedSegments }` or null.
+ */
+export function decodeGzipLenient(body, { maxOutputLength }) {
+  try {
+    return {
+      bytes: zlib.gunzipSync(body, { maxOutputLength, finishFlush: zlib.constants.Z_SYNC_FLUSH }),
+      strategy: "sync-flush",
+      segments: 1,
+      failedSegments: 0,
+    };
+  } catch {
+    // fall through
+  }
+  const offsets = gzipMemberOffsets(body);
+  if (offsets.length > 0) {
+    const parts = [];
+    let failed = 0;
+    for (let index = 0; index < offsets.length; index += 1) {
+      const segment = body.subarray(offsets[index], offsets[index + 1] ?? body.length);
+      const headerLength = gzipHeaderLength(segment);
+      if (headerLength == null) {
+        failed += 1;
+        continue;
+      }
+      try {
+        parts.push(
+          zlib.inflateRawSync(segment.subarray(headerLength), {
+            maxOutputLength,
+            finishFlush: zlib.constants.Z_SYNC_FLUSH,
+          }),
+        );
+      } catch {
+        failed += 1;
+      }
+    }
+    if (parts.length > 0) {
+      return {
+        bytes: Buffer.concat(parts),
+        strategy: "members",
+        segments: offsets.length,
+        failedSegments: failed,
+      };
+    }
+  }
+  const marker = body.lastIndexOf(SYNC_FLUSH_MARKER);
+  if (marker > 0) {
+    try {
+      return {
+        bytes: zlib.gunzipSync(body.subarray(0, marker + 4), {
+          maxOutputLength,
+          finishFlush: zlib.constants.Z_SYNC_FLUSH,
+        }),
+        strategy: "marker-backoff",
+        segments: 1,
+        failedSegments: 0,
+      };
+    } catch {
+      // fall through
+    }
+  }
+  return null;
+}
+
+/** Structural facts about a body for diagnostics; never returns content. */
+export function analyzeBody(body) {
+  const markers = [];
+  let from = 0;
+  while (markers.length < 10_000) {
+    const at = body.indexOf(SYNC_FLUSH_MARKER, from);
+    if (at === -1) break;
+    markers.push(at);
+    from = at + 1;
+  }
+  return {
+    bytes: body.length,
+    firstBytesHex: body.subarray(0, 16).toString("hex"),
+    gzipMemberOffsets: gzipMemberOffsets(body).slice(0, 50),
+    syncFlushMarkers: markers.length,
+    textual: looksTextual(body),
+  };
+}
+
 function looksTextual(buffer) {
   let index = 0;
   while (index < buffer.length && (buffer[index] === 0x20 || buffer[index] === 0x0a || buffer[index] === 0x0d || buffer[index] === 0x09 || buffer[index] === 0xef || buffer[index] === 0xbb || buffer[index] === 0xbf)) {
@@ -123,7 +246,11 @@ function looksTextual(buffer) {
   const byte = buffer[index];
   if (byte === 0x7b || byte === 0x5b || byte === 0x3a) return true; // { [ :
   const head = buffer.subarray(index, index + 8).toString("latin1");
-  return /^(?:data:|event:|id:|retry:)/.test(head);
+  if (/^(?:data:|event:|id:|retry:)/.test(head)) return true;
+  // Any other plain-text body (a form-encoded poll answer, for example) is
+  // "raw" with no events rather than an unknown binary format.
+  const sample = buffer.subarray(index, Math.min(buffer.length, index + 64));
+  return sample.every((value) => value === 0x09 || value === 0x0a || value === 0x0d || (value >= 0x20 && value < 0x7f));
 }
 
 function partialText(bytes) {
@@ -167,16 +294,16 @@ export function decodeCacheBody(body, { maxDecodedBytes = DEFAULT_MAX_DECODED_BY
     try {
       return { format: "gzip", bytes: zlib.gunzipSync(body, { maxOutputLength: maxDecodedBytes }), partial: false };
     } catch (error) {
-      // An unfinished gzip member decodes up to its last flushed block.
-      try {
-        const bytes = zlib.gunzipSync(body, {
-          maxOutputLength: maxDecodedBytes,
-          finishFlush: zlib.constants.Z_SYNC_FLUSH,
-        });
-        return { format: "gzip", bytes, partial: true };
-      } catch {
-        throw fail("DECODE_FAILED", `gzip: ${error.message}`);
-      }
+      const lenient = decodeGzipLenient(body, { maxOutputLength: maxDecodedBytes });
+      if (lenient == null) throw fail("DECODE_FAILED", `gzip: ${error.message}`);
+      return {
+        format: "gzip",
+        bytes: lenient.bytes,
+        partial: true,
+        strategy: lenient.strategy,
+        segments: lenient.segments,
+        failedSegments: lenient.failedSegments,
+      };
     }
   }
   if (looksTextual(body)) return { format: "raw", bytes: body, partial: truncated };
